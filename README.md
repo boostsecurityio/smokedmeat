@@ -50,16 +50,17 @@ Need Docker and `make`. If you want to run from source instead of the pinned rel
 git clone https://github.com/boostsecurityio/smokedmeat.git
 cd smokedmeat
 make quickstart
+# Then use a classic PAT with public_repo and target the whooli GitHub org.
 ```
 
 `make quickstart` is the recommended first run. It starts the stable release quickstart stack locally and launches the operator TUI (`Counter`) against the local C2 teamserver (`Kitchen`).
-
-Then give the setup wizard a classic PAT with `public_repo` scope and point it at the [`whooli` GitHub org](https://github.com/whooli) to kick the tires. The [whooli guide](docs/WHOOLI.md) has the full challenge flow.
 
 The setup wizard walks you through:
 1. **GitHub PAT**  - A classic PAT with `public_repo` scope is enough for `whooli`. For private repos, you'll need `repo` scope.
 2. **Target**  - Enter `whooli` or your own org/repo
 3. **Analysis**  - Scans workflows for vulnerabilities and presents exploitable findings
+
+For the full challenge flow, see the [`whooli` guide](docs/WHOOLI.md) or go straight to the [`whooli` GitHub org](https://github.com/whooli).
 
 When you are done:
 ```bash
