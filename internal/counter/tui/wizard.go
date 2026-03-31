@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/atotto/clipboard"
 	"github.com/boostsecurityio/smokedmeat/internal/rye"
 )
 
@@ -465,7 +466,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 		m.wizard.StagerID = stager.ID
 		m.wizard.Payload = payload
 
-		if err := copyToClipboard(payload); err != nil {
+		if err := clipboard.WriteAll(payload); err != nil {
 			m.AddOutput("warning", fmt.Sprintf("Clipboard failed: %v", err))
 			m.AddOutput("info", "Payload displayed below - copy manually:")
 		} else {
@@ -506,7 +507,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 		}
 		m.wizard.Payload = payload
 
-		if err := copyToClipboard(payload); err == nil {
+		if err := clipboard.WriteAll(payload); err == nil {
 			m.AddOutput("success", "══════════════════════════════════════")
 			m.AddOutput("success", "  ✓ PAYLOAD COPIED TO CLIPBOARD")
 			m.AddOutput("success", "══════════════════════════════════════")

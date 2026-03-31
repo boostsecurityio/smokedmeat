@@ -805,7 +805,7 @@ func (m *Model) contextStatusHints() string {
 			}
 		}
 	}
-	if m.initialTokenInfo != nil && m.tokenInfo.Value != m.initialTokenInfo.Value {
+	if m.tokenInfo != nil && m.initialTokenInfo != nil && m.tokenInfo.Value != m.initialTokenInfo.Value {
 		hints += helpKeyStyle.Render("i") + helpDescStyle.Render(":initial ")
 	}
 	return hints

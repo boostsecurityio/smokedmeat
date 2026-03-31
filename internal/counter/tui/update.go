@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/atotto/clipboard"
 	"github.com/boostsecurityio/smokedmeat/internal/counter"
 	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 	"github.com/boostsecurityio/smokedmeat/internal/rye"
@@ -1431,7 +1432,7 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.paneFocus == PaneFocusLoot {
 			secret := m.SelectedLootSecret()
 			if secret != nil {
-				if err := copyToClipboard(secret.Value); err != nil {
+				if err := clipboard.WriteAll(secret.Value); err != nil {
 					m.activityLog.Add(IconError, fmt.Sprintf("Copy failed: %v", err))
 				} else {
 					m.lootFlash = true

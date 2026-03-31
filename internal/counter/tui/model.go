@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -17,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/atotto/clipboard"
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
 	"github.com/boostsecurityio/smokedmeat/internal/counter"
 	"github.com/boostsecurityio/smokedmeat/internal/models"
@@ -1629,17 +1629,7 @@ grep -qxF "$line" "$f" 2>/dev/null || printf '%%s\n' "$line" >> "$f"
 
 func copyToClipboardCmd(text string) tea.Cmd {
 	return func() tea.Msg {
-		var c *exec.Cmd
-		switch runtime.GOOS {
-		case "darwin":
-			c = exec.Command("pbcopy")
-		case "linux":
-			c = exec.Command("xclip", "-selection", "clipboard")
-		default:
-			return SetupClipboardCopiedMsg{Err: fmt.Errorf("unsupported platform")}
-		}
-		c.Stdin = strings.NewReader(text)
-		if err := c.Run(); err != nil {
+		if err := clipboard.WriteAll(text); err != nil {
 			return SetupClipboardCopiedMsg{Err: err}
 		}
 		return SetupClipboardCopiedMsg{}
