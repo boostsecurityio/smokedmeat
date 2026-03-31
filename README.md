@@ -52,7 +52,7 @@ cd smokedmeat
 make quickstart
 ```
 
-`make quickstart` is the recommended first run. It starts the pinned quickstart stack locally and launches the operator TUI (`Counter`) against the local C2 teamserver (`Kitchen`).
+`make quickstart` is the recommended first run. It starts the stable release quickstart stack locally and launches the operator TUI (`Counter`) against the local C2 teamserver (`Kitchen`).
 
 For the easiest first target, use [`whooli`](docs/WHOOLI.md), our deliberately vulnerable public CI/CD playground.
 
