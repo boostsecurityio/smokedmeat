@@ -205,6 +205,16 @@ SEMVER_TAG_PATTERN := ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9
 RELEASE_VERSION ?= dev
 RELEASE_COMMIT ?= none
 RELEASE_DATE ?= unknown
+KITCHEN_AGENTS_DIR := internal/kitchen/agents
+RELEASE_ARTIFACTS_DIR := bin/release
+RELEASE_BRISKET_BINARY := $(RELEASE_ARTIFACTS_DIR)/brisket-linux-amd64
+KITCHEN_RELEASE_BRISKET_BINARY := $(KITCHEN_AGENTS_DIR)/brisket-linux-amd64
+DIST_BRISKET_LINUX_AMD64 := dist/brisket-linux-amd64
+DIST_BRISKET_LINUX_ARM64 := dist/brisket-linux-arm64
+DIST_BRISKET_WINDOWS_AMD64 := dist/brisket-windows-amd64.exe
+DIST_BRISKET_WINDOWS_ARM64 := dist/brisket-windows-arm64.exe
+UPX_TOOL_IMAGE := smokedmeat-upx:5.1.1-r1
+UPX_DOCKERFILE := deployments/Dockerfile.upx
 RELEASE_KITCHEN_AGENT_LDFLAGS := -w -s -extldflags "-static" -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Version=$(RELEASE_VERSION) -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Commit=$(RELEASE_COMMIT) -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Date=$(RELEASE_DATE)
 E2E_BROWSER_PORT_DEFAULT := 18280
 E2E_BROWSER_PORT_FILE := /tmp/smokedmeat-e2e-kitchen-browser-port
@@ -226,6 +236,16 @@ define ensure_auth_token
 		mv $(E2E_ENV).tmp $(E2E_ENV); \
 		echo "Generated AUTH_TOKEN in $(E2E_ENV)"; \
 	fi
+endef
+
+define pack_with_upx
+	@docker build -q -t $(UPX_TOOL_IMAGE) -f $(UPX_DOCKERFILE) deployments >/dev/null
+	@docker run --rm \
+		-u $$(id -u):$$(id -g) \
+		-v "$$(pwd)":/src \
+		-w /src \
+		$(UPX_TOOL_IMAGE) \
+		-qq $(1)
 endef
 
 define ensure_quickstart_release_pin
@@ -910,37 +930,38 @@ pinact:
 # =============================================================================
 
 build-release-embed-brisket:
-	@mkdir -p internal/kitchen/agents
-	@rm -f internal/kitchen/agents/brisket-*
+	@mkdir -p $(RELEASE_ARTIFACTS_DIR) $(KITCHEN_AGENTS_DIR)
+	@rm -f $(RELEASE_BRISKET_BINARY)
+	@rm -f $(KITCHEN_AGENTS_DIR)/brisket-*
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 		-tags netgo \
 		-ldflags='$(RELEASE_KITCHEN_AGENT_LDFLAGS)' \
 		-trimpath \
-		-o internal/kitchen/agents/brisket-linux-amd64 ./cmd/brisket
+		-o $(RELEASE_BRISKET_BINARY) ./cmd/brisket
+	$(call pack_with_upx,$(RELEASE_BRISKET_BINARY))
+	@cp $(RELEASE_BRISKET_BINARY) $(KITCHEN_RELEASE_BRISKET_BINARY)
+	@cmp -s $(RELEASE_BRISKET_BINARY) $(KITCHEN_RELEASE_BRISKET_BINARY)
 
 build-brisket:
-	@mkdir -p dist internal/kitchen/agents
+	@mkdir -p dist $(KITCHEN_AGENTS_DIR)
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a \
 		-tags netgo \
 		-ldflags='-w -s -extldflags "-static"' \
 		-trimpath \
-		-o dist/brisket-linux-amd64 ./cmd/brisket
-	@command -v upx >/dev/null 2>&1 && upx dist/brisket-linux-amd64 || true
-	@cp dist/brisket-linux-amd64 internal/kitchen/agents/
+		-o $(DIST_BRISKET_LINUX_AMD64) ./cmd/brisket
+	$(call pack_with_upx,$(DIST_BRISKET_LINUX_AMD64))
+	@cp $(DIST_BRISKET_LINUX_AMD64) $(KITCHEN_AGENTS_DIR)/
 
 build-brisket-all:
-	@mkdir -p dist internal/kitchen/agents
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -tags netgo -ldflags='-w -s' -trimpath -o dist/brisket-linux-amd64 ./cmd/brisket
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -a -tags netgo -ldflags='-w -s' -trimpath -o dist/brisket-linux-arm64 ./cmd/brisket
+	@mkdir -p dist $(KITCHEN_AGENTS_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -tags netgo -ldflags='-w -s' -trimpath -o $(DIST_BRISKET_LINUX_AMD64) ./cmd/brisket
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -a -tags netgo -ldflags='-w -s' -trimpath -o $(DIST_BRISKET_LINUX_ARM64) ./cmd/brisket
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -a -tags netgo -ldflags='-w -s' -trimpath -o dist/brisket-darwin-amd64 ./cmd/brisket
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -a -tags netgo -ldflags='-w -s' -trimpath -o dist/brisket-darwin-arm64 ./cmd/brisket
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -a -tags netgo -ldflags='-w -s' -trimpath -o dist/brisket-windows-amd64.exe ./cmd/brisket
-	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -a -tags netgo -ldflags='-w -s' -trimpath -o dist/brisket-windows-arm64.exe ./cmd/brisket
-	@command -v upx >/dev/null 2>&1 && { \
-		upx dist/brisket-linux-amd64 dist/brisket-linux-arm64 \
-			dist/brisket-windows-amd64.exe dist/brisket-windows-arm64.exe; \
-	} || true
-	@cp dist/brisket-linux-* internal/kitchen/agents/
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -a -tags netgo -ldflags='-w -s' -trimpath -o $(DIST_BRISKET_WINDOWS_AMD64) ./cmd/brisket
+	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -a -tags netgo -ldflags='-w -s' -trimpath -o $(DIST_BRISKET_WINDOWS_ARM64) ./cmd/brisket
+	$(call pack_with_upx,$(DIST_BRISKET_LINUX_AMD64) $(DIST_BRISKET_LINUX_ARM64) $(DIST_BRISKET_WINDOWS_AMD64))
+	@cp dist/brisket-linux-* $(KITCHEN_AGENTS_DIR)/
 
 # =============================================================================
 # Cloud Shell Image
@@ -1096,4 +1117,6 @@ e2e-goat:
 # =============================================================================
 
 clean:
-	rm -rf dist/
+	rm -rf dist/ $(RELEASE_ARTIFACTS_DIR)/
+	rm -f $(KITCHEN_AGENTS_DIR)/brisket-*
+	@rmdir $(dir $(RELEASE_ARTIFACTS_DIR)) 2>/dev/null || true

@@ -6,8 +6,8 @@ on:
       - "v*"
 
 env:
-  GO_VERSION: 1.25
-  GO_RELEASER_VERSION: v2.13.2
+  GO_VERSION: 1.26.1
+  GO_RELEASER_VERSION: v2.15.1
 
 permissions: {}
 

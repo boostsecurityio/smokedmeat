@@ -39,20 +39,6 @@ builds:
     ldflags:
       - -s -w -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Version={{ .Version }} -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Commit={{ .Commit }} -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Date={{ .Date }}
 
-  - id: brisket
-    main: ./cmd/brisket
-    binary: brisket
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-    goarch:
-      - amd64
-    flags:
-      - -trimpath
-    ldflags:
-      - -s -w -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Version={{ .Version }} -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Commit={{ .Commit }} -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Date={{ .Date }}
-
 archives:
   - id: counter
     ids:
@@ -70,19 +56,19 @@ archives:
         formats: ['zip']
 
   - id: brisket
-    ids:
-      - brisket
+    meta: true
     formats: ['tar.gz']
     name_template: >-
-      {{ .Binary }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
-    format_overrides:
-      - goos: windows
-        formats: ['zip']
+      brisket_Linux_x86_64
+    files:
+      - src: CHANGELOG.md
+        dst: CHANGELOG.md
+      - src: LICENSE
+        dst: LICENSE
+      - src: README.md
+        dst: README.md
+      - src: bin/release/brisket-linux-amd64
+        dst: brisket
 
 checksum:
   name_template: checksums.txt

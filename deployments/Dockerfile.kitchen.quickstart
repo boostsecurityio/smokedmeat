@@ -6,11 +6,12 @@
 # Used by: make dev-quickstart (Kitchen builds in Docker, Counter runs locally)
 
 FROM cgr.dev/chainguard/wolfi-base:latest@sha256:9925d3017788558fa8f27e8bb160b791e56202b60c91fbcc5c867de3175986c8 AS upx
-RUN apk add --no-cache upx
+RUN apk add --no-cache upx=5.1.1-r1
 
 FROM cgr.dev/chainguard/go:latest@sha256:18d53e852a00e36248cbac6de13dfe727585c0f3c358ff885912e1a23efb71b8 AS builder
 
 WORKDIR /src
+ARG BRISKET_AGENT_PATH=internal/kitchen/agents/brisket-linux-amd64
 
 COPY go.mod go.sum* ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download || true
@@ -25,8 +26,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -tags netgo \
     -ldflags='-w -s -extldflags "-static"' \
     -trimpath \
-    -o internal/kitchen/agents/brisket-linux-amd64 ./cmd/brisket \
-    && upx internal/kitchen/agents/brisket-linux-amd64
+    -o ${BRISKET_AGENT_PATH} ./cmd/brisket \
+    && upx ${BRISKET_AGENT_PATH}
 
 # Build Kitchen binary with embedded Brisket
 RUN --mount=type=cache,target=/go/pkg/mod \
