@@ -130,8 +130,34 @@ define start_release_quickstart_services
 		rm -f "$$COMPOSE_OUTPUT"; \
 	else \
 		printf "\r\033[2K"; \
-		echo "ERROR: Failed to start the quickstart Docker services."; \
-		cat "$$COMPOSE_OUTPUT"; \
+		if grep -Eqi 'ghcr\.io/boostsecurityio/smokedmeat-kitchen|smokedmeat-kitchen' "$$COMPOSE_OUTPUT" && \
+			grep -Eqi 'pull access denied|requested access to the resource is denied|insufficient_scope|unauthorized|authentication required|denied' "$$COMPOSE_OUTPUT"; then \
+			printf "\033[1;31m[auth]\033[0m \033[1mQuickstart could not pull the pinned Kitchen image from GHCR.\033[0m\n"; \
+			printf "  \033[90mThis private beta release still uses private GHCR packages.\033[0m\n"; \
+			printf "  \033[90mDocker is not presenting usable credentials for \033[36mghcr.io\033[90m.\033[0m\n"; \
+			printf "\n"; \
+			printf "\033[1;33m[fix]\033[0m Refresh GitHub auth with package scope\n"; \
+			printf "  \033[36mgh auth refresh -h github.com -s read:packages\033[0m\n"; \
+			printf "\033[1;33m[fix]\033[0m Log Docker into GHCR with the same account\n"; \
+			printf '  \033[36mecho "$$(gh auth token)" | docker login ghcr.io -u "$$(gh api user -q .login)" --password-stdin\033[0m\n'; \
+			printf "\n"; \
+			printf "\033[1;34m[check]\033[0m Confirm \033[36m~/.docker/config.json\033[0m has a GHCR credential source\n"; \
+			printf "  \033[90mLook for \033[36mauths.ghcr.io\033[90m, \033[36mcredHelpers.ghcr.io\033[90m, or \033[36mcredsStore\033[90m.\033[0m\n"; \
+			printf "  \033[90mA credential helper is preferred, but a plain \033[36mauths.ghcr.io\033[90m entry also works.\033[0m\n"; \
+			printf "  \033[90mExample:\033[0m\n"; \
+			printf '    \033[90m{\033[0m\n'; \
+			printf '      \033[90m"credHelpers": {\033[0m\n'; \
+			printf '        \033[90m"ghcr.io": \033[36m"<helper-name>"\033[90m\033[0m\n'; \
+			printf '      \033[90m}\033[0m\n'; \
+			printf '    \033[90m}\033[0m\n'; \
+			printf "\n"; \
+			printf "\033[1;35m[fallback]\033[0m No GHCR package access yet? Use \033[36mmake dev-quickstart\033[0m\n"; \
+			rm -f "$$COMPOSE_OUTPUT"; \
+			exit 1; \
+		else \
+			echo "ERROR: Failed to start the quickstart Docker services."; \
+			cat "$$COMPOSE_OUTPUT"; \
+		fi; \
 		rm -f "$$COMPOSE_OUTPUT"; \
 		exit 1; \
 	fi
@@ -163,6 +189,7 @@ QUICKSTART_RELEASE_BIN_DIR := $(QUICKSTART_RELEASE_CACHE_DIR)/counter
 QUICKSTART_RELEASE_COUNTER_BIN := $(QUICKSTART_RELEASE_BIN_DIR)/counter
 QUICKSTART_ACTIVE_VERSION_FILE := /tmp/smokedmeat-quickstart-release-version
 QUICKSTART_AUTH_TOKEN_FILE := $(HOME)/.smokedmeat/quickstart-auth-token
+QUICKSTART_CLOUD_SHELL_PULL_PID_FILE := /tmp/smokedmeat-quickstart-cloud-shell-pull.pid
 QUICKSTART_COUNTER_DARWIN_ARM64_SHA256 ?=
 QUICKSTART_COUNTER_DARWIN_X86_64_SHA256 ?=
 QUICKSTART_COUNTER_LINUX_ARM64_SHA256 ?=
@@ -271,6 +298,25 @@ define ensure_quickstart_auth_token
 		echo "$$TOKEN" > $(QUICKSTART_AUTH_TOKEN_FILE); \
 		chmod 600 $(QUICKSTART_AUTH_TOKEN_FILE); \
 		printf "\033[1;34m[auth]\033[0m Generated quickstart auth token in \033[36m%s\033[0m\n" "$(QUICKSTART_AUTH_TOKEN_FILE)"; \
+	fi
+endef
+
+define warm_quickstart_release_image
+	@IMAGE_REF="$(1)"; \
+	IMAGE_LABEL="$(2)"; \
+	if docker image inspect "$$IMAGE_REF" >/dev/null 2>&1; then \
+		:; \
+	elif [ -f "$(QUICKSTART_CLOUD_SHELL_PULL_PID_FILE)" ] && \
+		kill -0 "$$(cat "$(QUICKSTART_CLOUD_SHELL_PULL_PID_FILE)" 2>/dev/null)" >/dev/null 2>&1; then \
+		:; \
+	else \
+		rm -f "$(QUICKSTART_CLOUD_SHELL_PULL_PID_FILE)"; \
+		printf "  \033[90mWarming optional %s image in background while Counter starts.\033[0m\n" "$$IMAGE_LABEL"; \
+		nohup sh -c 'docker pull "$$1" >/dev/null 2>&1 || true; rm -f "$$2"' \
+			sh "$$IMAGE_REF" "$(QUICKSTART_CLOUD_SHELL_PULL_PID_FILE)" \
+			>/dev/null 2>&1 & \
+		PULL_PID=$$!; \
+		echo "$$PULL_PID" > "$(QUICKSTART_CLOUD_SHELL_PULL_PID_FILE)"; \
 	fi
 endef
 
@@ -534,8 +580,10 @@ quickstart:
 	else \
 		$(MAKE) --no-print-directory quickstart-up SMOKEDMEAT_QUICKSTART_BANNER_SHOWN=1; \
 	fi
-	$(call print_quickstart_step,Starting Counter TUI...)
+	$(call print_quickstart_step,Preparing Counter runtime...)
 	$(call ensure_quickstart_release_binaries)
+	$(call warm_quickstart_release_image,$(QUICKSTART_CLOUD_SHELL_IMAGE),cloud shell)
+	$(call print_quickstart_step,Starting Counter TUI...)
 	$(call run_quickstart_counter)
 
 quickstart-up:
@@ -587,8 +635,10 @@ quickstart-counter:
 		exit 1; \
 	fi
 	$(call ensure_quickstart_auth_token)
-	$(call print_quickstart_step,Starting Counter TUI...)
+	$(call print_quickstart_step,Preparing Counter runtime...)
 	$(call ensure_quickstart_release_binaries)
+	$(call warm_quickstart_release_image,$(QUICKSTART_CLOUD_SHELL_IMAGE),cloud shell)
+	$(call print_quickstart_step,Starting Counter TUI...)
 	$(call run_quickstart_counter)
 
 quickstart-down:
