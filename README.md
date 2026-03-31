@@ -54,7 +54,7 @@ make quickstart
 
 `make quickstart` is the recommended first run. It starts the stable release quickstart stack locally and launches the operator TUI (`Counter`) against the local C2 teamserver (`Kitchen`).
 
-For the easiest first target, use [`whooli`](docs/WHOOLI.md), our deliberately vulnerable public CI/CD playground.
+Then give the setup wizard a classic PAT with `public_repo` scope and point it at the [`whooli` GitHub org](https://github.com/whooli) to kick the tires. The [whooli guide](docs/WHOOLI.md) has the full challenge flow.
 
 The setup wizard walks you through:
 1. **GitHub PAT**  - A classic PAT with `public_repo` scope is enough for `whooli`. For private repos, you'll need `repo` scope.
