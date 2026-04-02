@@ -10,8 +10,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-
 	"github.com/atotto/clipboard"
+
 	"github.com/boostsecurityio/smokedmeat/internal/rye"
 )
 
