@@ -7,9 +7,10 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/boostsecurityio/smokedmeat/internal/counter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/boostsecurityio/smokedmeat/internal/counter"
 )
 
 func TestStartupRenderAllowsInitialTokenWithoutActiveToken(t *testing.T) {
