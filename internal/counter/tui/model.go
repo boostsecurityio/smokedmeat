@@ -382,7 +382,10 @@ func NewModel(config Config) Model {
 		m.focus = FocusSessions
 		m.paneFocus = PaneFocusFindings
 	} else {
-		m.setupWizard = &SetupWizardState{Step: startStep}
+		m.setupWizard = &SetupWizardState{
+			Step:          startStep,
+			BackStepFloor: setupBackStepFloor(startStep),
+		}
 		if needsFullSetup && config.AuthFailed {
 			m.setupWizard.KitchenURL = config.KitchenURL
 			m.setupWizard.Error = "Authentication failed. Re-run setup to reconnect."
@@ -462,6 +465,13 @@ func (m *Model) computeSetupStartStep(config Config) int {
 	}
 
 	return 7
+}
+
+func setupBackStepFloor(startStep int) int {
+	if startStep >= 5 {
+		return 5
+	}
+	return 1
 }
 
 // Init initializes the model

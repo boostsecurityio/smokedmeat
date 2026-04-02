@@ -585,18 +585,22 @@ func (m *Model) renderNewStatusBar() string {
 		case m.setupWizard != nil && m.setupWizard.Step == 7 && m.setupWizard.AnalysisSummary != "":
 			keyHints += helpKeyStyle.Render("Enter") + helpDescStyle.Render(":continue ")
 			keyHints += helpKeyStyle.Render("r") + helpDescStyle.Render(":re-analyze ")
-			keyHints += helpKeyStyle.Render("Tab") + helpDescStyle.Render(":back")
+			if m.setupWizard.CanGoBack() {
+				keyHints += helpKeyStyle.Render("Tab") + helpDescStyle.Render(":back")
+			}
 		case m.setupWizard != nil && m.setupWizard.Error != "" && (m.setupWizard.Step == 4 || m.setupWizard.Step == 7):
 			keyHints += helpKeyStyle.Render("r") + helpDescStyle.Render(":retry ")
-			keyHints += helpKeyStyle.Render("Tab") + helpDescStyle.Render(":back")
+			if m.setupWizard.CanGoBack() {
+				keyHints += helpKeyStyle.Render("Tab") + helpDescStyle.Render(":back")
+			}
 		default:
-			if m.setupWizard != nil && m.setupWizard.Step > 1 {
+			if m.setupWizard != nil && m.setupWizard.CanGoBack() {
 				keyHints += helpKeyStyle.Render("Tab") + helpDescStyle.Render(":back ")
 			}
 			sw := m.setupWizard
 			if sw != nil {
 				hasRadio := (sw.Step >= 2 && sw.Step <= 4) ||
-					(sw.Step == 5 && sw.TokenSubStep == 0) ||
+					(sw.Step == 5 && sw.TokenSubStep == setupTokenSubStepChoice) ||
 					(sw.Step == 6 && sw.TargetSubStep == 0)
 				if hasRadio {
 					keyHints += helpKeyStyle.Render("↑↓/jk") + helpDescStyle.Render(":select ") +
@@ -977,11 +981,14 @@ func (m *Model) renderSetupWizardView(height int) string {
 	case 5:
 		lines = append(lines,
 			pad+"  Step 5: GitHub Token",
-			pad+"",
-			pad+"  Select how to provide a GitHub token for scanning:",
-			pad+"",
 		)
-		if sw.TokenSubStep == 0 {
+		switch sw.TokenSubStep {
+		case setupTokenSubStepChoice:
+			lines = append(lines,
+				pad+"",
+				pad+"  Select how to provide a GitHub token for scanning:",
+				pad+"",
+			)
 			tokenOptions := []struct {
 				label string
 			}{
@@ -1001,7 +1008,21 @@ func (m *Model) renderSetupWizardView(height int) string {
 					pad+style.Render(fmt.Sprintf("  [%d] %s %s", i+1, marker, opt.label)),
 				)
 			}
-		} else {
+		case setupTokenSubStepWarning:
+			lines = append(lines,
+				pad+"",
+				pad+"  "+warningColor.Render("⚠ Fine-grained PAT detected"),
+				pad+"",
+				pad+"  "+mutedColor.Render("Classic PAT is recommended for first access."),
+				pad+"  "+mutedColor.Render("Fine-grained PATs can be too restrictive for"),
+				pad+"  "+mutedColor.Render("public cross-org testing, including whooli."),
+				pad+"",
+				pad+"  "+mutedColor.Render("Press Enter to continue or Tab to choose a different token."),
+			)
+		default:
+			lines = append(lines,
+				pad+"",
+			)
 			switch sw.TokenChoice {
 			case SetupTokenPAT:
 				lines = append(lines,

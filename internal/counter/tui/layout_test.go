@@ -449,6 +449,36 @@ func TestRenderNewStatusBar_HidesThemeAndLogHintsWhenInputFocused(t *testing.T) 
 	assert.NotContains(t, out, "t:theme")
 }
 
+func TestRenderNewStatusBar_HidesBackHintAtSetupBackFloor(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 120
+	m.view = ViewSetupWizard
+	m.setupWizard = &SetupWizardState{
+		Step:          5,
+		BackStepFloor: 5,
+		TokenSubStep:  setupTokenSubStepChoice,
+	}
+
+	out := stripANSI(m.renderNewStatusBar())
+
+	assert.NotContains(t, out, "Tab:back")
+}
+
+func TestRenderNewStatusBar_ShowsBackHintForSetupSubstepBack(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 120
+	m.view = ViewSetupWizard
+	m.setupWizard = &SetupWizardState{
+		Step:          5,
+		BackStepFloor: 5,
+		TokenSubStep:  setupTokenSubStepWarning,
+	}
+
+	out := stripANSI(m.renderNewStatusBar())
+
+	assert.Contains(t, out, "Tab:back")
+}
+
 func TestGlobalStatusHintsForWidth_DropsThemeBeforeImplants(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.view = ViewFindings

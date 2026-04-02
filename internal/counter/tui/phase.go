@@ -521,6 +521,12 @@ const (
 	SetupTokenBrowser
 )
 
+const (
+	setupTokenSubStepChoice = iota
+	setupTokenSubStepInput
+	setupTokenSubStepWarning
+)
+
 type SetupTargetChoice int
 
 const (
@@ -530,6 +536,7 @@ const (
 
 type SetupWizardState struct {
 	Step               int
+	BackStepFloor      int
 	KitchenURL         string
 	Keys               []SetupKeyInfo
 	SelectedKey        int
@@ -567,4 +574,24 @@ type SetupKeyInfo struct {
 	Fingerprint   string
 	Type          string
 	AuthorizedKey string
+}
+
+func (sw *SetupWizardState) backStepFloor() int {
+	if sw == nil || sw.BackStepFloor < 1 {
+		return 1
+	}
+	return sw.BackStepFloor
+}
+
+func (sw *SetupWizardState) CanGoBack() bool {
+	if sw == nil {
+		return false
+	}
+	if sw.Step == 5 && sw.TokenSubStep > setupTokenSubStepChoice {
+		return true
+	}
+	if sw.Step == 6 && sw.TargetSubStep > 0 {
+		return true
+	}
+	return sw.Step > sw.backStepFloor()
 }
