@@ -44,19 +44,27 @@ SmokedMeat is a post-exploitation framework for CI/CD pipelines. Point it at a G
 
 ## Quick Start
 
-Need Docker and `make`. If you want to run from source instead of the pinned release path, also install Go 1.25+.
+To try SmokedMeat for the first time, install Docker and `make`. Go is not required.
 
 ```bash
 git clone https://github.com/boostsecurityio/smokedmeat.git
 cd smokedmeat
 make quickstart
-# Then use a classic PAT with public_repo and target the whooli GitHub org.
 ```
 
 `make quickstart` is the recommended first run. It starts the stable release quickstart stack locally and launches the operator TUI (`Counter`) against the local C2 teamserver (`Kitchen`).
 
+Recommended first run:
+
+- Target: `whooli`
+- Token: classic PAT with `public_repo`
+
+⚠ Prefer a classic PAT. Fine-grained PATs can be too restrictive and may block testing public targets in other orgs, including `whooli`.
+
+`whooli` is SmokedMeat's deliberately vulnerable CI/CD attack playground. It is the recommended first target for the public path.
+
 The setup wizard walks you through:
-1. **GitHub PAT**  - A classic PAT with `public_repo` scope is enough for `whooli`. For private repos, you'll need `repo` scope.
+1. **GitHub PAT**  - Enter your token. For private repos, a classic PAT will usually need `repo`.
 2. **Target**  - Enter `whooli` or your own org/repo
 3. **Analysis**  - Scans workflows for vulnerabilities and presents exploitable findings
 
@@ -68,7 +76,11 @@ make quickstart-down       # Stop containers
 make quickstart-purge      # Stop and delete all data
 ```
 
-Working from source instead:
+If you want to work from source instead, see [Development](#development).
+
+## Development
+
+If you are contributing or iterating on the source tree locally, install Go 1.26+ and use the dev quickstart:
 
 ```bash
 make dev-quickstart
@@ -88,6 +100,8 @@ When you are done:
 make dev-quickstart-down   # Stop containers
 make dev-quickstart-purge  # Stop and delete all data
 ```
+
+More deployment modes and local development details are in [docs/deployment.md](docs/deployment.md).
 
 ## Core Components
 
@@ -172,17 +186,11 @@ Full details in [docs/FEATURES.md](docs/FEATURES.md).
 | **Operator TUI** | Phase-aware workflow, 7-step setup wizard, attack tree navigation, exploit wizard, loot stash, omnibox search, tab completion, OSC 8 hyperlinks. |
 | **Teamserver** | SSH or token auth, NATS JetStream message bus, GitHub API proxy (tokens stay server-side), auto-TLS via Caddy, operation history. |
 
-## Try It on a Vulnerable Target
-
-The [`whooli`](docs/WHOOLI.md) GitHub organization is a deliberately vulnerable CI/CD attack playground  - think Juice Shop for pipelines. It has planted vulnerabilities, exposed secrets, cache poisoning chains, and OIDC federation to a GCP bucket with a flag.
-
-Start with `make dev-quickstart`, enter `whooli` as your target, and see how far you get. The [challenge guide](docs/WHOOLI.md) explains the setup without giving away the solutions.
-
 ## Technology Stack
 
 | Layer | Technology |
 |-------|------------|
-| Language | Go 1.25 |
+| Language | Go 1.26+ |
 | TUI Framework | [Bubbletea v2](https://github.com/charmbracelet/bubbletea) + [Lipgloss v2](https://github.com/charmbracelet/lipgloss) |
 | TUI Layout | [Ultraviolet](https://github.com/charmbracelet/ultraviolet) layout + ANSI-safe screen compositing |
 | Message Bus | [NATS JetStream](https://nats.io/) |

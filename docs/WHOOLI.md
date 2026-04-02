@@ -21,12 +21,16 @@ The shortest validated path starts from a public repo, pivots through a GitHub A
 ## Getting Started
 
 ```bash
-make dev-quickstart
+make quickstart
 ```
 
 When the setup wizard asks for a target, enter `whooli`.
 
 A classic GitHub PAT with `public_repo` scope is enough to start the main public path. You do not need private-repo access up front because the environment is meant to make you earn it.
+
+⚠ Prefer a classic PAT. Fine-grained PATs can be too restrictive and may block public cross-org testing, including `whooli`.
+
+If you are working on SmokedMeat itself, `make dev-quickstart` uses the local source tree instead.
 
 ## Organization Layout
 
