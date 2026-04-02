@@ -235,6 +235,8 @@ type Model struct {
 	lootTreeScroll      int               // Scroll offset for visible window
 	tokenPermissions    map[string]string // GITHUB_TOKEN permissions from memory dump
 	appTokenPermissions map[string]string // GitHub App installation token permissions from pivot
+	lootPermissionView  map[string]map[string]string
+	appPermissionView   map[string]map[string]string
 
 	// Flash message (temporary notification in status bar)
 	flashMessage string
@@ -364,6 +366,8 @@ func NewModel(config Config) Model {
 		callbackModal:         &CallbackModalState{},
 		sessionLoot:           []CollectedSecret{},
 		lootStash:             []CollectedSecret{},
+		lootPermissionView:    make(map[string]map[string]string),
+		appPermissionView:     make(map[string]map[string]string),
 		dismissedDwellAgents:  make(map[string]struct{}),
 		workflowSecretTypes:   make(map[string]string),
 		knownEntities:         make(map[string]*KnownEntity),

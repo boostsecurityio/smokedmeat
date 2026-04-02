@@ -663,6 +663,30 @@ func TestPivotResult_GitHubApp_SetsAppTokenPermissions(t *testing.T) {
 	assert.Nil(t, model.tokenPermissions)
 }
 
+func TestPivotResult_GitHubApp_StoresDisplayPermissionsForPairedAppID(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhasePostExploit
+
+	perms := map[string]string{
+		"issues": "write",
+		"checks": "read",
+	}
+
+	result, _ := m.Update(PivotResultMsg{
+		Success: true,
+		Type:    PivotTypeGitHubApp,
+		Credentials: []CollectedSecret{
+			{Name: "APP_TOKEN_acme", Value: "ghs_permstest", Type: "github_app_token", Source: "pivot:app:12345"},
+		},
+		TokenPermissions: perms,
+	})
+
+	model := result.(Model)
+	require.NotNil(t, model.appPermissionView["12345"])
+	assert.Equal(t, "write", model.appPermissionView["12345"]["issues"])
+	assert.Equal(t, "read", model.appPermissionView["12345"]["checks"])
+}
+
 // =============================================================================
 // Bug 4: PivotResultMsg preserves initialTokenInfo
 // =============================================================================

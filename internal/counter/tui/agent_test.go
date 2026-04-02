@@ -146,6 +146,15 @@ func TestHandleExpressData_TokenPermissions(t *testing.T) {
 	data := counter.ExpressDataPayload{
 		AgentID:  "brisket-001234567890",
 		Hostname: "runner-1",
+		Secrets: []counter.ExtractedSecret{{
+			Name:       "GITHUB_TOKEN",
+			Value:      "ghs_live123",
+			Type:       "github_token",
+			Source:     "env",
+			Repository: "acme/api",
+			Workflow:   ".github/workflows/ci.yml",
+			Job:        "build",
+		}},
 		TokenPermissions: map[string]string{
 			"contents": "write",
 			"packages": "read",
@@ -159,6 +168,8 @@ func TestHandleExpressData_TokenPermissions(t *testing.T) {
 	require.NotNil(t, model.tokenPermissions)
 	assert.Equal(t, "write", model.tokenPermissions["contents"])
 	assert.Equal(t, "read", model.tokenPermissions["packages"])
+	require.Len(t, model.sessionLoot, 1)
+	assert.Equal(t, "write", model.displayPermissionsForSecret(model.sessionLoot[0])["contents"])
 }
 
 func TestHandleExpressData_CachePoisonArmed(t *testing.T) {

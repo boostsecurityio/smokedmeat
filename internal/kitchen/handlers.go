@@ -466,6 +466,8 @@ func detectSecretType(name, value string) string {
 	switch {
 	case strings.HasPrefix(value, "ghp_"):
 		return "github_pat"
+	case (upper == "GITHUB_TOKEN" || upper == "GH_TOKEN") && strings.HasPrefix(value, "ghs_"):
+		return "github_token"
 	case strings.HasPrefix(value, "ghs_"):
 		return "github_app_token"
 	case strings.HasPrefix(value, "gho_"):
@@ -636,12 +638,19 @@ func collapseAliasedGitHubTokens(secrets []ExtractedSecret) []ExtractedSecret {
 	}
 
 	collapsed := make([]ExtractedSecret, 0, len(secrets))
+	seenGitHubTokenValues := make(map[string]struct{}, len(githubTokenValues))
 	for _, secret := range secrets {
-		if strings.EqualFold(secret.Name, "GH_TOKEN") {
-			if _, ok := githubTokenValues[secret.Value]; ok {
-				continue
-			}
+		if _, ok := githubTokenValues[secret.Value]; !ok {
+			collapsed = append(collapsed, secret)
+			continue
 		}
+		if !strings.EqualFold(secret.Name, "GITHUB_TOKEN") {
+			continue
+		}
+		if _, seen := seenGitHubTokenValues[secret.Value]; seen {
+			continue
+		}
+		seenGitHubTokenValues[secret.Value] = struct{}{}
 		collapsed = append(collapsed, secret)
 	}
 	return collapsed

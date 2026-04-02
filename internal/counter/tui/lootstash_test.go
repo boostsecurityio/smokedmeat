@@ -124,6 +124,68 @@ func TestModel_AddToSessionLoot(t *testing.T) {
 	assert.Equal(t, "SESSION_KEY", m.sessionLoot[0].Name)
 }
 
+func TestRenderSelectedLootDetail_UsesKitchenTokenPermissionsForGitHubToken(t *testing.T) {
+	m := NewModel(Config{})
+	m.tokenPermissions = map[string]string{"actions": "write"}
+	m.appTokenPermissions = map[string]string{"issues": "write"}
+
+	secret := CollectedSecret{
+		Name:       "GITHUB_TOKEN",
+		Value:      "ghs_repo_token_123456",
+		Type:       "github_token",
+		Repository: "acme/api",
+		Workflow:   ".github/workflows/ci.yml",
+		Job:        "build",
+		AgentID:    "agt12345",
+	}
+	m.storeTokenDisplayPermissions(secret, map[string]string{"contents": "read"})
+
+	out := strings.Join(m.renderSelectedLootDetail(secret), "\n")
+
+	assert.Contains(t, out, "contents: read")
+	assert.NotContains(t, out, "actions: write")
+	assert.NotContains(t, out, "issues: write")
+}
+
+func TestRenderCompactLootDetail_UsesKitchenAppPermissionsForPairedKey(t *testing.T) {
+	m := NewModel(Config{})
+	m.appTokenPermissions = map[string]string{"metadata": "read"}
+
+	secret := CollectedSecret{
+		Name:        "APP_PRIVATE_KEY",
+		Value:       "-----BEGIN RSA PRIVATE KEY-----",
+		Type:        "github_app_key",
+		PairedAppID: "12345",
+	}
+	m.storeAppDisplayPermissions("12345", map[string]string{"issues": "write"})
+
+	out := strings.Join(m.renderCompactLootDetail(secret, 80), "\n")
+
+	assert.Contains(t, out, "issues: write")
+	assert.NotContains(t, out, "metadata: read")
+}
+
+func TestRenderCompactLootDetail_GitHubTokenNameBeatsMisclassifiedAppType(t *testing.T) {
+	m := NewModel(Config{})
+	m.appTokenPermissions = map[string]string{"issues": "write"}
+
+	secret := CollectedSecret{
+		Name:       "GITHUB_TOKEN",
+		Value:      "ghs_repo_token_123456",
+		Type:       "github_app_token",
+		Repository: "acme/api",
+		Workflow:   ".github/workflows/ci.yml",
+		Job:        "build",
+		AgentID:    "agt12345",
+	}
+	m.storeTokenDisplayPermissions(secret, map[string]string{"contents": "read"})
+
+	out := strings.Join(m.renderCompactLootDetail(secret, 80), "\n")
+
+	assert.Contains(t, out, "contents: read")
+	assert.NotContains(t, out, "issues: write")
+}
+
 func TestModel_RenderLootStash_Height(t *testing.T) {
 	m := NewModel(Config{})
 

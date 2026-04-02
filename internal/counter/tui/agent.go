@@ -410,6 +410,9 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.AddToLootStash(secret)
 		}
+		if secret.Name == "GITHUB_TOKEN" || secret.Type == "github_token" {
+			m.storeTokenDisplayPermissions(secret, data.TokenPermissions)
+		}
 	}
 
 	m.pairGitHubAppCredentials()
@@ -556,6 +559,9 @@ func (m *Model) handleReconResult(recon *models.ReconResult) {
 				CollectedAt: time.Now(),
 			}
 			m.AddToLootStash(collected)
+			if collected.Name == "GITHUB_TOKEN" {
+				m.storeTokenDisplayPermissions(collected, recon.TokenPermissions)
+			}
 			lootCount++
 		}
 

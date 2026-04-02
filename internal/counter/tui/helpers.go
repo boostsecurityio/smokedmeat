@@ -43,6 +43,24 @@ func GitHubFileURL(repo, path string) string {
 	return "https://github.com/" + repo + "/blob/HEAD/" + path
 }
 
+func clonePermissionMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+func appIDFromPivotSource(source string) string {
+	if !strings.HasPrefix(source, "pivot:app:") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(source, "pivot:app:"))
+}
+
 func GitHubFileLineURL(repo, path string, line int) string {
 	fileURL := GitHubFileURL(repo, path)
 	if fileURL == "" {

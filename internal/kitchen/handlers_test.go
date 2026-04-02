@@ -487,6 +487,8 @@ func TestDetectSecretType(t *testing.T) {
 		expected string
 	}{
 		{"github pat", "TOKEN", "ghp_abc123", "github_pat"},
+		{"github token exact name with ghs prefix", "GITHUB_TOKEN", "ghs_abc123", "github_token"},
+		{"gh token exact name with ghs prefix", "GH_TOKEN", "ghs_abc123", "github_token"},
 		{"github app", "GH", "ghs_abc123", "github_app_token"},
 		{"github oauth", "X", "gho_abc123", "github_oauth"},
 		{"github user", "X", "ghu_abc123", "github_user_token"},
@@ -639,6 +641,38 @@ func TestExtractSecrets_CollapsesGHTokenWhenValueMatchesGitHubToken(t *testing.T
 	require.Len(t, secrets, 1)
 	assert.Equal(t, "GITHUB_TOKEN", secrets[0].Name)
 	assert.Equal(t, "ghs_same_token_value_1234567890", secrets[0].Value)
+	assert.Equal(t, "github_token", secrets[0].Type)
+}
+
+func TestExtractSecrets_CollapsesArbitraryAliasWhenValueMatchesGitHubToken(t *testing.T) {
+	env := map[string]string{
+		"GITHUB_TOKEN":     "ghs_same_token_value_1234567890",
+		"CUSTOM_CI_TOKEN":  "ghs_same_token_value_1234567890",
+		"ANOTHER_CRED_VAR": "ghs_same_token_value_1234567890",
+	}
+
+	secrets := extractSecrets(env, nil)
+
+	require.Len(t, secrets, 1)
+	assert.Equal(t, "GITHUB_TOKEN", secrets[0].Name)
+	assert.Equal(t, "ghs_same_token_value_1234567890", secrets[0].Value)
+	assert.Equal(t, "github_token", secrets[0].Type)
+}
+
+func TestExtractSecrets_CollapsesRunnerSecretAliasWhenValueMatchesGitHubToken(t *testing.T) {
+	env := map[string]string{
+		"GITHUB_TOKEN": "ghs_same_token_value_1234567890",
+	}
+	runnerSecrets := []string{
+		`"WHATEVER_NAME" {"value":"ghs_same_token_value_1234567890","isSecret":true}`,
+	}
+
+	secrets := extractSecrets(env, runnerSecrets)
+
+	require.Len(t, secrets, 1)
+	assert.Equal(t, "GITHUB_TOKEN", secrets[0].Name)
+	assert.Equal(t, "ghs_same_token_value_1234567890", secrets[0].Value)
+	assert.Equal(t, "github_token", secrets[0].Type)
 }
 
 func TestExtractSecrets_KeepsGHAndGitHubTokenWhenValuesDiffer(t *testing.T) {

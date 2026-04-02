@@ -676,12 +676,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if len(msg.TokenPermissions) > 0 {
-				m.appTokenPermissions = msg.TokenPermissions
+				m.appTokenPermissions = clonePermissionMap(msg.TokenPermissions)
 			}
 
 			for _, cred := range msg.Credentials {
 				if !cred.CanUseAsToken() {
 					continue
+				}
+				if len(msg.TokenPermissions) > 0 {
+					m.storeAppDisplayPermissions(appIDFromPivotSource(cred.Source), msg.TokenPermissions)
 				}
 				m.pivotToken = &cred
 				if m.initialTokenInfo == nil && m.tokenInfo != nil {

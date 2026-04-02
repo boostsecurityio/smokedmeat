@@ -272,6 +272,13 @@ func lootOriginSlotKey(secret CollectedSecret) string {
 	return ""
 }
 
+func secretPermissionDisplayKey(secret CollectedSecret) string {
+	if key := lootOriginSlotKey(secret); key != "" {
+		return key
+	}
+	return strings.Join([]string{secret.AgentID, secret.Source, secret.Name, secret.Value}, "\x00")
+}
+
 func shouldReplaceCollectedSecret(existing, incoming CollectedSecret) bool {
 	if !existing.CollectedAt.IsZero() && !incoming.CollectedAt.IsZero() {
 		return !incoming.CollectedAt.Before(existing.CollectedAt)
@@ -280,8 +287,9 @@ func shouldReplaceCollectedSecret(existing, incoming CollectedSecret) bool {
 }
 
 func (m *Model) AddToSessionLoot(secret CollectedSecret) {
-	for _, existing := range m.sessionLoot {
+	for i, existing := range m.sessionLoot {
 		if existing.Name == secret.Name {
+			mergeCollectedSecretMetadataPreferIncomingOrigin(&m.sessionLoot[i], secret)
 			return
 		}
 	}
@@ -289,8 +297,52 @@ func (m *Model) AddToSessionLoot(secret CollectedSecret) {
 	m.RebuildLootTree()
 }
 
+func permissionHeading(secret CollectedSecret) string {
+	if secret.Type == "github_token" || secret.Name == "GITHUB_TOKEN" {
+		return "Permissions (from memory):"
+	}
+	return "Permissions:"
+}
+
+func (m *Model) storeTokenDisplayPermissions(secret CollectedSecret, perms map[string]string) {
+	if len(perms) == 0 {
+		return
+	}
+	if m.lootPermissionView == nil {
+		m.lootPermissionView = make(map[string]map[string]string)
+	}
+	m.lootPermissionView[secretPermissionDisplayKey(secret)] = clonePermissionMap(perms)
+}
+
+func (m *Model) storeAppDisplayPermissions(appID string, perms map[string]string) {
+	appID = strings.TrimSpace(appID)
+	if appID == "" || len(perms) == 0 {
+		return
+	}
+	if m.appPermissionView == nil {
+		m.appPermissionView = make(map[string]map[string]string)
+	}
+	m.appPermissionView[appID] = clonePermissionMap(perms)
+}
+
+func (m Model) displayPermissionsForSecret(secret CollectedSecret) map[string]string {
+	switch {
+	case secret.PairedAppID != "":
+		return clonePermissionMap(m.appPermissionView[strings.TrimSpace(secret.PairedAppID)])
+	case secret.Name == "GITHUB_TOKEN":
+		return clonePermissionMap(m.lootPermissionView[secretPermissionDisplayKey(secret)])
+	case secret.Type == "github_app_token":
+		return clonePermissionMap(m.appTokenPermissions)
+	case secret.Type == "github_token":
+		return clonePermissionMap(m.lootPermissionView[secretPermissionDisplayKey(secret)])
+	default:
+		return nil
+	}
+}
+
 func (m *Model) renderSelectedLootDetail(secret CollectedSecret) []string {
 	var lines []string
+	perms := m.displayPermissionsForSecret(secret)
 
 	if secret.PairedAppID != "" {
 		lines = append(lines,
@@ -304,9 +356,9 @@ func (m *Model) renderSelectedLootDetail(secret CollectedSecret) []string {
 			valPreview = valPreview[:80] + "..."
 		}
 		lines = append(lines, mutedColor.Render(valPreview))
-		if len(m.appTokenPermissions) > 0 {
-			lines = append(lines, "", secondaryColorStyle.Render("Permissions:"))
-			lines = append(lines, renderPermissionLines(m.appTokenPermissions, "  ")...)
+		if len(perms) > 0 {
+			lines = append(lines, "", secondaryColorStyle.Render(permissionHeading(secret)))
+			lines = append(lines, renderPermissionLines(perms, "  ")...)
 		}
 	} else {
 		lines = append(lines,
@@ -361,12 +413,9 @@ func (m *Model) renderSelectedLootDetail(secret CollectedSecret) []string {
 	}
 
 	switch {
-	case secret.Type == "github_app_token" && len(m.appTokenPermissions) > 0:
-		lines = append(lines, "", secondaryColorStyle.Render("Permissions:"))
-		lines = append(lines, renderPermissionLines(m.appTokenPermissions, "  ")...)
-	case strings.HasPrefix(secret.Value, "ghs_") && len(m.tokenPermissions) > 0:
-		lines = append(lines, "", secondaryColorStyle.Render("Permissions (from memory):"))
-		lines = append(lines, renderPermissionLines(m.tokenPermissions, "  ")...)
+	case len(perms) > 0:
+		lines = append(lines, "", secondaryColorStyle.Render(permissionHeading(secret)))
+		lines = append(lines, renderPermissionLines(perms, "  ")...)
 	case secret.Validated:
 		lines = append(lines, "")
 		if secret.ValidStatus == "valid" {
@@ -440,6 +489,7 @@ func (m *Model) renderSelectedLootDetail(secret CollectedSecret) []string {
 
 func (m *Model) renderCompactLootDetail(secret CollectedSecret, width int) []string {
 	var lines []string
+	perms := m.displayPermissionsForSecret(secret)
 
 	switch {
 	case secret.PairedAppID != "":
@@ -447,19 +497,14 @@ func (m *Model) renderCompactLootDetail(secret CollectedSecret, width int) []str
 			mutedColor.Render("  App ID: ")+secret.PairedAppID,
 			mutedColor.Render("  PEM: ")+secret.Name,
 		)
-		if len(m.appTokenPermissions) > 0 {
-			lines = append(lines, renderPermissionLines(m.appTokenPermissions, "  ")...)
+		if len(perms) > 0 {
+			lines = append(lines, renderPermissionLines(perms, "  ")...)
 		}
-	case secret.Type == "github_app_token" && len(m.appTokenPermissions) > 0:
+	case len(perms) > 0:
 		if secret.ExpressMode {
 			lines = append(lines, errorColor.Render("  ⚠ Expired")+mutedColor.Render(" (express mode)"))
 		}
-		lines = append(lines, renderPermissionLines(m.appTokenPermissions, "  ")...)
-	case strings.HasPrefix(secret.Value, "ghs_") && len(m.tokenPermissions) > 0:
-		if secret.ExpressMode {
-			lines = append(lines, errorColor.Render("  ⚠ Expired")+mutedColor.Render(" (express mode)"))
-		}
-		lines = append(lines, renderPermissionLines(m.tokenPermissions, "  ")...)
+		lines = append(lines, renderPermissionLines(perms, "  ")...)
 	default:
 		valPreview := secret.Value
 		maxLen := width - 8
