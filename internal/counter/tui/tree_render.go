@@ -92,6 +92,7 @@ func (m *Model) buildMenuNumberMap() map[string]int {
 }
 
 func (m *Model) nodeMatchesVuln(node *TreeNode, vuln Vulnerability) bool {
+	repo := m.treeNodeRepo(node)
 	path, _ := node.Properties["path"].(string)
 	line, _ := node.Properties["line"].(int)
 	if line == 0 {
@@ -103,7 +104,44 @@ func (m *Model) nodeMatchesVuln(node *TreeNode, vuln Vulnerability) bool {
 	if ruleID == "" {
 		ruleID = node.RuleID
 	}
-	return path == vuln.Workflow && line == vuln.Line && ruleID == vuln.RuleID
+	job := nodeStringProperty(node, "job")
+	context := nodeStringProperty(node, "context")
+	expression := nodeStringProperty(node, "expression")
+
+	if repo != "" && vuln.Repository != repo {
+		return false
+	}
+	if path != "" && vuln.Workflow != path {
+		return false
+	}
+	if line > 0 && vuln.Line != line {
+		return false
+	}
+	if ruleID != "" && vuln.RuleID != ruleID {
+		return false
+	}
+	if job != "" && vuln.Job != "" && vuln.Job != job {
+		return false
+	}
+	if context != "" && vuln.Context != "" && vuln.Context != context {
+		return false
+	}
+	if expression != "" && vuln.Expression != "" && vuln.Expression != expression {
+		return false
+	}
+	return true
+}
+
+func (m *Model) vulnerabilityIndexForNode(node *TreeNode) int {
+	if node == nil || node.Type != TreeNodeVuln {
+		return -1
+	}
+	for i := range m.vulnerabilities {
+		if m.vulnerabilities[i].ID == node.ID || m.nodeMatchesVuln(node, m.vulnerabilities[i]) {
+			return i
+		}
+	}
+	return -1
 }
 
 func (m *Model) findCursorLine(lines []string) int {
@@ -402,13 +440,9 @@ func (m *Model) formatVulnLabel(node *TreeNode) string {
 }
 
 func (m *Model) vulnerabilityForNode(node *TreeNode) *Vulnerability {
-	if node == nil || node.Type != TreeNodeVuln {
-		return nil
-	}
-	for i := range m.vulnerabilities {
-		if m.vulnerabilities[i].ID == node.ID || m.nodeMatchesVuln(node, m.vulnerabilities[i]) {
-			return &m.vulnerabilities[i]
-		}
+	index := m.vulnerabilityIndexForNode(node)
+	if index >= 0 {
+		return &m.vulnerabilities[index]
 	}
 	return nil
 }

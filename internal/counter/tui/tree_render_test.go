@@ -199,6 +199,36 @@ func TestHasActionsWriteToken(t *testing.T) {
 	}
 }
 
+func TestVulnerabilityForNode_UsesRepoToDisambiguateMatches(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.vulnerabilities = []Vulnerability{
+		{ID: "V001", Repository: "acme/one", Workflow: ".github/workflows/ci.yml", Job: "build", Line: 12, RuleID: "injection", Context: "issue_body"},
+		{ID: "V002", Repository: "acme/two", Workflow: ".github/workflows/ci.yml", Job: "build", Line: 12, RuleID: "injection", Context: "issue_body"},
+	}
+
+	root := &TreeNode{ID: "root", Expanded: true}
+	repo := &TreeNode{ID: "repo:acme/two", Type: TreeNodeRepo, Label: "acme/two", Expanded: true, Parent: root}
+	node := &TreeNode{
+		ID:     "vuln:injection:.github/workflows/ci.yml:12",
+		Type:   TreeNodeVuln,
+		RuleID: "injection",
+		Parent: repo,
+		Properties: map[string]interface{}{
+			"path":    ".github/workflows/ci.yml",
+			"line":    12,
+			"context": "issue_body",
+			"job":     "build",
+		},
+	}
+	root.Children = []*TreeNode{repo}
+	repo.Children = []*TreeNode{node}
+
+	vuln := m.vulnerabilityForNode(node)
+
+	require.NotNil(t, vuln)
+	assert.Equal(t, "V002", vuln.ID)
+}
+
 func TestTokenWriteScopes(t *testing.T) {
 	tests := []struct {
 		name string

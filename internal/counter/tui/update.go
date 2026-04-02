@@ -1453,6 +1453,10 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "x":
 		if m.focus != FocusInput && m.paneFocus == PaneFocusFindings {
+			if node := m.SelectedTreeNode(); node == nil || node.Type != TreeNodeVuln {
+				m.AddOutput("error", "Exploit shortcut requires a [VULN] node.")
+				return m, nil
+			}
 			if err := m.openSelectedVulnerabilityWizard(""); err == nil {
 				return m, nil
 			}
