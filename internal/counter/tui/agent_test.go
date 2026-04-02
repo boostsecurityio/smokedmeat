@@ -909,7 +909,7 @@ func TestExecuteCommand_ExploitQueryOpensWizard(t *testing.T) {
 	assert.Equal(t, PhaseWizard, model.phase)
 }
 
-func TestHandleKeyMsg_XUsesSelectedVulnerabilityFallback(t *testing.T) {
+func TestHandleKeyMsg_XRequiresVulnerabilityTreeNode(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhasePostExploit
 	m.view = ViewAgent
@@ -926,6 +926,67 @@ func TestHandleKeyMsg_XUsesSelectedVulnerabilityFallback(t *testing.T) {
 	root.Children = []*TreeNode{repo}
 	m.treeRoot = root
 	m.ReflattenTree()
+
+	result, cmd := m.Update(tea.KeyPressMsg{Text: "x", Code: 'x'})
+
+	require.Nil(t, cmd)
+	model := result.(Model)
+	require.NotNil(t, model.wizard)
+	assert.Nil(t, model.wizard.SelectedVuln)
+	assert.Equal(t, PhasePostExploit, model.phase)
+	require.NotEmpty(t, model.output)
+	assert.Equal(t, "error", model.output[len(model.output)-1].Type)
+	assert.Equal(t, "Exploit shortcut requires a [VULN] node.", model.output[len(model.output)-1].Content)
+}
+
+func TestHandleKeyMsg_XUsesHighlightedTreeVulnerabilityFromPantryNode(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhasePostExploit
+	m.view = ViewAgent
+	m.focus = FocusSessions
+	m.paneFocus = PaneFocusFindings
+	m.vulnerabilities = []Vulnerability{
+		{ID: "V001", Title: "Bash injection", Repository: "acme/xyz", Workflow: ".github/workflows/build.yml", Job: "build", Line: 12, RuleID: "injection", Context: "issue_body"},
+		{ID: "V004", Title: "Bash injection", Repository: "acme/xyz", Workflow: ".github/workflows/internal-sync.yml", Job: "archive-feedback", Line: 41, RuleID: "injection", Context: "workflow_dispatch_input"},
+	}
+	m.selectedVuln = 0
+
+	root := &TreeNode{ID: "root", Expanded: true}
+	repo := &TreeNode{ID: "repo:acme/xyz", Type: TreeNodeRepo, Label: "acme/xyz", Expanded: true, Parent: root}
+	job := &TreeNode{ID: "job:archive-feedback", Type: TreeNodeJob, Label: "archive-feedback", Expanded: true, Parent: repo}
+	firstVuln := &TreeNode{
+		ID:     "vuln:injection:.github/workflows/build.yml:12",
+		Type:   TreeNodeVuln,
+		Label:  "Bash injection",
+		RuleID: "injection",
+		Parent: repo,
+		Properties: map[string]interface{}{
+			"path":    ".github/workflows/build.yml",
+			"line":    12,
+			"context": "issue_body",
+			"job":     "build",
+		},
+	}
+	secondVuln := &TreeNode{
+		ID:     "vuln:injection:.github/workflows/internal-sync.yml:41",
+		Type:   TreeNodeVuln,
+		Label:  "Bash injection",
+		RuleID: "injection",
+		Parent: job,
+		Properties: map[string]interface{}{
+			"path":       ".github/workflows/internal-sync.yml",
+			"line":       41,
+			"context":    "workflow_dispatch_input",
+			"job":        "archive-feedback",
+			"expression": "${{ github.event.inputs.target }}",
+		},
+	}
+	root.Children = []*TreeNode{repo}
+	repo.Children = []*TreeNode{firstVuln, job}
+	job.Children = []*TreeNode{secondVuln}
+	m.treeRoot = root
+	m.ReflattenTree()
+	require.True(t, m.TreeSelectByID(secondVuln.ID))
 
 	result, cmd := m.Update(tea.KeyPressMsg{Text: "x", Code: 'x'})
 

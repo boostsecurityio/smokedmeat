@@ -964,12 +964,8 @@ func (m *Model) applySelectedVulnerability(index int) bool {
 
 func (m *Model) selectedVulnerabilityIndex() int {
 	node := m.SelectedTreeNode()
-	if node != nil && node.Type == TreeNodeVuln {
-		for i := range m.vulnerabilities {
-			if m.vulnerabilities[i].ID == node.ID {
-				return i
-			}
-		}
+	if index := m.vulnerabilityIndexForNode(node); index >= 0 {
+		return index
 	}
 	if m.selectedVuln >= 0 && m.selectedVuln < len(m.vulnerabilities) {
 		return m.selectedVuln
