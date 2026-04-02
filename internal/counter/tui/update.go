@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
 
@@ -151,6 +152,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setupWizard.TokenSubStep = setupTokenSubStepInput
 			m.setupInput.SetValue("")
 			m.setupInput.Placeholder = "ghp_xxxxxxxxxxxxxxxxxxxx"
+			m.setupInput.EchoMode = textinput.EchoPassword
+			m.setupInput.EchoCharacter = '•'
 			m.setupInput.Focus()
 		}
 		return m, nil

@@ -6,6 +6,7 @@ package tui
 import (
 	"testing"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -104,6 +105,24 @@ func TestSetupTabDoesNotLeaveTokenStepAtBackFloor(t *testing.T) {
 	assert.Equal(t, setupTokenSubStepChoice, model.setupWizard.TokenSubStep)
 }
 
+func TestSetupTabBlockedPreservesFeedback(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.setupWizard = &SetupWizardState{
+		Step:          5,
+		BackStepFloor: 5,
+		TokenSubStep:  setupTokenSubStepChoice,
+		Error:         "keep this error",
+		Status:        "keep this status",
+	}
+
+	result, _ := m.handleSetupWizardKeyMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+
+	model := result.(Model)
+	require.NotNil(t, model.setupWizard)
+	assert.Equal(t, "keep this error", model.setupWizard.Error)
+	assert.Equal(t, "keep this status", model.setupWizard.Status)
+}
+
 func TestSetupTabReturnsToTokenChoiceWithinStep(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.setupWizard = &SetupWizardState{
@@ -135,6 +154,54 @@ func TestSetupTabFromTargetStepStopsAtTokenStep(t *testing.T) {
 	assert.Equal(t, 5, model.setupWizard.Step)
 }
 
+func TestAdvanceSetupStep_PATUsesPasswordEcho(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.setupWizard = &SetupWizardState{
+		Step:         5,
+		TokenSubStep: setupTokenSubStepChoice,
+		TokenChoice:  SetupTokenPAT,
+	}
+
+	result, _ := m.advanceSetupStep()
+
+	model := result.(Model)
+	require.NotNil(t, model.setupWizard)
+	assert.Equal(t, setupTokenSubStepInput, model.setupWizard.TokenSubStep)
+	assert.Equal(t, textinput.EchoPassword, model.setupInput.EchoMode)
+}
+
+func TestAdvanceSetupStep_OPUsesNormalEcho(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.setupWizard = &SetupWizardState{
+		Step:         5,
+		TokenSubStep: setupTokenSubStepChoice,
+		TokenChoice:  SetupTokenOP,
+	}
+	m.setupInput.EchoMode = textinput.EchoPassword
+
+	result, _ := m.advanceSetupStep()
+
+	model := result.(Model)
+	require.NotNil(t, model.setupWizard)
+	assert.Equal(t, setupTokenSubStepInput, model.setupWizard.TokenSubStep)
+	assert.Equal(t, textinput.EchoNormal, model.setupInput.EchoMode)
+}
+
+func TestSetupBrowserOpenedUsesPasswordEcho(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.setupWizard = &SetupWizardState{
+		Step:        5,
+		TokenChoice: SetupTokenBrowser,
+	}
+
+	result, _ := m.Update(setupBrowserOpenedMsg{})
+
+	model := result.(Model)
+	require.NotNil(t, model.setupWizard)
+	assert.Equal(t, setupTokenSubStepInput, model.setupWizard.TokenSubStep)
+	assert.Equal(t, textinput.EchoPassword, model.setupInput.EchoMode)
+}
+
 func TestRenderSetupWizardView_FineGrainedWarning(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.width = 100
@@ -149,4 +216,5 @@ func TestRenderSetupWizardView_FineGrainedWarning(t *testing.T) {
 	assert.Contains(t, out, "Fine-grained PAT detected")
 	assert.Contains(t, out, "Classic PAT is recommended for first access.")
 	assert.Contains(t, out, "Press Enter to continue or Tab to choose a different token.")
+	assert.NotContains(t, out, "whooli")
 }

@@ -35,15 +35,17 @@ func (m Model) handleSetupWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		return m, tea.Quit
 
 	case "tab":
-		sw.Error = ""
-		sw.Status = ""
 		if sw.Step == 5 && sw.TokenSubStep > setupTokenSubStepChoice {
+			sw.Error = ""
+			sw.Status = ""
 			sw.TokenSubStep = setupTokenSubStepChoice
 			m.setupInput.EchoMode = textinput.EchoNormal
 			m.setupInput.Blur()
 			return m, nil
 		}
 		if sw.Step == 6 && sw.TargetSubStep > 0 {
+			sw.Error = ""
+			sw.Status = ""
 			sw.TargetSubStep = 0
 			m.setupInput.Blur()
 			return m, nil
@@ -51,6 +53,8 @@ func (m Model) handleSetupWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		if !sw.CanGoBack() {
 			return m, nil
 		}
+		sw.Error = ""
+		sw.Status = ""
 		sw.Step--
 		switch sw.Step {
 		case 1:
@@ -68,7 +72,7 @@ func (m Model) handleSetupWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		case 4:
 			m.setupInput.Blur()
 		case 5:
-			sw.TokenSubStep = 0
+			sw.TokenSubStep = setupTokenSubStepChoice
 			m.setupInput.Blur()
 		case 6:
 			sw.TargetSubStep = 0
@@ -310,21 +314,26 @@ func (m Model) advanceSetupStep() (tea.Model, tea.Cmd) {
 		if sw.TokenSubStep == setupTokenSubStepChoice {
 			sw.TokenSubStep = setupTokenSubStepInput
 			sw.Error = ""
+			m.setupInput.SetValue("")
+			m.setupInput.EchoMode = textinput.EchoNormal
 			switch sw.TokenChoice {
 			case SetupTokenPAT:
-				m.setupInput.SetValue("")
 				m.setupInput.Placeholder = "ghp_xxxxxxxxxxxxxxxxxxxx"
 				m.setupInput.EchoMode = textinput.EchoPassword
 				m.setupInput.EchoCharacter = '•'
 				m.setupInput.Focus()
 			case SetupTokenGH:
 				sw.Status = "Fetching token from GitHub CLI..."
+				m.setupInput.Blur()
 				return m, m.executeSetupGHAuthToken()
 			case SetupTokenOP:
-				m.setupInput.SetValue("")
 				m.setupInput.Placeholder = "op://Vault/Item/field"
 				m.setupInput.Focus()
 			case SetupTokenBrowser:
+				m.setupInput.Placeholder = "ghp_xxxxxxxxxxxxxxxxxxxx"
+				m.setupInput.EchoMode = textinput.EchoPassword
+				m.setupInput.EchoCharacter = '•'
+				m.setupInput.Blur()
 				sw.Status = "Opening browser..."
 				return m, tea.Batch(openBrowserCmd(gitHubPATURL), func() tea.Msg {
 					return setupBrowserOpenedMsg{}

@@ -1015,7 +1015,7 @@ func (m *Model) renderSetupWizardView(height int) string {
 				pad+"",
 				pad+"  "+mutedColor.Render("Classic PAT is recommended for first access."),
 				pad+"  "+mutedColor.Render("Fine-grained PATs can be too restrictive for"),
-				pad+"  "+mutedColor.Render("public cross-org testing, including whooli."),
+				pad+"  "+mutedColor.Render("public cross-org testing scenarios."),
 				pad+"",
 				pad+"  "+mutedColor.Render("Press Enter to continue or Tab to choose a different token."),
 			)
