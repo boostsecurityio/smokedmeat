@@ -1,7 +1,7 @@
 // Copyright (C) 2026 boostsecurity.io
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package buildinfo //nolint:revive // intentional name matching domain concept
+package buildinfo
 
 import (
 	"fmt"
