@@ -324,6 +324,49 @@ func TestRenderWaitingView_ShowsWriterCacheStatus(t *testing.T) {
 	assert.Contains(t, out, "Writer cache: armed")
 }
 
+func TestBuildWizardStep2Content_AppTokenIssueWriteDoesNotWarn(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.tokenInfo = &TokenInfo{Value: "ghs_app_token", Type: TokenTypeInstallApp, Source: "loot:APP_TOKEN_acme"}
+	m.appTokenPermissions = map[string]string{"issues": "write", "metadata": "read"}
+	m.wizard = &WizardState{
+		Step: 2,
+		SelectedVuln: &Vulnerability{
+			ID:         "V001",
+			Repository: "acme/api",
+			Workflow:   ".github/workflows/ci.yml",
+			Context:    "issue_body",
+			Trigger:    "issues",
+		},
+		DeliveryMethod: DeliveryIssue,
+	}
+
+	out := stripANSI(strings.Join(m.buildWizardStep2Content(90), "\n"))
+
+	assert.Contains(t, out, "Create Issue")
+	assert.NotContains(t, out, "Create Issue (token missing scope)")
+}
+
+func TestBuildWizardStep2Content_AppTokenWithoutPRWriteWarns(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.tokenInfo = &TokenInfo{Value: "ghs_app_token", Type: TokenTypeInstallApp, Source: "loot:APP_TOKEN_acme"}
+	m.appTokenPermissions = map[string]string{"issues": "write", "metadata": "read"}
+	m.wizard = &WizardState{
+		Step: 2,
+		SelectedVuln: &Vulnerability{
+			ID:         "V001",
+			Repository: "acme/api",
+			Workflow:   ".github/workflows/ci.yml",
+			Context:    "pr_body",
+			Trigger:    "pull_request_target",
+		},
+		DeliveryMethod: DeliveryAutoPR,
+	}
+
+	out := stripANSI(strings.Join(m.buildWizardStep2Content(90), "\n"))
+
+	assert.Contains(t, out, "Create PR (token missing scope)")
+}
+
 func TestHelpCommandsForPhase(t *testing.T) {
 	tests := []struct {
 		phase   Phase
