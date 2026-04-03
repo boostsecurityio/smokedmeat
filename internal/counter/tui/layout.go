@@ -1509,10 +1509,7 @@ func (m *Model) buildWizardStep2Content(width int) []string {
 			marker = "●"
 		}
 
-		canUse := m.tokenInfo.CanUseDelivery(opt.method)
-		if opt.method == DeliveryAutoDispatch && m.dispatchCredential() != nil {
-			canUse = true
-		}
+		canUse := m.canUseDeliveryMethod(opt.method)
 		label := opt.label
 		desc := opt.desc
 

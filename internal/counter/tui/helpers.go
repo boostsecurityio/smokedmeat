@@ -381,7 +381,7 @@ func findCollectedSecretByNameValue(secrets []CollectedSecret, name, value strin
 	return nil
 }
 
-func (m Model) activeDispatchPermissions() map[string]string {
+func (m Model) activeTokenPermissionsMap() map[string]string {
 	if m.tokenInfo == nil {
 		return nil
 	}
@@ -393,6 +393,10 @@ func (m Model) activeDispatchPermissions() map[string]string {
 	default:
 		return nil
 	}
+}
+
+func (m Model) activeDispatchPermissions() map[string]string {
+	return m.activeTokenPermissionsMap()
 }
 
 func (m Model) dispatchPermissionsForSecret(secret CollectedSecret) map[string]string {
@@ -461,18 +465,103 @@ func secretHasActionsWrite(secret CollectedSecret) bool {
 	return false
 }
 
+func (m Model) canUseDeliveryMethod(method DeliveryMethod) bool {
+	switch method {
+	case DeliveryCopyOnly, DeliveryManualSteps:
+		return true
+	case DeliveryAutoDispatch:
+		return m.dispatchCredential() != nil
+	}
+
+	secret := m.resolveActiveTokenSecret()
+	if secret == nil {
+		return false
+	}
+
+	return secretAllowsDeliveryMethod(*secret, m.activeTokenPermissionsMap(), method)
+}
+
+func secretAllowsDeliveryMethod(secret CollectedSecret, permissions map[string]string, method DeliveryMethod) bool {
+	switch method {
+	case DeliveryAutoPR, DeliveryLOTP:
+		return secretAllowsPullRequestWrite(secret, permissions)
+	case DeliveryIssue:
+		return secretAllowsIssueWrite(secret, permissions)
+	case DeliveryComment:
+		return secretAllowsCommentWrite(secret, permissions)
+	case DeliveryAutoDispatch:
+		return secretAllowsDispatch(secret, permissions)
+	case DeliveryCopyOnly, DeliveryManualSteps:
+		return true
+	default:
+		return false
+	}
+}
+
+func secretAllowsPullRequestWrite(secret CollectedSecret, permissions map[string]string) bool {
+	if !secret.CanUseAsToken() {
+		return false
+	}
+	if permissionAllowsWrite(permissions, "contents") && permissionAllowsWrite(permissions, "pull_requests") {
+		return true
+	}
+	return secretHasRepoWrite(secret)
+}
+
+func secretAllowsIssueWrite(secret CollectedSecret, permissions map[string]string) bool {
+	if !secret.CanUseAsToken() {
+		return false
+	}
+	if permissionAllowsWrite(permissions, "issues") {
+		return true
+	}
+	return secretHasRepoWrite(secret)
+}
+
+func secretAllowsCommentWrite(secret CollectedSecret, permissions map[string]string) bool {
+	if !secret.CanUseAsToken() {
+		return false
+	}
+	if permissionAllowsWrite(permissions, "issues") || permissionAllowsWrite(permissions, "pull_requests") {
+		return true
+	}
+	return secretHasRepoWrite(secret)
+}
+
+func secretHasRepoWrite(secret CollectedSecret) bool {
+	if !secret.CanUseAsToken() {
+		return false
+	}
+	if secret.Type == "github_fine_grained_pat" {
+		return true
+	}
+	for _, scope := range secret.Scopes {
+		scope = strings.ToLower(strings.TrimSpace(scope))
+		switch scope {
+		case "repo", "public_repo":
+			return true
+		}
+	}
+	return false
+}
+
 func permissionAllowsWrite(permissions map[string]string, name string) bool {
 	if len(permissions) == 0 || name == "" {
 		return false
 	}
-	if level, ok := permissions[name]; ok {
-		return level == "write"
-	}
-	titleName := strings.ToUpper(name[:1]) + name[1:]
-	if level, ok := permissions[titleName]; ok {
-		return level == "write"
+	want := normalizePermissionName(name)
+	for key, level := range permissions {
+		if normalizePermissionName(key) == want && strings.EqualFold(strings.TrimSpace(level), "write") {
+			return true
+		}
 	}
 	return false
+}
+
+func normalizePermissionName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	name = strings.ReplaceAll(name, "-", "_")
+	return name
 }
 
 func extractDispatchInputName(sources []string) string {

@@ -221,6 +221,35 @@ func TestGetEphemeralTokenForDispatch_IgnoresLootGitHubTokenWithoutPermissions(t
 	assert.Nil(t, secret)
 }
 
+func TestCanUseDeliveryMethod_AppTokenAllowsIssueWithIssuesWrite(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.tokenInfo = &TokenInfo{Value: "ghs_app_token", Type: TokenTypeInstallApp, Source: "loot:APP_TOKEN_acme"}
+	m.appTokenPermissions = map[string]string{"issues": "write", "metadata": "read"}
+
+	assert.True(t, m.canUseDeliveryMethod(DeliveryIssue))
+	assert.True(t, m.canUseDeliveryMethod(DeliveryComment))
+	assert.False(t, m.canUseDeliveryMethod(DeliveryAutoPR))
+}
+
+func TestCanUseDeliveryMethod_AppTokenAllowsPRWithContentsAndPullRequests(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.tokenInfo = &TokenInfo{Value: "ghs_app_token", Type: TokenTypeInstallApp, Source: "loot:APP_TOKEN_acme"}
+	m.appTokenPermissions = map[string]string{
+		"contents":      "write",
+		"pull_requests": "write",
+		"metadata":      "read",
+	}
+
+	assert.True(t, m.canUseDeliveryMethod(DeliveryAutoPR))
+	assert.True(t, m.canUseDeliveryMethod(DeliveryLOTP))
+}
+
+func TestPermissionAllowsWrite_NormalizesHyphenatedKeys(t *testing.T) {
+	perms := map[string]string{"pull-requests": "write"}
+
+	assert.True(t, permissionAllowsWrite(perms, "pull_requests"))
+}
+
 func TestScrollInfo_HasOverflow(t *testing.T) {
 	tests := []struct {
 		name     string
