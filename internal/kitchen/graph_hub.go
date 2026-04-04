@@ -179,11 +179,12 @@ func (h *GraphHub) OnAssetUpdated(asset pantry.Asset, oldState pantry.AssetState
 	}
 	node := AssetToGraphNode(asset)
 	h.pendingDelta.UpdatedNodes = append(h.pendingDelta.UpdatedNodes, NodeUpdate{
-		ID:         asset.ID,
-		OldState:   string(oldState),
-		NewState:   string(asset.State),
-		Label:      node.Label,
-		Properties: node.Properties,
+		ID:                asset.ID,
+		OldState:          string(oldState),
+		NewState:          string(asset.State),
+		Label:             node.Label,
+		Properties:        node.Properties,
+		TooltipProperties: node.TooltipProperties,
 	})
 	h.scheduleDeltaFlush()
 }
