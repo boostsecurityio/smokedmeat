@@ -598,12 +598,14 @@ type SetupWizardState struct {
 	TargetSubStep int
 	TargetValue   string
 
-	AnalysisRunning bool
-	AnalysisStart   time.Time
-	AnalysisSummary string
-	ReposAnalyzed   int
-	VulnsFound      int
-	SecretsFound    int
+	AnalysisRunning      bool
+	AnalysisStart        time.Time
+	AnalysisAttempt      int
+	AnalysisRetryPending bool
+	AnalysisSummary      string
+	ReposAnalyzed        int
+	VulnsFound           int
+	SecretsFound         int
 }
 
 type SetupKeyInfo struct {

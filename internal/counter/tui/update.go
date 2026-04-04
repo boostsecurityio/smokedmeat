@@ -234,6 +234,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		sw := m.setupWizard
 		sw.AnalysisRunning = false
+		sw.AnalysisAttempt = 0
+		sw.AnalysisRetryPending = false
+		sw.Status = ""
 		sw.ReposAnalyzed = msg.Result.ReposAnalyzed
 		sw.VulnsFound = len(msg.Result.Findings)
 		sw.SecretsFound = len(msg.Result.SecretFindings)
@@ -252,9 +255,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.setupWizard == nil || m.setupWizard.Step != 7 {
 			return m, nil
 		}
-		m.setupWizard.AnalysisRunning = false
-		m.setupWizard.Error = fmt.Sprintf("Analysis failed: %v", msg.Err)
+		sw := m.setupWizard
+		sw.AnalysisRunning = false
+		if isRetryableSetupAnalysisError(msg.Err) {
+			retryDelays := setupAnalysisRetryDelays()
+			if sw.AnalysisAttempt < len(retryDelays) {
+				sw.AnalysisAttempt++
+				delay := retryDelays[sw.AnalysisAttempt-1]
+				sw.AnalysisRetryPending = true
+				sw.Error = ""
+				sw.Status = fmt.Sprintf("Analyze request dropped, retrying in %ds... (attempt %d/%d)", int(delay.Seconds()), sw.AnalysisAttempt, len(retryDelays))
+				return m, tea.Tick(delay, func(time.Time) tea.Msg {
+					return setupAnalysisRetryMsg{}
+				})
+			}
+			sw.Error = fmt.Sprintf("Analysis failed after %d retries: %v", len(retryDelays), msg.Err)
+		} else {
+			sw.Error = fmt.Sprintf("Analysis failed: %v", msg.Err)
+		}
+		sw.AnalysisRetryPending = false
+		sw.Status = ""
 		return m, nil
+
+	case setupAnalysisRetryMsg:
+		if m.setupWizard == nil || m.setupWizard.Step != 7 || m.setupWizard.AnalysisRunning || !m.setupWizard.AnalysisRetryPending {
+			return m, nil
+		}
+		return m.startSetupAnalysis(false)
 
 	case setupAuthRetryMsg:
 		if m.setupWizard == nil {

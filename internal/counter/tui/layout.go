@@ -580,6 +580,8 @@ func (m *Model) renderNewStatusBar() string {
 		switch {
 		case m.setupWizard != nil && m.setupWizard.Connecting:
 			// No hints while auto-retrying
+		case m.setupWizard != nil && m.setupWizard.AnalysisRetryPending:
+			keyHints += mutedColor.Render("retrying...")
 		case m.setupWizard != nil && m.setupWizard.AnalysisRunning:
 			keyHints += mutedColor.Render("analyzing...")
 		case m.setupWizard != nil && m.setupWizard.Step == 7 && m.setupWizard.AnalysisSummary != "":
@@ -1102,6 +1104,16 @@ func (m *Model) renderSetupWizardView(height int) string {
 			pad+"",
 		)
 		switch {
+		case sw.AnalysisRetryPending:
+			targetLabel := sw.TargetValue
+			if targetLabel == "" {
+				targetLabel = m.target
+			}
+			lines = append(lines,
+				pad+"  "+mutedColor.Render("Retrying poutine analysis..."),
+				pad+"",
+				pad+"  "+mutedColor.Render("Target: "+targetLabel),
+			)
 		case sw.AnalysisRunning:
 			spinnerFrames := []string{"◐", "◓", "◑", "◒"}
 			elapsed := time.Since(sw.AnalysisStart)

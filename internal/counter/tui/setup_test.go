@@ -4,6 +4,8 @@
 package tui
 
 import (
+	"fmt"
+	"io"
 	"testing"
 
 	"charm.land/bubbles/v2/textinput"
@@ -217,4 +219,88 @@ func TestRenderSetupWizardView_FineGrainedWarning(t *testing.T) {
 	assert.Contains(t, out, "Classic PAT is recommended for first access.")
 	assert.Contains(t, out, "Press Enter to continue or Tab to choose a different token.")
 	assert.NotContains(t, out, "whooli")
+}
+
+func TestSetupStep7EnterOnErrorRetriesInsteadOfLeavingSetup(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.setupWizard = &SetupWizardState{
+		Step:   7,
+		Error:  "Analysis failed: EOF",
+		Status: "old status",
+	}
+
+	result, cmd := m.handleSetupWizardKeyMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	model := result.(Model)
+	require.NotNil(t, model.setupWizard)
+	assert.Equal(t, 7, model.setupWizard.Step)
+	assert.True(t, model.setupWizard.AnalysisRunning)
+	assert.False(t, model.setupWizard.AnalysisRetryPending)
+	assert.Empty(t, model.setupWizard.Error)
+	assert.Empty(t, model.setupWizard.Status)
+	assert.NotNil(t, cmd)
+}
+
+func TestSetupAnalysisErrorMsg_RetryableSchedulesRetry(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.setupWizard = &SetupWizardState{
+		Step:            7,
+		AnalysisRunning: true,
+	}
+
+	result, cmd := m.Update(SetupAnalysisErrorMsg{
+		Err: fmt.Errorf("failed to send request to Kitchen: %w", io.EOF),
+	})
+
+	model := result.(Model)
+	require.NotNil(t, model.setupWizard)
+	assert.False(t, model.setupWizard.AnalysisRunning)
+	assert.True(t, model.setupWizard.AnalysisRetryPending)
+	assert.Equal(t, 1, model.setupWizard.AnalysisAttempt)
+	assert.Empty(t, model.setupWizard.Error)
+	assert.Contains(t, model.setupWizard.Status, "retrying in 2s")
+	assert.NotNil(t, cmd)
+}
+
+func TestSetupAnalysisRetryMsg_RestartsAnalysis(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.setupWizard = &SetupWizardState{
+		Step:                 7,
+		AnalysisAttempt:      1,
+		AnalysisRetryPending: true,
+		Error:                "Analysis failed: EOF",
+		Status:               "Analyze request dropped, retrying in 2s... (attempt 1/3)",
+	}
+
+	result, cmd := m.Update(setupAnalysisRetryMsg{})
+
+	model := result.(Model)
+	require.NotNil(t, model.setupWizard)
+	assert.True(t, model.setupWizard.AnalysisRunning)
+	assert.False(t, model.setupWizard.AnalysisRetryPending)
+	assert.Empty(t, model.setupWizard.Error)
+	assert.Empty(t, model.setupWizard.Status)
+	assert.Equal(t, 1, model.setupWizard.AnalysisAttempt)
+	assert.NotNil(t, cmd)
+}
+
+func TestSetupAnalysisErrorMsg_RetryableExhaustedShowsError(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.setupWizard = &SetupWizardState{
+		Step:            7,
+		AnalysisRunning: true,
+		AnalysisAttempt: len(setupAnalysisRetryDelays()),
+	}
+
+	result, cmd := m.Update(SetupAnalysisErrorMsg{
+		Err: fmt.Errorf("failed to send request to Kitchen: %w", io.EOF),
+	})
+
+	model := result.(Model)
+	require.NotNil(t, model.setupWizard)
+	assert.False(t, model.setupWizard.AnalysisRunning)
+	assert.False(t, model.setupWizard.AnalysisRetryPending)
+	assert.Empty(t, model.setupWizard.Status)
+	assert.Contains(t, model.setupWizard.Error, "Analysis failed after 3 retries")
+	assert.Nil(t, cmd)
 }

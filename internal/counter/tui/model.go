@@ -1605,6 +1605,8 @@ func (m *Model) IsWaiting() bool {
 
 type setupAuthRetryMsg struct{}
 
+type setupAnalysisRetryMsg struct{}
+
 type SetupSSHKeysLoadedMsg struct {
 	Keys []SetupKeyInfo
 	Err  error

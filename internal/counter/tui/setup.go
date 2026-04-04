@@ -6,7 +6,9 @@ package tui
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -89,15 +91,11 @@ func (m Model) handleSetupWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 			return m, m.finishSetup()
 		}
 		if sw.Step == 7 && !sw.AnalysisRunning {
-			sw.Error = ""
-			sw.AnalysisSummary = ""
-			sw.AnalysisRunning = true
-			sw.AnalysisStart = time.Now()
-			return m, tea.Batch(m.runSetupAnalysis(), timerTickCmd())
+			return m.startSetupAnalysis(true)
 		}
 
 	case "enter":
-		if sw.AnalysisRunning {
+		if sw.AnalysisRunning || sw.AnalysisRetryPending {
 			return m, nil
 		}
 		return m.advanceSetupStep()
@@ -406,12 +404,10 @@ func (m Model) advanceSetupStep() (tea.Model, tea.Cmd) {
 		}
 
 		sw.Step = 7
-		sw.AnalysisRunning = true
-		sw.AnalysisStart = time.Now()
-		return m, tea.Batch(m.runSetupAnalysis(), timerTickCmd())
+		return m.startSetupAnalysis(true)
 
 	case 7:
-		if sw.AnalysisRunning {
+		if sw.AnalysisRunning || sw.AnalysisRetryPending {
 			return m, nil
 		}
 		if sw.AnalysisSummary != "" {
@@ -419,16 +415,34 @@ func (m Model) advanceSetupStep() (tea.Model, tea.Cmd) {
 			m.TransitionToPhase(PhaseRecon)
 			return m, nil
 		}
-		if sw.Error != "" {
-			m.setupWizard = nil
-			m.TransitionToPhase(PhaseRecon)
-			return m, nil
-		}
-		sw.AnalysisRunning = true
-		sw.AnalysisStart = time.Now()
-		return m, tea.Batch(m.runSetupAnalysis(), timerTickCmd())
+		return m.startSetupAnalysis(true)
 	}
 	return m, nil
+}
+
+func (m Model) startSetupAnalysis(resetAttempt bool) (tea.Model, tea.Cmd) {
+	sw := m.setupWizard
+	if sw == nil {
+		return m, nil
+	}
+	if resetAttempt {
+		sw.AnalysisAttempt = 0
+	}
+	sw.Error = ""
+	sw.Status = ""
+	sw.AnalysisSummary = ""
+	sw.AnalysisRetryPending = false
+	sw.AnalysisRunning = true
+	sw.AnalysisStart = time.Now()
+	return m, tea.Batch(m.runSetupAnalysis(), timerTickCmd())
+}
+
+func setupAnalysisRetryDelays() []time.Duration {
+	return []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
+}
+
+func isRetryableSetupAnalysisError(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 func (m *Model) finishSetupTokenVerification() {
