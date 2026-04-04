@@ -17,6 +17,8 @@ import (
 	"github.com/boostsecurityio/smokedmeat/internal/rye"
 )
 
+var clipboardWriteAll = clipboard.WriteAll
+
 // Update handles messages and updates the model
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -1439,7 +1441,7 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.paneFocus == PaneFocusLoot {
 			secret := m.SelectedLootSecret()
 			if secret != nil {
-				if err := clipboard.WriteAll(secret.Value); err != nil {
+				if err := clipboardWriteAll(secret.Value); err != nil {
 					m.activityLog.Add(IconError, fmt.Sprintf("Copy failed: %v", err))
 				} else {
 					m.lootFlash = true
