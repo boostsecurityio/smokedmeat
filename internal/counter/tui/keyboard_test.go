@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newKeyboardTestModel() Model {
@@ -57,6 +58,24 @@ func TestHandleKeyMsg_InputFocusEnterDoesNotTriggerPaneAction(t *testing.T) {
 	model := result.(Model)
 	assert.Empty(t, model.input.Value())
 	assert.Empty(t, model.output)
+}
+
+func TestHandleKeyMsg_InputFocusEnterShowsUnknownCommandInActivityLog(t *testing.T) {
+	m := newKeyboardTestModel()
+	m.phase = PhaseRecon
+	m.view = ViewFindings
+	m.input.SetValue("8oifsdfusoi")
+
+	result, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	model := result.(Model)
+	assert.Empty(t, model.input.Value())
+	require.NotEmpty(t, model.activityLog.Entries())
+	last := model.activityLog.Entries()[len(model.activityLog.Entries())-1]
+	assert.Equal(t, "Type 'help' for local commands", last.Message)
+	prev := model.activityLog.Entries()[len(model.activityLog.Entries())-2]
+	assert.Equal(t, "Unknown command: 8oifsdfusoi", prev.Message)
+	assert.False(t, model.activityLogExpandedUntil.IsZero())
 }
 
 func TestHandleKeyMsg_InputFocusUpDownBrowseHistory(t *testing.T) {

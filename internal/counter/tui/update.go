@@ -1009,44 +1009,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.stickersLayout.Resize(msg.Width, msg.Height)
-		// Calculate panel dimensions to match view.go's dynamic calculation.
-		// These heights must stay in sync with what view.go's renderX() methods produce.
-		//
-		// Height breakdown (matching view.go):
-		//   - Header: 1 line (renderHeader returns single line)
-		//   - Input panel: 3 lines (Height(1) + 2 for border in renderInputPanel)
-		//   - Status bar: 1 line (renderStatusBar returns single line)
-		//   - Panel borders: 2 lines (panelStyle has 1-line border top+bottom)
-		// Total fixed overhead: 1 + 3 + 1 + 2 = 7 lines
-		const (
-			headerHeight     = 1
-			inputPanelHeight = 3 // Height(1) content + 2 border lines
-			statusBarHeight  = 1
-			panelBorders     = 2
-			fixedOverhead    = headerHeight + inputPanelHeight + statusBarHeight + panelBorders // 7
-
-			panelTitleHeight = 2 // "Output" + blank line
-			panelPadding     = 2 // lipgloss border adds 1 line top + 1 bottom inside content
-		)
-
-		sessionWidth := 30
-		if m.width > 120 {
-			sessionWidth = 40
-		}
-		outputWidth := m.width - sessionWidth - 2
-
-		mainHeight := m.height - fixedOverhead
-		if mainHeight < 3 {
-			mainHeight = 3
-		}
-
-		// Viewport fits inside output panel (minus border and title)
-		m.viewport.SetWidth(max(outputWidth-4, 1))
-		vpHeight := mainHeight - panelTitleHeight - panelPadding
-		if vpHeight < 1 {
-			vpHeight = 1
-		}
-		m.viewport.SetHeight(vpHeight)
 		m.input.SetWidth(max(m.width-8, 1))
 
 		m.ready = true
@@ -1054,14 +1016,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Update focused component
-	switch m.focus {
-	case FocusInput:
+	if m.focus == FocusInput {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
-		cmds = append(cmds, cmd)
-	case FocusOutput:
-		var cmd tea.Cmd
-		m.viewport, cmd = m.viewport.Update(msg)
 		cmds = append(cmds, cmd)
 	}
 
@@ -1218,13 +1175,13 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "alt+tab":
 		// Cycle focus between panels
-		m.focus = (m.focus + 1) % 3
+		m.focus = (m.focus + 1) % 2
 		m.updateFocus()
 		return m, nil
 
 	case "shift+tab", "alt+shift+tab":
 		// Reverse cycle focus
-		m.focus = (m.focus + 2) % 3
+		m.focus = (m.focus + 1) % 2
 		m.updateFocus()
 		return m, nil
 
@@ -1637,16 +1594,11 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Pass through to focused component
-	switch m.focus {
-	case FocusInput:
+	if m.focus == FocusInput {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		// Clear completion hint on any typing
 		m.completionHint = ""
-		return m, cmd
-	case FocusOutput:
-		var cmd tea.Cmd
-		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
 	}
 

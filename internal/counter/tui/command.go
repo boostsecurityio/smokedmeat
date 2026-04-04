@@ -60,7 +60,9 @@ func (m Model) executeCommand() (result tea.Model, cmd tea.Cmd) {
 		m.showStatus()
 	case "clear":
 		m.output = []OutputLine{}
-		m.viewport.SetContent("")
+		if m.activityLog != nil {
+			m.activityLog.Clear()
+		}
 	case "license":
 		m.prevView = m.view
 		m.prevFocus = m.focus
@@ -81,7 +83,7 @@ func (m Model) executeCommand() (result tea.Model, cmd tea.Cmd) {
 			return m.handleTokenCommand(parts[2:])
 		}
 		if len(parts) < 3 {
-			m.AddOutput("error", "Usage: set <token|target|kitchen|activity-log> <value>")
+			m.showSetUsage(parts[1])
 			return m, nil
 		}
 		return m.handleSetCommand(parts[1], strings.Join(parts[2:], " "))
@@ -92,6 +94,24 @@ func (m Model) executeCommand() (result tea.Model, cmd tea.Cmd) {
 			ctxName = parts[1]
 		}
 		return m.handlePayloadCommand(ctxName)
+
+	case "order":
+		if len(parts) < 2 {
+			m.AddOutput("error", "Usage: order <exec|env|recon|cloud-query|oidc|transfer|upload|download> [args...]")
+			m.AddOutput("info", "Examples: order exec whoami | order env | order recon")
+			return m, nil
+		}
+		if m.SelectedSession() == nil {
+			m.AddOutput("error", "No session selected")
+			m.AddOutput("info", "Use 'sessions' then 'select <agent_id>' before sending agent orders")
+			return m, nil
+		}
+		if !m.connected {
+			m.AddOutput("error", "Not connected to Kitchen")
+			return m, nil
+		}
+		m.AddOutput("info", "Sending order to "+m.SelectedSession().AgentID+"...")
+		return m, m.sendOrder(parts[1], parts[2:])
 
 	case "exploit":
 		target := strings.TrimSpace(strings.TrimPrefix(commandText, parts[0]))
@@ -215,20 +235,151 @@ func (m Model) executeCommand() (result tea.Model, cmd tea.Cmd) {
 		m.selectVulnerability(parts[1])
 
 	default:
-		session := m.SelectedSession()
-		if session != nil {
-			if !m.connected {
-				m.AddOutput("error", "Not connected to Kitchen")
-				return m, nil
-			}
-			m.AddOutput("info", "Sending command to "+session.AgentID+"...")
-			return m, m.sendOrder(parts[0], parts[1:])
+		if suggestion, ok := suggestLocalCommand(parts[0]); ok {
+			m.AddOutput("error", "Unknown command: "+parts[0])
+			m.AddOutput("info", "Did you mean: "+suggestion)
+			return m, nil
 		}
 		m.AddOutput("error", "Unknown command: "+parts[0])
-		m.AddOutput("info", "Select a session first with 'select <agent_id>' or type 'help'")
+		if m.SelectedSession() != nil {
+			m.AddOutput("info", "Use 'order exec <cmd>' for agent shell commands, or 'help' for local commands")
+		} else {
+			m.AddOutput("info", "Type 'help' for local commands")
+		}
 	}
 
 	return m, nil
+}
+
+func (m *Model) showSetUsage(key string) {
+	switch key {
+	case "target":
+		m.AddOutput("error", "Usage: set target <org:owner|repo:owner/repo>")
+		m.AddOutput("info", "Examples: set target org:acme | set target repo:acme/api")
+	case "kitchen":
+		m.AddOutput("error", "Usage: set kitchen <http://host:port>")
+	case "activity-log", "activity":
+		m.AddOutput("error", "Usage: set activity-log autoexpand on|off")
+	default:
+		m.AddOutput("error", "Usage: set <token|target|kitchen|activity-log> <value>")
+	}
+}
+
+func suggestLocalCommand(input string) (string, bool) {
+	input = strings.ToLower(strings.TrimSpace(input))
+	if input == "" {
+		return "", false
+	}
+
+	best := ""
+	bestDistance := 0
+	for _, candidate := range localCommandNames {
+		if candidate == input {
+			return "", false
+		}
+		distance := damerauLevenshteinDistance(input, candidate)
+		if distance > maxCommandSuggestionDistance(candidate) {
+			continue
+		}
+		if best == "" || distance < bestDistance || (distance == bestDistance && candidate < best) {
+			best = candidate
+			bestDistance = distance
+		}
+	}
+
+	if best == "" {
+		return "", false
+	}
+	return best, true
+}
+
+func maxCommandSuggestionDistance(command string) int {
+	if len(command) <= 5 {
+		return 1
+	}
+	return 2
+}
+
+func damerauLevenshteinDistance(a, b string) int {
+	if a == b {
+		return 0
+	}
+	if a == "" {
+		return len(b)
+	}
+	if b == "" {
+		return len(a)
+	}
+
+	prevPrev := make([]int, len(b)+1)
+	prev := make([]int, len(b)+1)
+	curr := make([]int, len(b)+1)
+
+	for j := range len(b) + 1 {
+		prev[j] = j
+	}
+
+	for i := 1; i <= len(a); i++ {
+		curr[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 0
+			if a[i-1] != b[j-1] {
+				cost = 1
+			}
+
+			deletion := prev[j] + 1
+			insertion := curr[j-1] + 1
+			substitution := prev[j-1] + cost
+
+			curr[j] = minInt(deletion, insertion, substitution)
+
+			if i > 1 && j > 1 && a[i-1] == b[j-2] && a[i-2] == b[j-1] {
+				curr[j] = minInt(curr[j], prevPrev[j-2]+1)
+			}
+		}
+		copy(prevPrev, prev)
+		copy(prev, curr)
+	}
+
+	return prev[len(b)]
+}
+
+func minInt(values ...int) int {
+	best := values[0]
+	for _, value := range values[1:] {
+		if value < best {
+			best = value
+		}
+	}
+	return best
+}
+
+var localCommandNames = []string{
+	"analyze",
+	"callbacks",
+	"clear",
+	"cloud",
+	"deep-analyze",
+	"exit",
+	"exploit",
+	"graph",
+	"help",
+	"implants",
+	"license",
+	"ls",
+	"menu",
+	"order",
+	"payload",
+	"pivot",
+	"quit",
+	"scan",
+	"select",
+	"sessions",
+	"set",
+	"ssh",
+	"status",
+	"use",
+	"vulns",
 }
 
 func (m *Model) showStatus() {

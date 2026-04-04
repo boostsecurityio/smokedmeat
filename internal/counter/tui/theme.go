@@ -166,10 +166,6 @@ func ApplyTheme(name ThemeName) {
 		Bold(true)
 
 	outputStyle = lipgloss.NewStyle().Foreground(fgColor)
-	outputSuccessStyle = lipgloss.NewStyle().Foreground(successColorVal)
-	outputErrorStyle = lipgloss.NewStyle().Foreground(errorColorVal)
-	outputWarningStyle = lipgloss.NewStyle().Foreground(warningColorVal)
-	outputHintStyle = lipgloss.NewStyle().Foreground(secondaryColor).Faint(true)
 
 	statusBarStyle = lipgloss.NewStyle().
 		Foreground(fgColor).

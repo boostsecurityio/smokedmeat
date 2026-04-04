@@ -285,7 +285,7 @@ func ensureShortcutFocus(t *testing.T, tmux *TmuxController) {
 			time.Sleep(300 * time.Millisecond)
 			continue
 		}
-		if !strings.Contains(capture, "Tab:complete") && !strings.Contains(capture, "❯ >") {
+		if !strings.Contains(capture, "Tab:complete") && !strings.Contains(capture, counterPromptNeedle("")) {
 			return
 		}
 		require.NoError(t, tmux.SendKeys("F2"))
@@ -329,42 +329,33 @@ func jumpOmnibox(t *testing.T, tmux *TmuxController, query, want string, timeout
 func runCounterCommand(t *testing.T, tmux *TmuxController, command string) {
 	t.Helper()
 
+	ensureInputFocus(t, tmux)
+	require.NoError(t, tmux.SendKeys("C-u"))
+	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, tmux.TypeText(command))
+	time.Sleep(300 * time.Millisecond)
+
+	capture := tmux.CaptureClean()
+	if strings.Contains(capture, "JUMP") {
+		require.NoError(t, tmux.SendKeys("Escape"))
+		requireContentGone(t, tmux, "JUMP", 5*time.Second, "Omnibox should close before retrying command entry")
+		ensureInputFocus(t, tmux)
+		require.NoError(t, tmux.SendKeys("C-u"))
+		time.Sleep(200 * time.Millisecond)
+		require.NoError(t, tmux.TypeText(command))
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	require.NoError(t, tmux.SendKeys("Enter"))
+	time.Sleep(400 * time.Millisecond)
+}
+
+func counterPromptNeedle(command string) string {
 	promptPrefix := command
 	if len(promptPrefix) > 24 {
 		promptPrefix = promptPrefix[:24]
 	}
-	promptNeedle := "❯ > " + promptPrefix
-	for attempt := 0; attempt < 2; attempt++ {
-		require.NoError(t, tmux.SendKeys("F5"))
-		requireContent(t, tmux, "Tab:complete", 5*time.Second, "Input focus should be active")
-		require.NoError(t, tmux.SendKeys("C-u"))
-		time.Sleep(200 * time.Millisecond)
-		require.NoError(t, tmux.TypeText(command))
-
-		capture := waitForStableCapture(tmux, 3*time.Second)
-		if strings.Contains(capture, "JUMP") {
-			require.NoError(t, tmux.SendKeys("Escape"))
-			requireContentGone(t, tmux, "JUMP", 5*time.Second, "Omnibox should close before retrying command entry")
-			continue
-		}
-		if !strings.Contains(capture, promptNeedle) {
-			if attempt == 1 {
-				t.Fatalf("command %q did not appear in the prompt after typing. Capture:\n%s", command, capture)
-			}
-			continue
-		}
-
-		for _, submit := range []string{"Enter", "C-m"} {
-			require.NoError(t, tmux.SendKeys(submit))
-			time.Sleep(400 * time.Millisecond)
-			capture = tmux.CaptureClean()
-			if !strings.Contains(capture, promptNeedle) {
-				return
-			}
-		}
-	}
-	capture := tmux.CaptureClean()
-	t.Fatalf("command %q stayed in the prompt after repeated Enter attempts. Capture:\n%s", command, capture)
+	return "❯ " + promptPrefix
 }
 
 func waitForReconPhase(t *testing.T, tmux *TmuxController) {

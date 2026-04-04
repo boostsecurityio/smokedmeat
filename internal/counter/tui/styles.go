@@ -61,11 +61,7 @@ var (
 
 // Output styles — set by ApplyTheme()
 var (
-	outputStyle        lipgloss.Style
-	outputSuccessStyle lipgloss.Style
-	outputErrorStyle   lipgloss.Style
-	outputWarningStyle lipgloss.Style
-	outputHintStyle    lipgloss.Style
+	outputStyle lipgloss.Style
 )
 
 // Status bar styles — set by ApplyTheme()

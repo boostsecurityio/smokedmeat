@@ -12,9 +12,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
 	"github.com/boostsecurityio/smokedmeat/internal/counter"
@@ -30,7 +28,6 @@ type Focus int
 const (
 	FocusSessions Focus = iota
 	FocusInput
-	FocusOutput
 )
 
 // PaneFocus represents which pane j/k navigation controls
@@ -54,7 +51,7 @@ type Session struct {
 	SessionID string
 }
 
-// OutputLine represents a line in the output panel
+// OutputLine represents a recorded output line
 type OutputLine struct {
 	Time    time.Time
 	Type    string // "info", "success", "error", "warning", "output"
@@ -149,8 +146,7 @@ type Model struct {
 	wizardInput textinput.Model
 
 	// Output panel
-	output   []OutputLine
-	viewport viewport.Model
+	output []OutputLine
 
 	// Pantry for attack graph data
 	pantry *pantry.Pantry
@@ -324,11 +320,6 @@ func NewModel(config Config) Model {
 	wi.CharLimit = 10
 	wi.SetWidth(20)
 
-	var vp viewport.Model
-	vp.SetWidth(80)
-	vp.SetHeight(20)
-	vp.SetContent("  Type 'help' to get started, or Tab for completion")
-
 	// Initialize LightRye with external URL (for stager callbacks)
 	var lr *rye.LightRye
 	if config.ExternalURL() != "" {
@@ -349,7 +340,6 @@ func NewModel(config Config) Model {
 		input:                 ti,
 		wizardInput:           wi,
 		setupInput:            si,
-		viewport:              vp,
 		sessions:              []Session{},
 		output:                []OutputLine{},
 		history:               []string{},
@@ -732,7 +722,7 @@ func (m *Model) extractVulnerabilitiesFromPantry() []Vulnerability {
 	return vulns
 }
 
-// AddOutput adds a line to the output panel
+// AddOutput records a line and mirrors it to the visible activity log
 func (m *Model) AddOutput(lineType, content string) {
 	m.output = append(m.output, OutputLine{
 		Time:    time.Now(),
@@ -745,50 +735,31 @@ func (m *Model) AddOutput(lineType, content string) {
 		m.output = m.output[len(m.output)-1000:]
 	}
 
-	// Update viewport
-	m.updateViewport()
+	if m.activityLog != nil {
+		if strings.HasPrefix(content, "> ") {
+			return
+		}
+		for _, line := range strings.Split(content, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			m.activityLog.Add(activityIconForOutputType(lineType), line)
+		}
+	}
 }
 
-// updateViewport updates the viewport content
-func (m *Model) updateViewport() {
-	var content string
-	prefixWidth := 11 // "[HH:MM:SS] "
-	contentWidth := m.viewport.Width() - prefixWidth
-	if contentWidth < 20 {
-		contentWidth = 20
+func activityIconForOutputType(lineType string) string {
+	switch lineType {
+	case "success":
+		return IconSuccess
+	case "error":
+		return IconError
+	case "warning":
+		return IconWarning
+	default:
+		return IconInfo
 	}
-
-	for _, line := range m.output {
-		timestamp := line.Time.Format("15:04:05")
-		prefix := mutedColor.Render("[" + timestamp + "] ")
-
-		var styledLine string
-		switch line.Type {
-		case "success":
-			styledLine = outputSuccessStyle.Render(line.Content)
-		case "error":
-			styledLine = outputErrorStyle.Render(line.Content)
-		case "warning":
-			styledLine = outputWarningStyle.Render(line.Content)
-		case "hint":
-			styledLine = outputHintStyle.Render(line.Content)
-		default:
-			styledLine = outputStyle.Render(line.Content)
-		}
-
-		wrapped := lipgloss.NewStyle().Width(contentWidth).Render(styledLine)
-		wrappedLines := strings.Split(wrapped, "\n")
-		for i, wl := range wrappedLines {
-			if i == 0 {
-				content += prefix + wl + "\n"
-			} else {
-				content += strings.Repeat(" ", prefixWidth) + wl + "\n"
-			}
-		}
-	}
-
-	m.viewport.SetContent(content)
-	m.viewport.GotoBottom()
 }
 
 // SelectedSession returns the currently selected session, or nil if none

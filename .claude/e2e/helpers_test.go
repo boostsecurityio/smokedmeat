@@ -98,6 +98,11 @@ func TestCurrentWizardVictimWorkflow(t *testing.T) {
 	assert.Equal(t, ".github/workflows/release.yml", currentWizardVictimWorkflow(capture))
 }
 
+func TestCounterPromptNeedle(t *testing.T) {
+	assert.Equal(t, "❯ status", counterPromptNeedle("status"))
+	assert.Equal(t, "❯ set token 12345678901234", counterPromptNeedle("set token 12345678901234567890"))
+}
+
 func TestCurrentWizardVictimWorkflowFromBorderedModalLine(t *testing.T) {
 	capture := `
  │  Victim:  actions/cache · manual [v] to cycle                                          │

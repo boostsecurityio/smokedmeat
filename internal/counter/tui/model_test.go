@@ -4,6 +4,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -100,6 +101,109 @@ func TestExecuteCommand_DoesNotExpandActivityLogWhenDisabled(t *testing.T) {
 	assert.Equal(t, defaultActivityHeight, model.activityRegionHeight())
 }
 
+func TestExecuteCommand_UnknownCommandSuggestsLocalMatch(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+	m.phase = PhaseRecon
+	m.view = ViewFindings
+	m.input.SetValue("grahp")
+
+	result, cmd := m.executeCommand()
+	model := result.(Model)
+
+	assert.Nil(t, cmd)
+	require.Len(t, model.output, 3)
+	assert.Equal(t, "error", model.output[1].Type)
+	assert.Equal(t, "Unknown command: grahp", model.output[1].Content)
+	assert.Equal(t, "info", model.output[2].Type)
+	assert.Equal(t, "Did you mean: graph", model.output[2].Content)
+	require.NotEmpty(t, model.activityLog.Entries())
+	assert.Equal(t, "Unknown command: grahp", model.activityLog.Entries()[len(model.activityLog.Entries())-2].Message)
+	assert.Equal(t, "Did you mean: graph", model.activityLog.Entries()[len(model.activityLog.Entries())-1].Message)
+}
+
+func TestExecuteCommand_UnknownCommandWithSelectedSessionBlocksLikelyLocalTypo(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+	m.phase = PhasePostExploit
+	m.view = ViewAgent
+	m.connected = true
+	m.sessions = []Session{{AgentID: "agt_12345678", IsOnline: true}}
+	m.selectedIndex = 0
+	m.input.SetValue("anlyze")
+
+	result, cmd := m.executeCommand()
+	model := result.(Model)
+
+	assert.Nil(t, cmd)
+	require.Len(t, model.output, 3)
+	assert.Equal(t, "Unknown command: anlyze", model.output[1].Content)
+	assert.Equal(t, "Did you mean: analyze", model.output[2].Content)
+}
+
+func TestExecuteCommand_UnknownCommandWithSelectedSessionShowsOrderHint(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+	m.phase = PhasePostExploit
+	m.view = ViewAgent
+	m.connected = true
+	m.sessions = []Session{{AgentID: "agt_12345678", IsOnline: true}}
+	m.selectedIndex = 0
+	m.input.SetValue("whoami")
+
+	result, cmd := m.executeCommand()
+	model := result.(Model)
+
+	assert.Nil(t, cmd)
+	require.Len(t, model.output, 3)
+	assert.Equal(t, "Unknown command: whoami", model.output[1].Content)
+	assert.Equal(t, "Use 'order exec <cmd>' for agent shell commands, or 'help' for local commands", model.output[2].Content)
+}
+
+func TestExecuteCommand_OrderExecPassesThroughToAgent(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+	m.phase = PhasePostExploit
+	m.view = ViewAgent
+	m.connected = true
+	m.sessions = []Session{{AgentID: "agt_12345678", IsOnline: true}}
+	m.selectedIndex = 0
+	m.input.SetValue("order exec whoami")
+
+	result, cmd := m.executeCommand()
+	model := result.(Model)
+
+	assert.NotNil(t, cmd)
+	require.Len(t, model.output, 2)
+	assert.Equal(t, "Sending order to agt_12345678...", model.output[1].Content)
+}
+
+func TestExecuteCommand_SetTargetWithoutValueShowsTargetedUsage(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+	m.phase = PhaseRecon
+	m.view = ViewFindings
+	m.input.SetValue("set target")
+
+	result, cmd := m.executeCommand()
+	model := result.(Model)
+
+	assert.Nil(t, cmd)
+	require.Len(t, model.output, 3)
+	assert.Equal(t, "Usage: set target <org:owner|repo:owner/repo>", model.output[1].Content)
+	assert.Equal(t, "Examples: set target org:acme | set target repo:acme/api", model.output[2].Content)
+}
+
+func TestExecuteCommand_OrderWithoutSelectedSessionShowsGuidance(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+	m.phase = PhasePostExploit
+	m.view = ViewAgent
+	m.input.SetValue("order exec whoami")
+
+	result, cmd := m.executeCommand()
+	model := result.(Model)
+
+	assert.Nil(t, cmd)
+	require.Len(t, model.output, 3)
+	assert.Equal(t, "No session selected", model.output[1].Content)
+	assert.Equal(t, "Use 'sessions' then 'select <agent_id>' before sending agent orders", model.output[2].Content)
+}
+
 func TestHandleSetCommand_ActivityLogAutoExpandToggle(t *testing.T) {
 	m := NewModel(Config{SessionID: "test-session"})
 	m.activityLogExpandedUntil = time.Now().Add(2 * time.Second)
@@ -122,7 +226,14 @@ func TestHandleSetCommand_TargetAddsActivityLogEntry(t *testing.T) {
 
 	require.NotNil(t, model.activityLog)
 	require.NotEmpty(t, model.activityLog.Entries())
-	assert.Contains(t, model.activityLog.Entries()[len(model.activityLog.Entries())-1].Message, "repo:acme/private-infra")
+	found := false
+	for _, entry := range model.activityLog.Entries() {
+		if strings.Contains(entry.Message, "repo:acme/private-infra") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found)
 	assert.Equal(t, "acme/private-infra", model.target)
 	assert.Equal(t, "repo", model.targetType)
 }
@@ -196,7 +307,7 @@ func TestRenderAgentPanel_ShowsCompactProvenanceAndConnectedBack(t *testing.T) {
 
 func TestFocus_Values(t *testing.T) {
 	// Verify focus constants exist and are distinct
-	focuses := []Focus{FocusSessions, FocusInput, FocusOutput}
+	focuses := []Focus{FocusSessions, FocusInput}
 	seen := make(map[Focus]bool)
 
 	for _, f := range focuses {
@@ -286,6 +397,10 @@ func TestModel_AddOutput(t *testing.T) {
 	assert.Equal(t, "info", m.output[0].Type)
 	assert.Equal(t, "Test message", m.output[0].Content)
 	assert.False(t, m.output[0].Time.IsZero())
+	require.NotNil(t, m.activityLog)
+	require.NotEmpty(t, m.activityLog.Entries())
+	assert.Equal(t, "Test message", m.activityLog.Entries()[0].Message)
+	assert.Equal(t, IconInfo, m.activityLog.Entries()[0].Icon)
 }
 
 func TestModel_AddOutput_MultipleTypes(t *testing.T) {
@@ -301,6 +416,11 @@ func TestModel_AddOutput_MultipleTypes(t *testing.T) {
 	assert.Equal(t, "success", m.output[1].Type)
 	assert.Equal(t, "error", m.output[2].Type)
 	assert.Equal(t, "warning", m.output[3].Type)
+	require.Len(t, m.activityLog.Entries(), 4)
+	assert.Equal(t, IconInfo, m.activityLog.Entries()[0].Icon)
+	assert.Equal(t, IconSuccess, m.activityLog.Entries()[1].Icon)
+	assert.Equal(t, IconError, m.activityLog.Entries()[2].Icon)
+	assert.Equal(t, IconWarning, m.activityLog.Entries()[3].Icon)
 }
 
 func TestModel_AddOutput_TruncatesAtLimit(t *testing.T) {
@@ -313,6 +433,14 @@ func TestModel_AddOutput_TruncatesAtLimit(t *testing.T) {
 
 	// Should be truncated to 1000
 	assert.Len(t, m.output, 1000)
+}
+
+func TestModel_AddOutput_SkipsBlankActivityEntries(t *testing.T) {
+	m := NewModel(Config{})
+
+	m.AddOutput("info", "")
+
+	require.Empty(t, m.activityLog.Entries())
 }
 
 // =============================================================================
