@@ -4,10 +4,12 @@
 package kitchen
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
 	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 )
 
@@ -90,6 +92,53 @@ func TestAssetToGraphNode_PreservesProperties(t *testing.T) {
 
 	assert.Equal(t, "high", node.Properties["severity"])
 	assert.Equal(t, "INJECTION_001", node.Properties["rule_id"])
+}
+
+func TestAssetToGraphNode_FormatsTooltipProperties(t *testing.T) {
+	asset := pantry.Asset{
+		ID:    "vuln:v1",
+		Type:  pantry.AssetVulnerability,
+		Name:  "cache-poison",
+		State: pantry.StateValidated,
+		Properties: map[string]any{
+			"severity": "high",
+			"cache_poison_victims": []cachepoison.VictimCandidate{
+				{
+					Workflow:       ".github/workflows/release.yml",
+					ConsumerAction: "actions/setup-node",
+					Strategy:       "setup-node",
+					Ready:          true,
+				},
+			},
+		},
+	}
+
+	node := AssetToGraphNode(asset)
+
+	assert.Equal(t, "high", node.TooltipProperties["severity"])
+	assert.Equal(t, "[{consumer_action: actions/setup-node, ready: true, strategy: setup-node, workflow: .github/workflows/release.yml}]", node.TooltipProperties["cache_poison_victims"])
+	assert.NotContains(t, node.TooltipProperties["cache_poison_victims"], "[object Object]")
+}
+
+func TestFormatTooltipValue_SummarizesDeepNestedCollections(t *testing.T) {
+	value := map[string]any{
+		"outer": map[string]any{
+			"inner": map[string]any{
+				"deep": "value",
+			},
+			"items": []any{1, 2, 3, 4, 5},
+		},
+	}
+
+	formatted := formatTooltipValue(value)
+
+	assert.Equal(t, "{outer: {inner: {1 fields}, items: [5 items]}}", formatted)
+}
+
+func TestGraphCytoscapeHTML_UsesTooltipProperties(t *testing.T) {
+	assert.Contains(t, graphCytoscapeHTML, "tooltipProperties: node.tooltip_properties")
+	assert.Contains(t, graphCytoscapeHTML, "Object.entries(data.tooltipProperties)")
+	assert.False(t, strings.Contains(graphCytoscapeHTML, "String(v)"))
 }
 
 func TestAssetToGraphNode_RepositorySSHAccessLabel(t *testing.T) {

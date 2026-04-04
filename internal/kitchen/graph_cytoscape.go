@@ -116,7 +116,11 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
         }
         #tooltip .title { color: #e94560; font-weight: bold; margin-bottom: 5px; }
         #tooltip .field { color: #888; }
-        #tooltip .value { color: #fff; }
+        #tooltip .value {
+            color: #fff;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
 
         @keyframes pulse {
             0%, 100% { box-shadow: 0 0 0 0 rgba(233, 69, 96, 0.4); }
@@ -353,7 +357,8 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
                         label: truncateLabel(node.label || node.id, 15),
                         type: node.type,
                         state: node.state,
-                        properties: node.properties
+                        properties: node.properties,
+                        tooltipProperties: node.tooltip_properties
                     }
                 });
             });
@@ -386,7 +391,8 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
                         label: truncateLabel(node.label || node.id, 15),
                         type: node.type,
                         state: node.state,
-                        properties: node.properties
+                        properties: node.properties,
+                        tooltipProperties: node.tooltip_properties
                     }
                 });
                 const addedNode = cy.getElementById(node.id);
@@ -400,6 +406,7 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
                     node.data('state', update.new_state);
                     if (update.label) node.data('label', truncateLabel(update.label, 15));
                     if (update.properties) node.data('properties', update.properties);
+                    if (update.tooltip_properties) node.data('tooltipProperties', update.tooltip_properties);
                     node.addClass('updated-node');
                     setTimeout(() => node.removeClass('updated-node'), 2000);
                 }
@@ -455,9 +462,9 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
             html += '<div><span class="field">Type:</span> <span class="value">' + data.type + '</span></div>';
             html += '<div><span class="field">State:</span> <span class="value">' + data.state + '</span></div>';
             html += '<div><span class="field">ID:</span> <span class="value">' + escapeHtml(data.id) + '</span></div>';
-            if (data.properties) {
-                Object.entries(data.properties).forEach(([k, v]) => {
-                    html += '<div><span class="field">' + k + ':</span> <span class="value">' + escapeHtml(String(v)) + '</span></div>';
+            if (data.tooltipProperties) {
+                Object.entries(data.tooltipProperties).forEach(([k, v]) => {
+                    html += '<div><span class="field">' + escapeHtml(k) + ':</span> <span class="value">' + escapeHtml(v) + '</span></div>';
                 });
             }
             tooltip.innerHTML = html;
