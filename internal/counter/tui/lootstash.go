@@ -609,19 +609,19 @@ func (m *Model) BuildLootTree() *TreeNode {
 		Depth:    -1,
 	}
 
-	allSecrets := make([]CollectedSecret, 0, len(m.lootStash)+len(m.sessionLoot))
+	allSecrets := make([]*CollectedSecret, 0, len(m.lootStash)+len(m.sessionLoot))
 	now := time.Now()
-	for _, s := range m.lootStash {
-		if s.IsEphemeral() && s.DwellDeadline != nil && now.After(*s.DwellDeadline) {
+	for i := range m.lootStash {
+		if m.lootStash[i].IsEphemeral() && m.lootStash[i].DwellDeadline != nil && now.After(*m.lootStash[i].DwellDeadline) {
 			continue
 		}
-		allSecrets = append(allSecrets, s)
+		allSecrets = append(allSecrets, &m.lootStash[i])
 	}
-	for _, s := range m.sessionLoot {
-		if s.IsEphemeral() && s.DwellDeadline != nil && now.After(*s.DwellDeadline) {
+	for i := range m.sessionLoot {
+		if m.sessionLoot[i].IsEphemeral() && m.sessionLoot[i].DwellDeadline != nil && now.After(*m.sessionLoot[i].DwellDeadline) {
 			continue
 		}
-		allSecrets = append(allSecrets, s)
+		allSecrets = append(allSecrets, &m.sessionLoot[i])
 	}
 
 	if len(allSecrets) == 0 {
@@ -629,12 +629,12 @@ func (m *Model) BuildLootTree() *TreeNode {
 	}
 
 	byRepo := make(map[string][]*CollectedSecret)
-	for i := range allSecrets {
-		repo := allSecrets[i].Repository
+	for _, secret := range allSecrets {
+		repo := secret.Repository
 		if repo == "" {
 			repo = "(unknown)"
 		}
-		byRepo[repo] = append(byRepo[repo], &allSecrets[i])
+		byRepo[repo] = append(byRepo[repo], secret)
 	}
 
 	activeRepo := ""

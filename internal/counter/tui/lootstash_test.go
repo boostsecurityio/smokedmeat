@@ -227,6 +227,29 @@ func TestBuildLootTree_PairsGitHubApp(t *testing.T) {
 	assert.Equal(t, "WHOOLI_BOT_APP_PRIVATE_KEY", secretNodes[0].Label)
 }
 
+func TestSelectedLootSecret_PairedGitHubAppUsesCanonicalLootEntry(t *testing.T) {
+	m := NewModel(Config{})
+	m.lootStash = []CollectedSecret{
+		{
+			Name:        "WHOOLI_BOT_APP_PRIVATE_KEY",
+			Value:       "pem-before",
+			Type:        "github_app_key",
+			PairedAppID: "12345",
+			Repository:  "whooli/xyz",
+			Workflow:    "whooli-analyzer.yml",
+			Job:         "analyze",
+		},
+	}
+
+	m.RebuildLootTree()
+	require.True(t, m.LootTreeSelectByID("loot:secret:WHOOLI_BOT_APP_PRIVATE_KEY:whooli/xyz"))
+
+	m.lootStash[0].Value = "pem-after"
+
+	require.NotNil(t, m.SelectedLootSecret())
+	assert.Equal(t, "pem-after", m.SelectedLootSecret().Value)
+}
+
 func TestBuildLootTree_UnpairedSecretsUnchanged(t *testing.T) {
 	m := NewModel(Config{})
 	m.lootStash = []CollectedSecret{

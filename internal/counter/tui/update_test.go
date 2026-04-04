@@ -879,3 +879,41 @@ func TestModel_Update_CallbackControlFailedMsg_IncludesCallbackID(t *testing.T) 
 	assert.Contains(t, last.Content, "revoke", "output should include the action")
 	assert.Contains(t, last.Content, "connection refused", "output should include the error")
 }
+
+func TestHandleKeyMsg_CopyLoot_GitHubAppKeyCopiesPEM(t *testing.T) {
+	m := NewModel(Config{})
+	m.phase = PhasePostExploit
+	m.view = ViewAgent
+	m.focus = FocusSessions
+	m.paneFocus = PaneFocusLoot
+	m.lootStash = []CollectedSecret{
+		{
+			Name:        "WHOOLI_BOT_APP_PRIVATE_KEY",
+			Value:       "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----",
+			Type:        "github_app_key",
+			PairedAppID: "12345",
+			Repository:  "whooli/xyz",
+			Workflow:    "whooli-analyzer.yml",
+			Job:         "analyze",
+		},
+	}
+	m.RebuildLootTree()
+	require.True(t, m.LootTreeSelectByID("loot:secret:WHOOLI_BOT_APP_PRIVATE_KEY:whooli/xyz"))
+
+	original := clipboardWriteAll
+	defer func() {
+		clipboardWriteAll = original
+	}()
+
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+
+	result, _ := m.Update(tea.KeyPressMsg{Text: "c", Code: 'c'})
+	model := result.(Model)
+
+	assert.Equal(t, "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----", copied)
+	assert.True(t, model.lootFlash)
+}

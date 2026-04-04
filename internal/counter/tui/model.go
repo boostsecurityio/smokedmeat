@@ -15,7 +15,6 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/atotto/clipboard"
 
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
 	"github.com/boostsecurityio/smokedmeat/internal/counter"
@@ -1664,7 +1663,7 @@ grep -qxF "$line" "$f" 2>/dev/null || printf '%%s\n' "$line" >> "$f"
 
 func copyToClipboardCmd(text string) tea.Cmd {
 	return func() tea.Msg {
-		if err := clipboard.WriteAll(text); err != nil {
+		if err := clipboardWriteAll(text); err != nil {
 			return SetupClipboardCopiedMsg{Err: err}
 		}
 		return SetupClipboardCopiedMsg{}
