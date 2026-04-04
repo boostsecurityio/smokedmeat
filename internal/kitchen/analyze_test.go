@@ -604,6 +604,28 @@ func TestHandleAnalyze_WithSessionID_RecordsRepoVisibility(t *testing.T) {
 	assert.True(t, found, "private-repo should exist in pantry")
 }
 
+func TestImportAnalysisToPantry_SetsExploitSupportMetadata(t *testing.T) {
+	h := NewHandlerWithPublisher(&mockPublisher{}, nil)
+	result := &poutine.AnalysisResult{
+		Success: true,
+		Findings: []poutine.Finding{
+			{
+				Repository: "acme/api",
+				Workflow:   ".github/workflows/pr.yml",
+				RuleID:     "pr_runs_on_self_hosted",
+				Severity:   "critical",
+			},
+		},
+	}
+
+	h.importAnalysisToPantry(result)
+
+	vulns := h.Pantry().FindVulnerabilities()
+	require.Len(t, vulns, 1)
+	assert.Equal(t, false, vulns[0].Properties["exploit_supported"])
+	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", vulns[0].Properties["exploit_support_reason"])
+}
+
 func TestAnalyzeRequest_IncludesSessionID(t *testing.T) {
 	reqData := `{"token":"ghp_test","target":"acme/repo","target_type":"repo","session_id":"sess-abc-123"}`
 

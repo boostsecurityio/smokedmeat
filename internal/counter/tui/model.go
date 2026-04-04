@@ -89,6 +89,9 @@ type Vulnerability struct {
 	GateTriggers   []string
 	GateRaw        string
 	GateUnsolvable string
+
+	ExploitSupported     bool
+	ExploitSupportReason string
 }
 
 // Config holds configuration for the TUI
@@ -690,30 +693,40 @@ func (m *Model) extractVulnerabilitiesFromPantry() []Vulnerability {
 			cachePoisonReason = reason
 		}
 		cachePoisonVictims := propertyVictimCandidates(pv.Properties, "cache_poison_victims")
+		exploitSupported, hasExploitSupport := pv.Properties["exploit_supported"].(bool)
+		exploitSupportReason := ""
+		if reason, ok := pv.Properties["exploit_support_reason"].(string); ok {
+			exploitSupportReason = reason
+		}
+		if !hasExploitSupport && exploitSupportReason == "" {
+			exploitSupported = false
+		}
 
 		vulns = append(vulns, Vulnerability{
-			ID:                 pv.ID,
-			Repository:         repo,
-			Workflow:           workflow,
-			Job:                job,
-			Line:               line,
-			Title:              title,
-			RuleID:             pv.RuleID,
-			Severity:           pv.Severity,
-			Context:            ctx,
-			Trigger:            trigger,
-			Expression:         expression,
-			InjectionSources:   injectionSources,
-			ReferencedSecrets:  referencedSecrets,
-			LOTPTool:           lotpTool,
-			LOTPAction:         lotpAction,
-			LOTPTargets:        lotpTargets,
-			CachePoisonWriter:  cachePoisonWriter,
-			CachePoisonReason:  cachePoisonReason,
-			CachePoisonVictims: cachePoisonVictims,
-			GateTriggers:       gateTriggers,
-			GateRaw:            gateRaw,
-			GateUnsolvable:     gateUnsolvable,
+			ID:                   pv.ID,
+			Repository:           repo,
+			Workflow:             workflow,
+			Job:                  job,
+			Line:                 line,
+			Title:                title,
+			RuleID:               pv.RuleID,
+			Severity:             pv.Severity,
+			Context:              ctx,
+			Trigger:              trigger,
+			Expression:           expression,
+			InjectionSources:     injectionSources,
+			ReferencedSecrets:    referencedSecrets,
+			LOTPTool:             lotpTool,
+			LOTPAction:           lotpAction,
+			LOTPTargets:          lotpTargets,
+			CachePoisonWriter:    cachePoisonWriter,
+			CachePoisonReason:    cachePoisonReason,
+			CachePoisonVictims:   cachePoisonVictims,
+			GateTriggers:         gateTriggers,
+			GateRaw:              gateRaw,
+			GateUnsolvable:       gateUnsolvable,
+			ExploitSupported:     exploitSupported,
+			ExploitSupportReason: exploitSupportReason,
 		})
 	}
 
@@ -1024,6 +1037,8 @@ func (m *Model) importScanToPantry(scan *models.ScanResult) (int, error) {
 			finding.Path,
 			finding.Line,
 		)
+		vuln.Provider = "github"
+		pantry.SetVulnerabilityExploitSupport(&vuln)
 
 		// Map poutine severity levels
 		var severity string
@@ -1361,6 +1376,8 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 			purl = fmt.Sprintf("pkg:github/%s/%s", org, repoName)
 		}
 		vuln := pantry.NewVulnerability(f.RuleID, purl, f.Workflow, f.Line)
+		vuln.Provider = "github"
+		pantry.SetVulnerabilityExploitSupport(&vuln)
 		vuln.State = pantry.StateHighValue
 		vuln.Severity = f.Severity
 		if f.Title != "" {
@@ -1490,7 +1507,10 @@ func (m *Model) CanTransitionTo(newPhase Phase) bool {
 }
 
 // OpenWizard starts the payload wizard for a selected vulnerability.
-func (m *Model) OpenWizard(vuln *Vulnerability) {
+func (m *Model) OpenWizard(vuln *Vulnerability) error {
+	if err := vulnerabilityExploitError(vuln); err != nil {
+		return err
+	}
 	if m.wizard == nil {
 		m.wizard = &WizardState{}
 	}
@@ -1506,6 +1526,7 @@ func (m *Model) OpenWizard(vuln *Vulnerability) {
 	m.prevView = m.view
 	m.prevFocus = m.focus
 	m.TransitionToPhase(PhaseWizard)
+	return nil
 }
 
 // CloseWizard exits the wizard and returns to the appropriate phase.

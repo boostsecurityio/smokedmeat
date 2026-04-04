@@ -313,3 +313,35 @@ func TestSwapActiveToken_RecalculatesSuggestions(t *testing.T) {
 	require.GreaterOrEqual(t, m.suggestions[0].VulnIndex, 0)
 	assert.Equal(t, "V002", m.vulnerabilities[m.suggestions[0].VulnIndex].ID)
 }
+
+func TestGenerateSuggestions_OmitsAnalyzeOnlyFindings(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.vulnerabilities = []Vulnerability{
+		{
+			ID:         "V001",
+			Repository: "acme/api",
+			Workflow:   ".github/workflows/pr.yml",
+			Job:        "build",
+			Line:       20,
+			RuleID:     "pr_runs_on_self_hosted",
+			Trigger:    "pull_request",
+			Context:    "bash_run",
+		},
+		{
+			ID:         "V002",
+			Repository: "acme/api",
+			Workflow:   "azure-pipelines.yml",
+			Job:        "build",
+			Line:       22,
+			RuleID:     "injection",
+			Trigger:    "pull_request",
+			Context:    "bash_run",
+		},
+	}
+
+	m.GenerateSuggestions()
+
+	for _, suggestion := range m.suggestions {
+		assert.Less(t, suggestion.VulnIndex, 0)
+	}
+}

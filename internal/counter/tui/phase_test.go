@@ -474,3 +474,50 @@ func TestApplicableDeliveryMethods_LOTP(t *testing.T) {
 		})
 	}
 }
+
+func TestVulnerabilitySupportsExploit(t *testing.T) {
+	tests := []struct {
+		name     string
+		vuln     *Vulnerability
+		supports bool
+	}{
+		{
+			name: "github injection is supported",
+			vuln: &Vulnerability{
+				Workflow: ".github/workflows/ci.yml",
+				RuleID:   "injection",
+			},
+			supports: true,
+		},
+		{
+			name: "github pwn request is supported",
+			vuln: &Vulnerability{
+				Workflow: ".github/workflows/pr.yml",
+				RuleID:   "untrusted_checkout_exec",
+			},
+			supports: true,
+		},
+		{
+			name: "self hosted finding is analyze only",
+			vuln: &Vulnerability{
+				Workflow: ".github/workflows/pr.yml",
+				RuleID:   "pr_runs_on_self_hosted",
+			},
+			supports: false,
+		},
+		{
+			name: "non github workflow is analyze only",
+			vuln: &Vulnerability{
+				Workflow: "azure-pipelines.yml",
+				RuleID:   "injection",
+			},
+			supports: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.supports, vulnerabilitySupportsExploit(tt.vuln))
+		})
+	}
+}

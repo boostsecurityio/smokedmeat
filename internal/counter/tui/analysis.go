@@ -18,6 +18,7 @@ import (
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
 	"github.com/boostsecurityio/smokedmeat/internal/counter"
 	"github.com/boostsecurityio/smokedmeat/internal/models"
+	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 	"github.com/boostsecurityio/smokedmeat/internal/poutine"
 )
 
@@ -344,10 +345,41 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 		m.AddOutput("success", "Imported to attack graph: "+summary.String())
 	}
 
+	supportedCount := 0
+	for _, f := range result.Findings {
+		if supported, _ := pantry.VulnerabilityExploitSupport("github", f.Workflow, f.RuleID); supported {
+			supportedCount++
+		}
+	}
+	analyzeOnlyCount := len(result.Findings) - supportedCount
+
 	if len(result.Findings) == 0 {
 		m.AddOutput("info", "No exploitable vulnerabilities found.")
 	} else {
-		m.AddOutput("warning", fmt.Sprintf("Found %d exploitable vulnerabilities", len(result.Findings)))
+		switch {
+		case supportedCount == 0:
+			noun := "findings"
+			if analyzeOnlyCount == 1 {
+				noun = "finding"
+			}
+			m.AddOutput("info", fmt.Sprintf("Found %d analyze-only %s", analyzeOnlyCount, noun))
+		case analyzeOnlyCount == 0:
+			noun := "vulnerabilities"
+			if supportedCount == 1 {
+				noun = "vulnerability"
+			}
+			m.AddOutput("warning", fmt.Sprintf("Found %d exploitable %s", supportedCount, noun))
+		default:
+			vulnNoun := "vulnerabilities"
+			if supportedCount == 1 {
+				vulnNoun = "vulnerability"
+			}
+			findingNoun := "findings"
+			if analyzeOnlyCount == 1 {
+				findingNoun = "finding"
+			}
+			m.AddOutput("warning", fmt.Sprintf("Found %d exploitable %s and %d analyze-only %s", supportedCount, vulnNoun, analyzeOnlyCount, findingNoun))
+		}
 
 		existing := make(map[string]bool, len(m.vulnerabilities))
 		for _, v := range m.vulnerabilities {
@@ -359,32 +391,35 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 			if existing[key] {
 				continue
 			}
+			supported, reason := pantry.VulnerabilityExploitSupport("github", f.Workflow, f.RuleID)
 			vulnID := fmt.Sprintf("V%03d", nextVulnID)
 			nextVulnID++
 			m.vulnerabilities = append(m.vulnerabilities, Vulnerability{
-				ID:                 vulnID,
-				Fingerprint:        f.Fingerprint,
-				Repository:         f.Repository,
-				Workflow:           f.Workflow,
-				Job:                f.Job,
-				Line:               f.Line,
-				Title:              f.Title,
-				RuleID:             f.RuleID,
-				Context:            f.Context,
-				Trigger:            f.Trigger,
-				Expression:         f.Expression,
-				Severity:           f.Severity,
-				InjectionSources:   f.InjectionSources,
-				ReferencedSecrets:  f.ReferencedSecrets,
-				LOTPTool:           f.LOTPTool,
-				LOTPAction:         f.LOTPAction,
-				LOTPTargets:        f.LOTPTargets,
-				CachePoisonWriter:  f.CachePoisonWriter,
-				CachePoisonReason:  f.CachePoisonReason,
-				CachePoisonVictims: append([]cachepoison.VictimCandidate(nil), f.CachePoisonVictims...),
-				GateTriggers:       f.GateTriggers,
-				GateRaw:            f.GateRaw,
-				GateUnsolvable:     f.GateUnsolvable,
+				ID:                   vulnID,
+				Fingerprint:          f.Fingerprint,
+				Repository:           f.Repository,
+				Workflow:             f.Workflow,
+				Job:                  f.Job,
+				Line:                 f.Line,
+				Title:                f.Title,
+				RuleID:               f.RuleID,
+				Context:              f.Context,
+				Trigger:              f.Trigger,
+				Expression:           f.Expression,
+				Severity:             f.Severity,
+				InjectionSources:     f.InjectionSources,
+				ReferencedSecrets:    f.ReferencedSecrets,
+				LOTPTool:             f.LOTPTool,
+				LOTPAction:           f.LOTPAction,
+				LOTPTargets:          f.LOTPTargets,
+				CachePoisonWriter:    f.CachePoisonWriter,
+				CachePoisonReason:    f.CachePoisonReason,
+				CachePoisonVictims:   append([]cachepoison.VictimCandidate(nil), f.CachePoisonVictims...),
+				GateTriggers:         f.GateTriggers,
+				GateRaw:              f.GateRaw,
+				GateUnsolvable:       f.GateUnsolvable,
+				ExploitSupported:     supported,
+				ExploitSupportReason: reason,
 			})
 			existing[key] = true
 		}
@@ -415,8 +450,19 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 	m.fetchKnownEntitiesFromKitchen()
 
 	if len(m.vulnerabilities) > 0 {
-		m.selectedVuln = 0
-		m.AddOutput("info", fmt.Sprintf("Selected: %s. Press 1-5 to exploit or 'use <id>'.", m.vulnerabilities[0].ID))
+		selected := 0
+		for i := range m.vulnerabilities {
+			if vulnerabilitySupportsExploit(&m.vulnerabilities[i]) {
+				selected = i
+				break
+			}
+		}
+		m.selectedVuln = selected
+		if vulnerabilitySupportsExploit(&m.vulnerabilities[selected]) {
+			m.AddOutput("info", fmt.Sprintf("Selected: %s. Press 1-5 for suggested actions or 'use <id>'.", m.vulnerabilities[selected].ID))
+		} else {
+			m.AddOutput("info", fmt.Sprintf("Selected: %s. Analyze-only finding. Use 'use <id>' to inspect findings.", m.vulnerabilities[selected].ID))
+		}
 	}
 
 	m.updatePlaceholder()

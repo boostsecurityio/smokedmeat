@@ -9,6 +9,7 @@ import (
 
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
 	"github.com/boostsecurityio/smokedmeat/internal/models"
+	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 )
 
 type Phase int
@@ -168,6 +169,42 @@ func (t CommentTarget) RequestValue() string {
 	default:
 		return "issue"
 	}
+}
+
+type analyzeOnlyFindingError struct {
+	message string
+}
+
+func (e analyzeOnlyFindingError) Error() string {
+	return e.message
+}
+
+func exploitSupportBlockReason(v *Vulnerability) string {
+	if v == nil {
+		return ""
+	}
+	if v.ExploitSupported {
+		return ""
+	}
+	if strings.TrimSpace(v.ExploitSupportReason) != "" {
+		return v.ExploitSupportReason
+	}
+	_, reason := pantry.VulnerabilityExploitSupport("github", v.Workflow, v.RuleID)
+	return reason
+}
+
+func vulnerabilitySupportsExploit(v *Vulnerability) bool {
+	return v != nil && exploitSupportBlockReason(v) == ""
+}
+
+func vulnerabilityExploitError(v *Vulnerability) error {
+	if v == nil {
+		return nil
+	}
+	if reason := exploitSupportBlockReason(v); reason != "" {
+		return analyzeOnlyFindingError{message: reason}
+	}
+	return nil
 }
 
 func ApplicableDeliveryMethods(v *Vulnerability) []DeliveryMethod {

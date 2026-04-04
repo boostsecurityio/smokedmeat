@@ -906,7 +906,7 @@ func TestExecuteCommand_ExploitQueryOpensWizard(t *testing.T) {
 	m.phase = PhasePostExploit
 	m.view = ViewAgent
 	m.vulnerabilities = []Vulnerability{
-		{ID: "V004", Title: "Bash injection", Repository: "acme/xyz", Workflow: ".github/workflows/internal-sync.yml", Job: "archive-feedback", Context: "workflow_dispatch_input"},
+		{ID: "V004", Title: "Bash injection", Repository: "acme/xyz", Workflow: ".github/workflows/internal-sync.yml", Job: "archive-feedback", RuleID: "injection", Context: "workflow_dispatch_input"},
 	}
 	m.input.SetValue("exploit dispatch input")
 
@@ -918,6 +918,30 @@ func TestExecuteCommand_ExploitQueryOpensWizard(t *testing.T) {
 	require.NotNil(t, model.wizard.SelectedVuln)
 	assert.Equal(t, "V004", model.wizard.SelectedVuln.ID)
 	assert.Equal(t, PhaseWizard, model.phase)
+}
+
+func TestExecuteCommand_ExploitQueryRejectsAnalyzeOnlyFinding(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhasePostExploit
+	m.view = ViewAgent
+	m.vulnerabilities = []Vulnerability{
+		{ID: "V005", Title: "Self-hosted runner", Repository: "acme/xyz", Workflow: ".github/workflows/pr.yml", Job: "build", RuleID: "pr_runs_on_self_hosted", Context: "bash_run"},
+	}
+	m.input.SetValue("exploit self-hosted")
+
+	result, cmd := m.executeCommand()
+
+	require.Nil(t, cmd)
+	model := result.(Model)
+	require.NotNil(t, model.wizard)
+	assert.Nil(t, model.wizard.SelectedVuln)
+	assert.Equal(t, PhasePostExploit, model.phase)
+	require.NotEmpty(t, model.output)
+	assert.Equal(t, "error", model.output[len(model.output)-1].Type)
+	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", model.output[len(model.output)-1].Content)
+	for _, line := range model.output {
+		assert.NotContains(t, line.Content, "Usage: exploit [vuln-id or query]")
+	}
 }
 
 func TestHandleKeyMsg_XRequiresVulnerabilityTreeNode(t *testing.T) {
@@ -1006,4 +1030,48 @@ func TestHandleKeyMsg_XUsesHighlightedTreeVulnerabilityFromPantryNode(t *testing
 	require.NotNil(t, model.wizard)
 	require.NotNil(t, model.wizard.SelectedVuln)
 	assert.Equal(t, "V004", model.wizard.SelectedVuln.ID)
+}
+
+func TestHandleKeyMsg_XRejectsAnalyzeOnlyFinding(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhasePostExploit
+	m.view = ViewAgent
+	m.focus = FocusSessions
+	m.paneFocus = PaneFocusFindings
+	m.vulnerabilities = []Vulnerability{
+		{ID: "V005", Title: "Self-hosted runner", Repository: "acme/xyz", Workflow: ".github/workflows/pr.yml", Job: "build", Line: 12, RuleID: "pr_runs_on_self_hosted", Context: "bash_run"},
+	}
+	m.selectedVuln = 0
+
+	root := &TreeNode{ID: "root", Expanded: true}
+	repo := &TreeNode{ID: "repo:acme/xyz", Type: TreeNodeRepo, Label: "acme/xyz", Expanded: true, Parent: root}
+	vuln := &TreeNode{
+		ID:     "V005",
+		Type:   TreeNodeVuln,
+		Label:  "Self-hosted runner",
+		RuleID: "pr_runs_on_self_hosted",
+		Parent: repo,
+		Properties: map[string]interface{}{
+			"path":    ".github/workflows/pr.yml",
+			"line":    12,
+			"context": "bash_run",
+			"job":     "build",
+		},
+	}
+	root.Children = []*TreeNode{repo}
+	repo.Children = []*TreeNode{vuln}
+	m.treeRoot = root
+	m.ReflattenTree()
+	require.True(t, m.TreeSelectByID("V005"))
+
+	result, cmd := m.Update(tea.KeyPressMsg{Text: "x", Code: 'x'})
+
+	require.Nil(t, cmd)
+	model := result.(Model)
+	require.NotNil(t, model.wizard)
+	assert.Nil(t, model.wizard.SelectedVuln)
+	assert.Equal(t, PhasePostExploit, model.phase)
+	require.NotEmpty(t, model.output)
+	assert.Equal(t, "error", model.output[len(model.output)-1].Type)
+	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", model.output[len(model.output)-1].Content)
 }

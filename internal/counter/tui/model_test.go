@@ -698,6 +698,34 @@ func TestImportAnalysis_RoundTrip_PreservesAllFields(t *testing.T) {
 	assert.Equal(t, []string{"/deploy"}, v.GateTriggers)
 	assert.Equal(t, "contains(github.event.comment.body, '/deploy')", v.GateRaw)
 	assert.Empty(t, v.GateUnsolvable)
+	assert.True(t, v.ExploitSupported)
+	assert.Empty(t, v.ExploitSupportReason)
+}
+
+func TestImportAnalysis_RoundTrip_PreservesAnalyzeOnlySupportReason(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+
+	result := &poutine.AnalysisResult{
+		Success:    true,
+		Target:     "acme/api",
+		TargetType: "repo",
+		Repository: "acme/api",
+		Findings: []poutine.Finding{
+			{
+				ID:         "V001",
+				Repository: "acme/api",
+				Workflow:   ".github/workflows/pr.yml",
+				RuleID:     "pr_runs_on_self_hosted",
+				Severity:   "critical",
+			},
+		},
+	}
+
+	m.importAnalysisToPantry(result)
+	vulns := m.extractVulnerabilitiesFromPantry()
+	require.Len(t, vulns, 1)
+	assert.False(t, vulns[0].ExploitSupported)
+	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", vulns[0].ExploitSupportReason)
 }
 
 func TestImportAnalysis_RoundTrip_CommentInjectionDetected(t *testing.T) {

@@ -398,7 +398,7 @@ func (m *Model) generateIdleSuggestions() {
 			}
 			vuln := m.vulnerabilities[vulnIdx]
 
-			if !strings.HasPrefix(vuln.Workflow, ".github/workflows/") {
+			if !vulnerabilitySupportsExploit(&vuln) {
 				continue
 			}
 
@@ -428,7 +428,9 @@ func (m *Model) generateIdleSuggestions() {
 			})
 			count++
 		}
-		return
+		if count > 0 {
+			return
+		}
 	}
 
 	// No vulnerabilities - guide through setup

@@ -1161,8 +1161,9 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if idx >= 0 && idx < len(m.suggestions) {
 				suggestion := m.suggestions[idx]
 				if suggestion.VulnIndex >= 0 && suggestion.VulnIndex < len(m.vulnerabilities) {
-					vuln := &m.vulnerabilities[suggestion.VulnIndex]
-					m.OpenWizard(vuln)
+					if err := m.OpenWizard(&m.vulnerabilities[suggestion.VulnIndex]); err != nil {
+						m.AddOutput("error", err.Error())
+					}
 					return m, nil
 				}
 				// Non-vuln suggestion - just execute the command
@@ -1225,8 +1226,9 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if m.menuCursor >= 0 && m.menuCursor < len(m.suggestions) {
 				suggestion := m.suggestions[m.menuCursor]
 				if suggestion.VulnIndex >= 0 && suggestion.VulnIndex < len(m.vulnerabilities) {
-					vuln := &m.vulnerabilities[suggestion.VulnIndex]
-					m.OpenWizard(vuln)
+					if err := m.OpenWizard(&m.vulnerabilities[suggestion.VulnIndex]); err != nil {
+						m.AddOutput("error", err.Error())
+					}
 					return m, nil
 				}
 				if suggestion.Command != "" {
@@ -1460,8 +1462,8 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.AddOutput("error", "Exploit shortcut requires a [VULN] node.")
 				return m, nil
 			}
-			if err := m.openSelectedVulnerabilityWizard(""); err == nil {
-				return m, nil
+			if err := m.openSelectedVulnerabilityWizard(""); err != nil {
+				m.AddOutput("error", err.Error())
 			}
 			return m, nil
 		}

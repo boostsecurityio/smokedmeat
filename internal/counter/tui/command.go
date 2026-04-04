@@ -4,6 +4,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -96,7 +97,10 @@ func (m Model) executeCommand() (result tea.Model, cmd tea.Cmd) {
 		target := strings.TrimSpace(strings.TrimPrefix(commandText, parts[0]))
 		if err := m.openSelectedVulnerabilityWizard(target); err != nil {
 			m.AddOutput("error", err.Error())
-			m.AddOutput("info", "Usage: exploit [vuln-id or query]")
+			var analyzeOnlyErr analyzeOnlyFindingError
+			if !errors.As(err, &analyzeOnlyErr) {
+				m.AddOutput("info", "Usage: exploit [vuln-id or query]")
+			}
 			return m, nil
 		}
 		return m, nil

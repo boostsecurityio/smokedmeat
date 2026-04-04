@@ -994,8 +994,7 @@ func (m *Model) openSelectedVulnerabilityWizard(query string) error {
 		}
 	}
 	m.applySelectedVulnerability(index)
-	m.OpenWizard(&m.vulnerabilities[index])
-	return nil
+	return m.OpenWizard(&m.vulnerabilities[index])
 }
 
 func (m *Model) findVulnerabilityIndex(query string) (int, error) {

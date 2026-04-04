@@ -420,6 +420,47 @@ func TestPaneNavHints_ShowsDeepAnalyzeShortcutForSelectedRepo(t *testing.T) {
 	assert.Contains(t, hints, "s:target")
 }
 
+func TestPaneNavHints_HidesExploitShortcutForAnalyzeOnlyFinding(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.focus = FocusSessions
+	m.paneFocus = PaneFocusFindings
+	m.vulnerabilities = []Vulnerability{{
+		ID:         "V001",
+		Repository: "acme/api",
+		Workflow:   ".github/workflows/pr.yml",
+		Job:        "build",
+		Line:       12,
+		RuleID:     "pr_runs_on_self_hosted",
+		Context:    "bash_run",
+	}}
+
+	root := &TreeNode{ID: "root", Expanded: true}
+	repo := &TreeNode{ID: "repo:acme/api", Type: TreeNodeRepo, Label: "acme/api", Expanded: true, Parent: root}
+	vuln := &TreeNode{
+		ID:     "V001",
+		Type:   TreeNodeVuln,
+		Label:  "Self-hosted runner",
+		RuleID: "pr_runs_on_self_hosted",
+		Parent: repo,
+		Properties: map[string]interface{}{
+			"path":    ".github/workflows/pr.yml",
+			"line":    12,
+			"context": "bash_run",
+			"job":     "build",
+		},
+	}
+	root.Children = []*TreeNode{repo}
+	repo.Children = []*TreeNode{vuln}
+	m.treeRoot = root
+	m.ReflattenTree()
+	require.True(t, m.TreeSelectByID("V001"))
+
+	hints := stripANSI(m.paneNavHints())
+
+	assert.NotContains(t, hints, "x:exploit")
+	assert.Contains(t, hints, "K:chain")
+}
+
 func TestStatusBar_PivotedOnlyWhenTokenDiffers(t *testing.T) {
 	m := Model{width: 120}
 	token := "ghp_abcdef1234567890abcdef1234567890abcd"

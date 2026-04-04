@@ -786,12 +786,22 @@ func (m *Model) contextStatusHints() string {
 			hints += helpKeyStyle.Render("s") + helpDescStyle.Render(":target ")
 		}
 		if node := m.SelectedTreeNode(); node != nil && node.Type == TreeNodeVuln {
-			hints += helpKeyStyle.Render("x") + helpDescStyle.Render(":exploit ")
+			if vulnerabilitySupportsExploit(m.vulnerabilityForNode(node)) {
+				hints += helpKeyStyle.Render("x") + helpDescStyle.Render(":exploit ")
+			}
 			hints += helpKeyStyle.Render("K") + helpDescStyle.Render(":chain ")
 		}
 	case PaneFocusMenu:
 		hints += navHint
-		hints += helpKeyStyle.Render("Enter") + helpDescStyle.Render(":exploit ")
+		if m.menuCursor >= 0 && m.menuCursor < len(m.suggestions) {
+			suggestion := m.suggestions[m.menuCursor]
+			if suggestion.VulnIndex >= 0 && suggestion.VulnIndex < len(m.vulnerabilities) &&
+				vulnerabilitySupportsExploit(&m.vulnerabilities[suggestion.VulnIndex]) {
+				hints += helpKeyStyle.Render("Enter") + helpDescStyle.Render(":exploit ")
+			} else {
+				hints += helpKeyStyle.Render("Enter") + helpDescStyle.Render(":run ")
+			}
+		}
 	case PaneFocusActivity:
 		hints += navHint
 	case PaneFocusLoot:

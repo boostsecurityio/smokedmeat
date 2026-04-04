@@ -408,6 +408,8 @@ func (h *Handler) importAnalysisToPantry(result *poutine.AnalysisResult) int {
 			purl = fmt.Sprintf("pkg:github/%s/%s", org, repoName)
 		}
 		vuln := pantry.NewVulnerability(f.RuleID, purl, f.Workflow, f.Line)
+		vuln.Provider = "github"
+		pantry.SetVulnerabilityExploitSupport(&vuln)
 		vuln.State = pantry.StateHighValue
 		vuln.Severity = f.Severity
 		if f.Title != "" {

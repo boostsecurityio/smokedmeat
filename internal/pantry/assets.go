@@ -154,10 +154,42 @@ func NewVulnerability(ruleID, purl, path string, line int) Asset {
 	asset := NewAsset(id, AssetVulnerability, ruleID)
 	asset.RuleID = ruleID
 	asset.Purl = purl
+	if provider, _, _ := ParsePurl(purl); provider != "" {
+		asset.Provider = provider
+	}
 	asset.Properties["path"] = path
 	asset.Properties["line"] = line
 	asset.Severity = classifyRuleSeverity(ruleID)
+	SetVulnerabilityExploitSupport(&asset)
 	return asset
+}
+
+func VulnerabilityExploitSupport(provider, path, ruleID string) (supported bool, reason string) {
+	if strings.TrimSpace(provider) != "github" || !strings.HasPrefix(strings.TrimSpace(path), ".github/workflows/") {
+		return false, "This finding is analyze-only in v0.1.0. Exploit actions are only available for GitHub Actions workflows."
+	}
+	switch strings.TrimSpace(ruleID) {
+	case "injection", "untrusted_checkout_exec":
+		return true, ""
+	case "pr_runs_on_self_hosted":
+		return false, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet."
+	default:
+		return false, "This finding is analyze-only in v0.1.0. Exploit actions are only available for injection and pwn-request findings."
+	}
+}
+
+func SetVulnerabilityExploitSupport(asset *Asset) {
+	if asset == nil {
+		return
+	}
+	path, _ := asset.Properties["path"].(string)
+	supported, reason := VulnerabilityExploitSupport(asset.Provider, path, asset.RuleID)
+	asset.Properties["exploit_supported"] = supported
+	if reason == "" {
+		delete(asset.Properties, "exploit_support_reason")
+		return
+	}
+	asset.Properties["exploit_support_reason"] = reason
 }
 
 // classifyRuleSeverity maps poutine rule IDs to severity levels.

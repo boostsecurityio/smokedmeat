@@ -205,6 +205,7 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
                             'text-outline-width': 2,
                             'background-color': ele => {
                                 if (ele.data('type') === 'repository' && ele.data('properties') && ele.data('properties').private) return '#e94560';
+                                if (ele.data('type') === 'vulnerability' && ele.data('properties') && ele.data('properties').exploit_supported === false) return '#6b7280';
                                 return nodeColors[ele.data('type')] || '#666';
                             },
                             'shape': ele => nodeShapes[ele.data('type')] || 'ellipse',
@@ -222,8 +223,14 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
                                 if (ele.data('type') === 'repository' && ele.data('properties') && ele.data('properties').private) return '#fff';
                                 return ele.data('state') === 'high_value' ? '#fff' : (nodeColors[ele.data('type')] || '#666');
                             },
-                            'border-style': ele => ele.data('state') === 'deadend' ? 'dashed' : 'solid',
-                            'opacity': ele => ele.data('state') === 'deadend' ? 0.5 : 1
+                            'border-style': ele => {
+                                if (ele.data('type') === 'vulnerability' && ele.data('properties') && ele.data('properties').exploit_supported === false) return 'dashed';
+                                return ele.data('state') === 'deadend' ? 'dashed' : 'solid';
+                            },
+                            'opacity': ele => {
+                                if (ele.data('type') === 'vulnerability' && ele.data('properties') && ele.data('properties').exploit_supported === false) return 0.65;
+                                return ele.data('state') === 'deadend' ? 0.5 : 1;
+                            }
                         }
                     },
                     {

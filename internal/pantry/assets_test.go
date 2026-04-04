@@ -122,6 +122,16 @@ func TestNewVulnerability(t *testing.T) {
 	assert.Equal(t, ".github/workflows/ci.yml", vuln.Properties["path"])
 	assert.Equal(t, 42, vuln.Properties["line"])
 	assert.Equal(t, "critical", vuln.Severity) // injection is critical
+	assert.Equal(t, true, vuln.Properties["exploit_supported"])
+	_, hasReason := vuln.Properties["exploit_support_reason"]
+	assert.False(t, hasReason)
+}
+
+func TestNewVulnerability_SetsAnalyzeOnlyMetadata(t *testing.T) {
+	vuln := NewVulnerability("pr_runs_on_self_hosted", "pkg:github/acme/api", ".github/workflows/pr.yml", 19)
+
+	assert.Equal(t, false, vuln.Properties["exploit_supported"])
+	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", vuln.Properties["exploit_support_reason"])
 }
 
 func TestClassifyRuleSeverity(t *testing.T) {

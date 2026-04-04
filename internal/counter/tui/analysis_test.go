@@ -101,6 +101,41 @@ func TestModel_Update_AnalysisCompleted_AddsSecretsWithoutVulns(t *testing.T) {
 	assert.Contains(t, output, "Found 2 secrets (private keys / credentials)")
 }
 
+func TestModel_Update_AnalysisCompleted_AnalyzeOnlyFindingsRemainVisible(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.target = "acme"
+	m.targetType = "org"
+
+	result, _ := m.Update(AnalysisCompletedMsg{
+		Result: &poutine.AnalysisResult{
+			Success:       true,
+			Target:        "acme",
+			ReposAnalyzed: 1,
+			TotalFindings: 1,
+			Findings: []poutine.Finding{
+				{
+					ID:         "V001",
+					Repository: "acme/api",
+					Workflow:   ".github/workflows/pr.yml",
+					RuleID:     "pr_runs_on_self_hosted",
+					Severity:   "critical",
+				},
+			},
+		},
+	})
+
+	model := result.(Model)
+	require.Len(t, model.vulnerabilities, 1)
+	assert.Equal(t, 0, model.selectedVuln)
+
+	var output []string
+	for _, line := range model.output {
+		output = append(output, line.Content)
+	}
+	assert.Contains(t, output, "Found 1 analyze-only finding")
+	assert.Contains(t, output, "Selected: V001. Analyze-only finding. Use 'use <id>' to inspect findings.")
+}
+
 func TestModel_Update_AnalysisError(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.target = "acme"
