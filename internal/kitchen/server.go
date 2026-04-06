@@ -245,6 +245,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.Handle("POST /github/deploy/comment", opAuth(http.HandlerFunc(s.handler.handleGitHubDeployComment)))
 	mux.Handle("POST /github/deploy/lotp", opAuth(http.HandlerFunc(s.handler.handleGitHubDeployLOTP)))
 	mux.Handle("POST /github/deploy/dispatch", opAuth(http.HandlerFunc(s.handler.handleGitHubDeployDispatch)))
+	mux.Handle("POST /github/deploy/preflight", opAuth(http.HandlerFunc(s.handler.handleGitHubDeployPreflight)))
 	mux.Handle("POST /github/repos", opAuth(http.HandlerFunc(s.handler.handleGitHubListRepos)))
 	mux.Handle("POST /github/repos/info", opAuth(http.HandlerFunc(s.handler.handleGitHubListReposWithInfo)))
 	mux.Handle("POST /github/workflows", opAuth(http.HandlerFunc(s.handler.handleGitHubListWorkflows)))

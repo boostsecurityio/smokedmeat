@@ -1524,6 +1524,17 @@ func (m *Model) buildWizardStep2Content(width int) []string {
 
 	applicable := ApplicableDeliveryMethods(m.wizard.SelectedVuln)
 	options := m.getDeliveryOptions(applicable)
+	recommendedIndex := -1
+	recommendedRank := -1
+
+	for i, opt := range options {
+		state, _ := m.deliveryMethodStatus(opt.method)
+		rank := preferredDeliveryStatusRank(state)
+		if rank > recommendedRank {
+			recommendedRank = rank
+			recommendedIndex = i
+		}
+	}
 
 	for i, opt := range options {
 		marker := "○"
@@ -1531,17 +1542,41 @@ func (m *Model) buildWizardStep2Content(width int) []string {
 			marker = "●"
 		}
 
-		canUse := m.canUseDeliveryMethod(opt.method)
+		state, reason := m.deliveryMethodStatus(opt.method)
 		label := opt.label
 		desc := opt.desc
 
-		if opt.rec && canUse {
+		if i == recommendedIndex && state != deployStateFail && state != deployStateDenied {
 			label += successColor.Render(" Recommended")
 		}
-		if !canUse {
-			label = mutedColor.Render(opt.label) + warningColor.Render(" (token missing scope)")
-			desc = mutedColor.Render(opt.desc)
-		} else {
+		switch state {
+		case deployStateConfirmed:
+			label += successColor.Render(" (worked before)")
+			desc = mutedColor.Render(desc)
+		case deployStatePass:
+			desc = mutedColor.Render(desc)
+		case deployStateUnknown:
+			if reason != "" {
+				desc = mutedColor.Render(reason)
+			} else {
+				desc = mutedColor.Render(desc)
+			}
+		case deployStateDenied:
+			label = mutedColor.Render(opt.label) + errorColor.Render(" (denied)")
+			if reason != "" {
+				desc = mutedColor.Render(reason)
+			} else {
+				desc = mutedColor.Render(opt.desc)
+			}
+		default:
+			label = mutedColor.Render(opt.label) + warningColor.Render(" (blocked)")
+			if reason != "" {
+				desc = mutedColor.Render(reason)
+			} else {
+				desc = mutedColor.Render(opt.desc)
+			}
+		}
+		if state == deployStatePass || state == deployStateConfirmed {
 			desc = mutedColor.Render(desc)
 		}
 
@@ -1550,6 +1585,13 @@ func (m *Model) buildWizardStep2Content(width int) []string {
 			formatWizardContent(pad, "     ", desc, innerWidth),
 			emptyLine,
 		)
+	}
+
+	if m.wizard.PreflightLoading {
+		lines = append(lines, formatWizardContent(pad, "", warningColor.Render("Checking token and target access..."), innerWidth))
+	}
+	if m.wizard.PreflightError != "" {
+		lines = append(lines, formatWizardContent(pad, "", warningColor.Render("GitHub check unavailable: "+m.wizard.PreflightError), innerWidth))
 	}
 
 	if m.tokenInfo != nil {
@@ -1566,11 +1608,10 @@ type deliveryOption struct {
 	method DeliveryMethod
 	label  string
 	desc   string
-	rec    bool
 }
 
 func (m *Model) getDeliveryOptions(applicable []DeliveryMethod) []deliveryOption {
-	issueOpt := deliveryOption{DeliveryIssue, "Create Issue", "Simplest: gh issue create with payload", false}
+	issueOpt := deliveryOption{DeliveryIssue, "Create Issue", "Simplest: gh issue create with payload"}
 	if m.wizard != nil && m.wizard.SelectedVuln != nil && isCommentInjection(m.wizard.SelectedVuln) {
 		issueOpt.label = "Create Issue then Add Comment"
 		issueOpt.desc = "Creates issue then comments with payload (issue_comment trigger)"
@@ -1578,20 +1619,17 @@ func (m *Model) getDeliveryOptions(applicable []DeliveryMethod) []deliveryOption
 
 	allOptions := map[DeliveryMethod]deliveryOption{
 		DeliveryIssue:        issueOpt,
-		DeliveryComment:      {DeliveryComment, "Add Comment", "Comment on an existing issue or PR, or create a stub PR", false},
-		DeliveryAutoPR:       {DeliveryAutoPR, "Create PR", "Fork (if needed) and open pull request", false},
+		DeliveryComment:      {DeliveryComment, "Add Comment", "Comment on an existing issue or PR, or create a stub PR"},
+		DeliveryAutoPR:       {DeliveryAutoPR, "Create PR", "Fork (if needed) and open pull request"},
 		DeliveryLOTP:         m.lotpDeliveryOption(),
-		DeliveryAutoDispatch: {DeliveryAutoDispatch, "Trigger Dispatch", "Use ephemeral token to trigger workflow_dispatch", false},
-		DeliveryCopyOnly:     {DeliveryCopyOnly, "Copy and deploy manually", "Copies payload to clipboard", false},
-		DeliveryManualSteps:  {DeliveryManualSteps, "Manual deploy (step-by-step)", "Copy payload and follow guided instructions", false},
+		DeliveryAutoDispatch: {DeliveryAutoDispatch, "Trigger Dispatch", "Use ephemeral token to trigger workflow_dispatch"},
+		DeliveryCopyOnly:     {DeliveryCopyOnly, "Copy and deploy manually", "Copies payload to clipboard"},
+		DeliveryManualSteps:  {DeliveryManualSteps, "Manual deploy (step-by-step)", "Copy payload and follow guided instructions"},
 	}
 
 	var result []deliveryOption
 	for _, method := range applicable {
 		if opt, ok := allOptions[method]; ok {
-			if len(result) == 0 {
-				opt.rec = true
-			}
 			result = append(result, opt)
 		}
 	}
@@ -1612,7 +1650,7 @@ func (m *Model) lotpDeliveryOption() deliveryOption {
 			desc = "Inject into " + strings.Join(v.LOTPTargets, ", ") + " via fork PR"
 		}
 	}
-	return deliveryOption{DeliveryLOTP, tool, desc, false}
+	return deliveryOption{DeliveryLOTP, tool, desc}
 }
 
 func (m *Model) buildWizardStep3Content(width int) []string {
@@ -1638,10 +1676,25 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 		lines = append(lines, m.renderDwellTimeOption(pad, innerWidth)...)
 		lines = append(lines, m.renderAutoCloseOption(pad, innerWidth)...)
 	case DeliveryComment:
-		targetLabel := m.wizard.CommentTarget.String() + " [t]"
+		targets := m.availableCommentTargets()
+		currentTarget := m.wizard.CommentTarget
+		foundTarget := false
+		for _, target := range targets {
+			if target == currentTarget {
+				foundTarget = true
+				break
+			}
+		}
+		if !foundTarget && len(targets) > 0 {
+			currentTarget = targets[0]
+		}
+		targetLabel := currentTarget.String()
+		if len(targets) > 1 {
+			targetLabel += " [t]"
+		}
 		numberLabel := "Issue #:"
 		hint := "(blank = auto-select first open issue)"
-		switch m.wizard.CommentTarget {
+		switch currentTarget {
 		case CommentTargetPullRequest:
 			numberLabel = "PR #:"
 			hint = "(enter an existing PR number)"
@@ -1654,7 +1707,16 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 			emptyLine,
 			formatWizardContent(pad, "Target:", targetLabel, innerWidth),
 		)
-		if m.wizard.CommentTarget == CommentTargetStubPullRequest {
+		state, reason := m.commentTargetStatus(currentTarget)
+		switch {
+		case state == deployStateConfirmed:
+			lines = append(lines, formatWizardContent(pad, "", successColor.Render("This path worked before with this token"), innerWidth))
+		case state == deployStateUnknown && reason != "":
+			lines = append(lines, formatWizardContent(pad, "", warningColor.Render(reason), innerWidth))
+		case (state == deployStateFail || state == deployStateDenied) && reason != "":
+			lines = append(lines, formatWizardContent(pad, "", errorColor.Render(reason), innerWidth))
+		}
+		if currentTarget == CommentTargetStubPullRequest {
 			lines = append(lines,
 				formatWizardContent(pad, "", mutedColor.Render(hint), innerWidth),
 				emptyLine,
@@ -1672,7 +1734,7 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 			emptyLine,
 		)
 		lines = append(lines, m.renderDwellTimeOption(pad, innerWidth)...)
-		if m.wizard.CommentTarget == CommentTargetStubPullRequest {
+		if currentTarget == CommentTargetStubPullRequest {
 			lines = append(lines, m.renderAutoCloseOption(pad, innerWidth)...)
 		}
 	case DeliveryAutoPR:
@@ -1808,6 +1870,20 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 			formatWizardContent(pad, "", "Ready to deploy!", innerWidth),
 			emptyLine,
 		)
+	}
+
+	statusState, statusReason := m.deliveryMethodStatus(m.wizard.DeliveryMethod)
+	switch statusState {
+	case deployStateConfirmed:
+		lines = append(lines, formatWizardContent(pad, "", successColor.Render("This path worked before with this token"), innerWidth), emptyLine)
+	case deployStateUnknown:
+		if statusReason != "" {
+			lines = append(lines, formatWizardContent(pad, "", warningColor.Render(statusReason), innerWidth), emptyLine)
+		}
+	case deployStateFail, deployStateDenied:
+		if statusReason != "" {
+			lines = append(lines, formatWizardContent(pad, "", errorColor.Render(statusReason), innerWidth), emptyLine)
+		}
 	}
 
 	lines = append(lines, m.renderCachePoisonOption(pad, innerWidth)...)

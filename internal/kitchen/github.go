@@ -29,8 +29,9 @@ import (
 )
 
 type gitHubClient struct {
-	client *github.Client
-	token  string
+	client     *github.Client
+	token      string
+	graphqlURL string
 }
 
 type actionsCachesResponse struct {
@@ -61,8 +62,9 @@ func newGitHubClientDefault(token string) *gitHubClient {
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	tc := oauth2.NewClient(context.Background(), ts)
 	return &gitHubClient{
-		client: github.NewClient(tc),
-		token:  token,
+		client:     github.NewClient(tc),
+		token:      token,
+		graphqlURL: "https://api.github.com/graphql",
 	}
 }
 
@@ -1295,10 +1297,12 @@ func (h *Handler) handleGitHubDeployPR(w http.ResponseWriter, r *http.Request) {
 	client := newGitHubClient(req.Token)
 	prURL, err := client.deployVulnerability(r.Context(), &req.Vuln, req.Payload, draft)
 	if err != nil {
+		h.recordObservedCapability(req.Token, req.Vuln.Repository, deployCapabilityPR, err)
 		slog.Warn("github deploy PR failed", "error", err)
 		writeGitHubError(w, err)
 		return
 	}
+	h.recordObservedCapability(req.Token, req.Vuln.Repository, deployCapabilityPR, nil)
 
 	if req.StagerID != "" && autoClose {
 		if stager := h.stagerStore.Get(req.StagerID); stager != nil {
@@ -1333,10 +1337,12 @@ func (h *Handler) handleGitHubDeployIssue(w http.ResponseWriter, r *http.Request
 	client := newGitHubClient(req.Token)
 	issueURL, err := client.deployIssue(r.Context(), &req.Vuln, req.Payload, req.CommentMode)
 	if err != nil {
+		h.recordObservedCapability(req.Token, req.Vuln.Repository, deployCapabilityIssue, err)
 		slog.Warn("github deploy issue failed", "error", err)
 		writeGitHubError(w, err)
 		return
 	}
+	h.recordObservedCapability(req.Token, req.Vuln.Repository, deployCapabilityIssue, nil)
 
 	if req.StagerID != "" && autoClose {
 		if stager := h.stagerStore.Get(req.StagerID); stager != nil {
@@ -1371,10 +1377,12 @@ func (h *Handler) handleGitHubDeployComment(w http.ResponseWriter, r *http.Reque
 	client := newGitHubClient(req.Token)
 	result, err := client.deployComment(r.Context(), &req.Vuln, req.Payload, req.Target)
 	if err != nil {
+		h.recordObservedCapability(req.Token, req.Vuln.Repository, commentObservedCapability(req.Target), err)
 		slog.Warn("github deploy comment failed", "error", err)
 		writeGitHubError(w, err)
 		return
 	}
+	h.recordObservedCapability(req.Token, req.Vuln.Repository, commentObservedCapability(req.Target), nil)
 
 	if req.StagerID != "" && autoClose && (result.CreatedIssueURL != "" || result.CreatedPRURL != "") {
 		if stager := h.stagerStore.Get(req.StagerID); stager != nil {
@@ -1421,10 +1429,12 @@ func (h *Handler) handleGitHubDeployLOTP(w http.ResponseWriter, r *http.Request)
 	lotpDraft := req.Draft == nil || *req.Draft
 	prURL, err := client.deployLOTP(r.Context(), req.RepoName, kitchenURL, req.StagerID, lotpName, req.LOTPTargets, lotpDraft)
 	if err != nil {
+		h.recordObservedCapability(req.Token, req.RepoName, deployCapabilityLOTP, err)
 		slog.Warn("github deploy LOTP failed", "error", err)
 		writeGitHubError(w, err)
 		return
 	}
+	h.recordObservedCapability(req.Token, req.RepoName, deployCapabilityLOTP, nil)
 
 	if stager := h.stagerStore.Get(req.StagerID); stager != nil {
 		if stager.Metadata == nil {
@@ -1459,7 +1469,9 @@ func (h *Handler) handleGitHubDeployDispatch(w http.ResponseWriter, r *http.Requ
 
 	client := newGitHubClient(req.Token)
 
+	dispatchCapability := dispatchObservedCapability(req.WorkflowFile)
 	if err := client.getWorkflowByFileName(r.Context(), req.Owner, req.Repo, req.WorkflowFile); err != nil {
+		h.recordObservedCapability(req.Token, req.Owner+"/"+req.Repo, dispatchCapability, err)
 		slog.Warn("github deploy dispatch preflight failed", "error", err)
 		writeGitHubError(w, fmt.Errorf("preflight: %w", err))
 		return
@@ -1467,10 +1479,12 @@ func (h *Handler) handleGitHubDeployDispatch(w http.ResponseWriter, r *http.Requ
 
 	err := client.triggerWorkflowDispatch(r.Context(), req.Owner, req.Repo, req.WorkflowFile, req.Ref, req.Inputs)
 	if err != nil {
+		h.recordObservedCapability(req.Token, req.Owner+"/"+req.Repo, dispatchCapability, err)
 		slog.Warn("github deploy dispatch failed", "error", err)
 		writeGitHubError(w, err)
 		return
 	}
+	h.recordObservedCapability(req.Token, req.Owner+"/"+req.Repo, dispatchCapability, nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

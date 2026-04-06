@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
+	"github.com/boostsecurityio/smokedmeat/internal/counter"
 	"github.com/boostsecurityio/smokedmeat/internal/models"
 	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 )
@@ -273,6 +274,10 @@ type WizardState struct {
 	CachePoisonEnabled     bool
 	CachePoisonReplace     bool
 	CachePoisonVictimIndex int
+	PreflightKey           string
+	PreflightLoading       bool
+	PreflightError         string
+	Preflight              *counter.DeployPreflightResponse
 }
 
 func (w *WizardState) Reset() {
@@ -292,6 +297,10 @@ func (w *WizardState) Reset() {
 	w.CachePoisonEnabled = false
 	w.CachePoisonReplace = false
 	w.CachePoisonVictimIndex = 0
+	w.PreflightKey = ""
+	w.PreflightLoading = false
+	w.PreflightError = ""
+	w.Preflight = nil
 }
 
 func boolPtr(v bool) *bool { return &v }

@@ -6,8 +6,6 @@ package tui
 import (
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -26,13 +24,6 @@ func createTestPantry() *pantry.Pantry {
 		Type: pantry.AssetRepository,
 	})
 	return p
-}
-
-func newStagerServer(t *testing.T, wantStatus int) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(wantStatus)
-	}))
 }
 
 func newModelWithMockClient(mock *mockKitchenClient) Model {

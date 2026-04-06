@@ -4,7 +4,6 @@
 package tui
 
 import (
-	"net/http"
 	"testing"
 	"time"
 
@@ -18,11 +17,9 @@ import (
 
 func newModelForWizardDeploy(t *testing.T, mock *mockKitchenClient) Model {
 	t.Helper()
-	srv := newStagerServer(t, http.StatusCreated)
-	t.Cleanup(srv.Close)
 	m := NewModel(Config{
-		KitchenURL:         srv.URL,
-		KitchenExternalURL: srv.URL,
+		KitchenURL:         "http://kitchen.local",
+		KitchenExternalURL: "https://callback.smokedmeat.local",
 		SessionID:          "test-session",
 	})
 	m.kitchenClient = mock
