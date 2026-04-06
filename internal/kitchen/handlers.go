@@ -84,33 +84,36 @@ func extractClientIP(r *http.Request) string {
 
 // Handler handles HTTP requests from Brisket agents.
 type Handler struct {
-	publisher   Publisher
-	store       *OrderStore
-	stagerStore *StagerStore
-	sessions    *SessionRegistry
-	database    *db.DB
-	operators   *OperatorHub
-	pantry      *pantry.Pantry
-	auth        *auth.Auth
+	publisher      Publisher
+	store          *OrderStore
+	stagerStore    *StagerStore
+	sessions       *SessionRegistry
+	database       *db.DB
+	operators      *OperatorHub
+	pantry         *pantry.Pantry
+	auth           *auth.Auth
+	preflightCache *deployPreflightCache
 }
 
 // NewHandler creates a new Handler.
 func NewHandler(publisher *pass.Publisher, store *OrderStore, sessions *SessionRegistry) *Handler {
 	return &Handler{
-		publisher:   publisher,
-		store:       store,
-		stagerStore: NewStagerStore(DefaultStagerStoreConfig()),
-		sessions:    sessions,
+		publisher:      publisher,
+		store:          store,
+		stagerStore:    NewStagerStore(DefaultStagerStoreConfig()),
+		sessions:       sessions,
+		preflightCache: newDeployPreflightCache(),
 	}
 }
 
 // NewHandlerWithPublisher creates a new Handler with a custom publisher (for testing).
 func NewHandlerWithPublisher(publisher Publisher, store *OrderStore) *Handler {
 	return &Handler{
-		publisher:   publisher,
-		store:       store,
-		stagerStore: NewStagerStore(DefaultStagerStoreConfig()),
-		sessions:    NewSessionRegistry(DefaultSessionRegistryConfig()),
+		publisher:      publisher,
+		store:          store,
+		stagerStore:    NewStagerStore(DefaultStagerStoreConfig()),
+		sessions:       NewSessionRegistry(DefaultSessionRegistryConfig()),
+		preflightCache: newDeployPreflightCache(),
 	}
 }
 
@@ -174,6 +177,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /github/deploy/comment", h.handleGitHubDeployComment)
 	mux.HandleFunc("POST /github/deploy/lotp", h.handleGitHubDeployLOTP)
 	mux.HandleFunc("POST /github/deploy/dispatch", h.handleGitHubDeployDispatch)
+	mux.HandleFunc("POST /github/deploy/preflight", h.handleGitHubDeployPreflight)
 	mux.HandleFunc("POST /github/repos", h.handleGitHubListRepos)
 	mux.HandleFunc("POST /github/repos/info", h.handleGitHubListReposWithInfo)
 	mux.HandleFunc("POST /github/workflows", h.handleGitHubListWorkflows)

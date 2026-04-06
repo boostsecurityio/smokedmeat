@@ -346,7 +346,7 @@ func TestBuildWizardStep2Content_AppTokenIssueWriteDoesNotWarn(t *testing.T) {
 	assert.NotContains(t, out, "Create Issue (token missing scope)")
 }
 
-func TestBuildWizardStep2Content_AppTokenWithoutPRWriteWarns(t *testing.T) {
+func TestBuildWizardStep2Content_AppTokenWithoutPRWriteShowsBlocked(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.tokenInfo = &TokenInfo{Value: "ghs_app_token", Type: TokenTypeInstallApp, Source: "loot:APP_TOKEN_acme"}
 	m.appTokenPermissions = map[string]string{"issues": "write", "metadata": "read"}
@@ -364,7 +364,7 @@ func TestBuildWizardStep2Content_AppTokenWithoutPRWriteWarns(t *testing.T) {
 
 	out := stripANSI(strings.Join(m.buildWizardStep2Content(90), "\n"))
 
-	assert.Contains(t, out, "Create PR (token missing scope)")
+	assert.Contains(t, out, "Create PR (blocked)")
 }
 
 func TestHelpCommandsForPhase(t *testing.T) {

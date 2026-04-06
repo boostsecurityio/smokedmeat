@@ -971,6 +971,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TokenInfoErrorMsg:
 		return m.handleTokenInfoError(msg)
 
+	case WizardPreflightFetchedMsg:
+		if m.wizard == nil || msg.Key != m.wizard.PreflightKey {
+			return m, nil
+		}
+		m.wizard.PreflightLoading = false
+		m.wizard.PreflightError = ""
+		m.wizard.Preflight = msg.Response
+		if m.wizard.DeliveryMethod == DeliveryComment {
+			m.normalizeCommentTarget()
+		}
+		return m, nil
+
+	case WizardPreflightErrorMsg:
+		if m.wizard == nil || msg.Key != m.wizard.PreflightKey {
+			return m, nil
+		}
+		m.wizard.PreflightLoading = false
+		m.wizard.PreflightError = msg.Err.Error()
+		return m, nil
+
 	case TargetLoadedMsg:
 		m.target = msg.Target
 		m.targetType = msg.TargetType
@@ -1039,8 +1059,13 @@ func (m Model) handlePasteMsg(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.view == ViewWizard {
+		prevIssue := m.currentCommentIssueNumber()
+		prevPR := m.currentCommentPRNumber()
 		var cmd tea.Cmd
 		m.wizardInput, cmd = m.wizardInput.Update(msg)
+		if prevIssue != m.currentCommentIssueNumber() || prevPR != m.currentCommentPRNumber() {
+			return m, tea.Batch(cmd, m.startWizardPreflight(false))
+		}
 		return m, cmd
 	}
 	if m.view == ViewOmnibox {
@@ -1149,8 +1174,9 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				if suggestion.VulnIndex >= 0 && suggestion.VulnIndex < len(m.vulnerabilities) {
 					if err := m.OpenWizard(&m.vulnerabilities[suggestion.VulnIndex]); err != nil {
 						m.AddOutput("error", err.Error())
+						return m, nil
 					}
-					return m, nil
+					return m, m.startWizardPreflight(false)
 				}
 				// Non-vuln suggestion - just execute the command
 				m.input.SetValue(suggestion.Command)
@@ -1214,8 +1240,9 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				if suggestion.VulnIndex >= 0 && suggestion.VulnIndex < len(m.vulnerabilities) {
 					if err := m.OpenWizard(&m.vulnerabilities[suggestion.VulnIndex]); err != nil {
 						m.AddOutput("error", err.Error())
+						return m, nil
 					}
-					return m, nil
+					return m, m.startWizardPreflight(false)
 				}
 				if suggestion.Command != "" {
 					m.input.SetValue(suggestion.Command)
@@ -1448,10 +1475,11 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.AddOutput("error", "Exploit shortcut requires a [VULN] node.")
 				return m, nil
 			}
-			if err := m.openSelectedVulnerabilityWizard(""); err != nil {
+			cmd, err := m.openSelectedVulnerabilityWizard("")
+			if err != nil {
 				m.AddOutput("error", err.Error())
 			}
-			return m, nil
+			return m, cmd
 		}
 
 	case "K":

@@ -979,22 +979,25 @@ func (m *Model) selectedVulnerabilityIndex() int {
 	return -1
 }
 
-func (m *Model) openSelectedVulnerabilityWizard(query string) error {
+func (m *Model) openSelectedVulnerabilityWizard(query string) (tea.Cmd, error) {
 	var index int
 	if strings.TrimSpace(query) == "" {
 		index = m.selectedVulnerabilityIndex()
 		if index < 0 {
-			return fmt.Errorf("no vulnerability selected")
+			return nil, fmt.Errorf("no vulnerability selected")
 		}
 	} else {
 		var err error
 		index, err = m.findVulnerabilityIndex(query)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	m.applySelectedVulnerability(index)
-	return m.OpenWizard(&m.vulnerabilities[index])
+	if err := m.OpenWizard(&m.vulnerabilities[index]); err != nil {
+		return nil, err
+	}
+	return m.startWizardPreflight(false), nil
 }
 
 func (m *Model) findVulnerabilityIndex(query string) (int, error) {

@@ -41,6 +41,7 @@ type KitchenAPI interface {
 	DeployComment(ctx context.Context, req DeployCommentRequest) (DeployCommentResponse, error)
 	DeployLOTP(ctx context.Context, req DeployLOTPRequest) (DeployLOTPResponse, error)
 	TriggerDispatch(ctx context.Context, req DeployDispatchRequest) error
+	FetchDeployPreflight(ctx context.Context, req DeployPreflightRequest) (*DeployPreflightResponse, error)
 	ListReposWithInfo(ctx context.Context, token string) ([]RepoInfo, error)
 	ListWorkflowsWithDispatch(ctx context.Context, token, owner, repo string) ([]string, error)
 	GetAuthenticatedUser(ctx context.Context, token string) (GetUserResponse, error)
@@ -1075,6 +1076,34 @@ type DeployDispatchResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+type DeployPreflightRequest struct {
+	Token            string            `json:"token"`
+	Vuln             VulnerabilityInfo `json:"vuln"`
+	TokenType        string            `json:"token_type,omitempty"`
+	TokenOwner       string            `json:"token_owner,omitempty"`
+	Scopes           []string          `json:"scopes,omitempty"`
+	KnownPermissions map[string]string `json:"known_permissions,omitempty"`
+	IssueNumber      int               `json:"issue_number,omitempty"`
+	PRNumber         int               `json:"pr_number,omitempty"`
+}
+
+type DeployPreflightCheck struct {
+	Name   string `json:"name"`
+	State  string `json:"state"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type DeployPreflightCapability struct {
+	State  string `json:"state"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type DeployPreflightResponse struct {
+	CacheHit     bool                                 `json:"cache_hit"`
+	Capabilities map[string]DeployPreflightCapability `json:"capabilities"`
+	Checks       []DeployPreflightCheck               `json:"checks,omitempty"`
+}
+
 type ListReposRequest struct {
 	Token string `json:"token"`
 }
@@ -1234,6 +1263,15 @@ func (k *KitchenClient) DeployLOTP(ctx context.Context, req DeployLOTPRequest) (
 
 func (k *KitchenClient) TriggerDispatch(ctx context.Context, req DeployDispatchRequest) error {
 	return k.doPostJSON(ctx, "/github/deploy/dispatch", req, nil, 30*time.Second)
+}
+
+func (k *KitchenClient) FetchDeployPreflight(ctx context.Context, req DeployPreflightRequest) (*DeployPreflightResponse, error) {
+	var resp DeployPreflightResponse
+	err := k.doPostJSON(ctx, "/github/deploy/preflight", req, &resp, 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 func (k *KitchenClient) ListReposWithInfo(ctx context.Context, token string) ([]RepoInfo, error) {

@@ -71,6 +71,10 @@ Remaining:
 - Issue/comment: issues availability and write permission validation
 - LOTP: repo fork/push preflight parity
 
+Task note:
+
+- `docs/tasks/server-side-deploy-preflight.md`
+
 ### E3.5: Operator Notifications
 
 **Status:** 🔲 Not started

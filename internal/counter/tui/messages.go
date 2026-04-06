@@ -91,6 +91,16 @@ type TokenInfoErrorMsg struct {
 	Err  error
 }
 
+type WizardPreflightFetchedMsg struct {
+	Key      string
+	Response *counter.DeployPreflightResponse
+}
+
+type WizardPreflightErrorMsg struct {
+	Key string
+	Err error
+}
+
 // Phase and UI state messages
 
 type TimerTickMsg struct{}

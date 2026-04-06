@@ -50,6 +50,9 @@ type mockKitchenClient struct {
 	deployLOTPResp       counter.DeployLOTPResponse
 	deployLOTPErr        error
 	triggerDispatchErr   error
+	fetchPreflightResp   *counter.DeployPreflightResponse
+	fetchPreflightErr    error
+	lastPreflightReq     counter.DeployPreflightRequest
 
 	listReposWithInfoResp []counter.RepoInfo
 	listReposWithInfoErr  error
@@ -141,6 +144,11 @@ func (m *mockKitchenClient) DeployLOTP(_ context.Context, _ counter.DeployLOTPRe
 
 func (m *mockKitchenClient) TriggerDispatch(_ context.Context, _ counter.DeployDispatchRequest) error {
 	return m.triggerDispatchErr
+}
+
+func (m *mockKitchenClient) FetchDeployPreflight(_ context.Context, req counter.DeployPreflightRequest) (*counter.DeployPreflightResponse, error) {
+	m.lastPreflightReq = req
+	return m.fetchPreflightResp, m.fetchPreflightErr
 }
 
 func (m *mockKitchenClient) ListReposWithInfo(_ context.Context, _ string) ([]counter.RepoInfo, error) {

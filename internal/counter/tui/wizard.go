@@ -26,14 +26,45 @@ func (m *Model) cycleCommentTarget() {
 	if m.wizard == nil {
 		return
 	}
-	switch m.wizard.CommentTarget {
-	case CommentTargetIssue:
-		m.wizard.CommentTarget = CommentTargetPullRequest
-	case CommentTargetPullRequest:
-		m.wizard.CommentTarget = CommentTargetStubPullRequest
-	default:
-		m.wizard.CommentTarget = CommentTargetIssue
+	targets := m.availableCommentTargets()
+	if len(targets) == 0 {
+		return
 	}
+	for i, target := range targets {
+		if target == m.wizard.CommentTarget {
+			m.wizard.CommentTarget = targets[(i+1)%len(targets)]
+			if m.wizard.CommentTarget == CommentTargetStubPullRequest {
+				m.wizardInput.SetValue("")
+				m.wizardInput.Blur()
+				return
+			}
+			m.wizardInput.Focus()
+			return
+		}
+	}
+	m.wizard.CommentTarget = targets[0]
+	if m.wizard.CommentTarget == CommentTargetStubPullRequest {
+		m.wizardInput.SetValue("")
+		m.wizardInput.Blur()
+		return
+	}
+	m.wizardInput.Focus()
+}
+
+func (m *Model) normalizeCommentTarget() {
+	if m.wizard == nil {
+		return
+	}
+	targets := m.availableCommentTargets()
+	if len(targets) == 0 {
+		return
+	}
+	for _, target := range targets {
+		if target == m.wizard.CommentTarget {
+			return
+		}
+	}
+	m.wizard.CommentTarget = targets[0]
 	if m.wizard.CommentTarget == CommentTargetStubPullRequest {
 		m.wizardInput.SetValue("")
 		m.wizardInput.Blur()
@@ -49,6 +80,7 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.wizard.Step == 3 && m.wizard.DeliveryMethod == DeliveryComment {
+		m.normalizeCommentTarget()
 		switch msg.String() {
 		case "ctrl+c":
 			m.quitting = true
@@ -71,7 +103,7 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "t":
 			m.cycleCommentTarget()
-			return m, nil
+			return m, m.startWizardPreflight(false)
 		case "a":
 			if m.wizard.CommentTarget == CommentTargetStubPullRequest {
 				if m.wizard.AutoClose == nil {
@@ -106,8 +138,13 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if m.wizard.CommentTarget == CommentTargetStubPullRequest {
 				return m, nil
 			}
+			prevIssue := m.currentCommentIssueNumber()
+			prevPR := m.currentCommentPRNumber()
 			var cmd tea.Cmd
 			m.wizardInput, cmd = m.wizardInput.Update(msg)
+			if prevIssue != m.currentCommentIssueNumber() || prevPR != m.currentCommentPRNumber() {
+				return m, tea.Batch(cmd, m.startWizardPreflight(false))
+			}
 			return m, cmd
 		}
 	}
@@ -139,7 +176,7 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return m, nil
+		return m, m.startWizardPreflight(false)
 
 	case "up", "k":
 		if m.wizard.Step == 2 {
@@ -158,7 +195,7 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return m, nil
+		return m, m.startWizardPreflight(false)
 
 	case "down", "j":
 		if m.wizard.Step == 2 {
@@ -177,7 +214,7 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return m, nil
+		return m, m.startWizardPreflight(false)
 
 	case "d":
 		if m.wizard.Step == 3 {
@@ -274,7 +311,7 @@ func (m Model) advanceWizardStep() (tea.Model, tea.Cmd) {
 			m.wizard.CommentTarget = CommentTargetIssue
 		}
 		m.wizard.Step = 3
-		return m, nil
+		return m, m.startWizardPreflight(false)
 
 	case 3:
 		return m.executeWizardDeployment()
@@ -291,6 +328,14 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 
 	vuln := m.wizard.SelectedVuln
 	m.pendingCachePoison = nil
+	state, reason := m.wizardPreflightBlockForMethod(m.wizard.DeliveryMethod)
+	if state != "" {
+		if reason == "" {
+			reason = "Selected delivery path is blocked"
+		}
+		m.AddOutput("error", reason)
+		return m, nil
+	}
 
 	switch m.wizard.DeliveryMethod {
 	case DeliveryAutoPR:
@@ -364,6 +409,14 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 		if m.tokenInfo == nil {
 			m.AddOutput("error", "GitHub token not set - required for Comment creation")
 			m.CloseWizard()
+			return m, nil
+		}
+		state, reason := m.wizardPreflightBlockForCommentTarget(m.wizard.CommentTarget)
+		if state != "" {
+			if reason == "" {
+				reason = "Current comment target is blocked"
+			}
+			m.AddOutput("error", reason)
 			return m, nil
 		}
 

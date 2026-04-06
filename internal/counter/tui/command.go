@@ -115,7 +115,8 @@ func (m Model) executeCommand() (result tea.Model, cmd tea.Cmd) {
 
 	case "exploit":
 		target := strings.TrimSpace(strings.TrimPrefix(commandText, parts[0]))
-		if err := m.openSelectedVulnerabilityWizard(target); err != nil {
+		cmd, err := m.openSelectedVulnerabilityWizard(target)
+		if err != nil {
 			m.AddOutput("error", err.Error())
 			var analyzeOnlyErr analyzeOnlyFindingError
 			if !errors.As(err, &analyzeOnlyErr) {
@@ -123,7 +124,7 @@ func (m Model) executeCommand() (result tea.Model, cmd tea.Cmd) {
 			}
 			return m, nil
 		}
-		return m, nil
+		return m, cmd
 
 	case "analyze", "scan":
 		if len(parts) > 1 && parts[1] == "pivots" {

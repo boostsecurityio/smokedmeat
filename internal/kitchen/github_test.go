@@ -1641,7 +1641,7 @@ func swapGitHubClient(t *testing.T, ghSrvURL string) {
 		tc := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token}))
 		c := github.NewClient(tc)
 		c.BaseURL = baseURL
-		return &gitHubClient{client: c, token: token}
+		return &gitHubClient{client: c, token: token, graphqlURL: ghSrvURL + "/graphql"}
 	}
 	t.Cleanup(func() { newGitHubClientFunc = origNew })
 }

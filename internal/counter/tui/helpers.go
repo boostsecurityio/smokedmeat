@@ -466,6 +466,11 @@ func secretHasActionsWrite(secret CollectedSecret) bool {
 }
 
 func (m Model) canUseDeliveryMethod(method DeliveryMethod) bool {
+	state, _ := m.deliveryMethodStatus(method)
+	return state != deployStateFail && state != deployStateDenied
+}
+
+func (m Model) canUseDeliveryMethodHeuristic(method DeliveryMethod) bool {
 	switch method {
 	case DeliveryCopyOnly, DeliveryManualSteps:
 		return true
