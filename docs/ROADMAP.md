@@ -1,121 +1,55 @@
 # SmokedMeat Roadmap
 
-CI/CD Red Team Framework - Implementation Roadmap
+CI/CD Red Team Framework
 
-**Last Updated:** March 27, 2026
+Last updated: 2026-04-06
 
----
+Status: `✅` shipped, `🔲` planned, `💡` idea
+Spec: `Task` = planned in `docs/tasks`, `Ref` = related reference, `Idea` = tracked only
 
-## Current State
+## Product Snapshot
 
-- Core operator flow is shipped: analyze → select vuln → deploy → wait for dwell beacon → post-exploit → pivot.
-- GitHub Actions exploitation is end-to-end across PR, issue, comment, LOTP, and `workflow_dispatch` delivery paths.
-- Cloud pivots are end-to-end for AWS, GCP, and Azure with durable local sessions, `cloud shell`, `cloud export`, provider quick checks, quickstart support, and dedicated E2E coverage.
-- Remaining work is mostly gap-closing rather than greenfield: the cache-poisoning feature is now in-product, the refreshed goat target proves the writer and victim side of the chain, and the main remaining gap is finishing the later post-exploit goat path.
+- Core operator flow is shipped: analyze -> exploit -> dwell beacon -> post-exploit -> pivot.
+- GitHub Actions exploitation is shipped across PR, issue, comment, LOTP, and `workflow_dispatch`.
+- Cloud pivots are shipped for AWS, GCP, and Azure, including durable sessions and shell/export flows.
+- SSH pivots, graph view, and the Counter UI migration are shipped.
 
----
+## Release Window
 
-## Current Priorities
+- Public open source release target: April 15, 2026
+- Feature freeze target: April 10, 2026
+- Pre-freeze rule: only take work that can ship confidently in small chunks before the freeze date
+- Post-freeze working days: April 10, 2026 and April 13-14, 2026
+- Post-freeze scope: docs, tutorial, screenshots, screencast, release notes, and packaging only
+- Post-freeze tracking: [docs/tasks/release-prep-and-launch-materials.md](tasks/release-prep-and-launch-materials.md)
 
-| Priority | Feature | Status | Why now |
-|----------|---------|--------|---------|
-| P1 | F1.2 goat wizard E2E validation | 🔶 Partial | Cache poisoning is implemented in-product, the Whooli target now proves the writer and victim restore path, and the main remaining work is stabilizing the final post-exploit goat flag path. |
-| P2 | E3.4 Complete server-side deploy preflight | 🔶 Partial | Removes avoidable failed deployments and brings backend behavior in line with the wizard UX. |
-| P3 | E3.6 Embedded shell takeover + native Go E2E | 🔲 Not started | Replaces the tmux-driven shell/testing boundary with an in-app PTY/VT shell takeover, strengthens E2E robustness, and unlocks VHS-exportable walkthrough recording. |
+## Before Feature Freeze
 
----
+This is the recommended pre-freeze queue. Only items that are realistically shippable and helpful to beta testers before April 10, 2026 should stay here.
 
-## Phase Overview
+| Priority | Item | Status | Scope | Spec |
+|----------|------|--------|-------|------|
+| 1 | Operator command discoverability | 🔲 | Make completion and inline hints match the real command surface, including `order exec`. | Task: [docs/tasks/operator-command-discoverability.md](tasks/operator-command-discoverability.md) |
+| 2 | Analysis progress and streaming | 🔲 | Add honest progress for large `analyze` and `deep-analyze` runs, and evaluate poutine streaming hooks. | Task: [docs/tasks/analysis-progress-and-streaming.md](tasks/analysis-progress-and-streaming.md) |
+| 3 | Selective Kitchen purge | 🔲 | Purge org-scoped or repo-scoped operational state while preserving audit trail. | Task: [docs/tasks/selective-kitchen-purge.md](tasks/selective-kitchen-purge.md) |
+| 4 | Callback fanout and session management | 🔲 | Ship a small first slice for clearer arrival notification and faster switching between related callbacks and agents. | Task: [docs/tasks/callback-fanout-and-session-management.md](tasks/callback-fanout-and-session-management.md) |
 
-| Phase | Status | Notes |
-|-------|--------|-------|
-| Core Infrastructure (1-16) | ✅ Done | Counter, Kitchen, Brisket, Pantry, graph, and persistence are all shipped |
-| S1-S3 UX + Layout | ✅ Done | Bubbletea v2 migration and Ultraviolet layout/compositing are shipped |
-| E1 Graph Polish | ✅ Done | Live graph and browser view are shipped |
-| E2 Pivot Intelligence | ✅ Done | Cloud and SSH pivots are shipped with durable sessions, graph surfacing, and shell workflows |
-| E3 Automation & Polish | 🔶 In progress | Backend preflight parity, notifications, and the embedded-shell / native-Go E2E cleanup remain |
-| F1 Advanced Persistence | 🔲 Research | No production-ready persistence automation yet |
+## Planned Backlog
 
----
-
-## Shipped Recently
-
-- **E2.2 Cloud CLI shell**
-  - `pivot aws/gcp/azure` now resolves Pantry config, `${{ secrets.X }}`, and `${{ vars.X }}`; stores durable cloud sessions; imports discovered cloud resources into Pantry; and unlocks `cloud shell`, `cloud export`, and provider quick checks.
-- **E2.4 SSH pivoting**
-  - `pivot ssh`, `pivot ssh org`, and `pivot ssh org/repo` are shipped; confirmed repo access is persisted into graph labels; `ssh status` and `ssh shell` are available; and the goat E2E covers the operator path.
-- **Cloud pivot operational polish**
-  - Quickstart Counter now has embedded cloud tooling, the repo ships `make cloud-shell-image` for local operator runs, and the current goat work has revalidated that the remaining gap is later operator/E2E flow rather than cloud/OIDC support.
-- **Deployment workflow polish**
-  - Draft PR support, auto-close on callback, comment-mode issue deploys, workflow `if:` gate detection, and dispatch backend preflight are shipped.
-- **Counter UI migration**
-  - Bubbletea v2 and Ultraviolet layout/compositing are shipped. The old Stickers and bubbletea-overlay stack is no longer the source of truth.
-
----
-
-## Open Work
-
-### E3.4: Permission Pre-Check
-
-**Status:** 🔶 Partial
-
-Done:
-
-- Wizard gating via `CanUseDelivery()`
-- Friendly reactive 403 parsing
-- Server-side dispatch preflight via `getWorkflowByFileName`
-
-Remaining:
-
-- PR: repo access and pushability validation
-- Issue/comment: issues availability and write permission validation
-- LOTP: repo fork/push preflight parity
-
-Task note:
-
-- `docs/tasks/server-side-deploy-preflight.md`
-
-### E3.5: Operator Notifications
-
-**Status:** 🔲 Not started
-
-Goal:
-
-- Webhook on new agent check-in, new high-value loot, and deployment success/failure
-- Start with generic webhook payloads; Slack and Discord adapters can sit on top
-
-### E3.6: Embedded Shell Takeover And Native Go E2E
-
-**Status:** 🔲 Not started
-
-Goal:
-
-- replace raw `ExecProcess` shell handoff with an in-app shell takeover
-- make `cloud shell` and `ssh shell` testable without tmux
-- keep shell state sandboxed and support real completion
-- add organic walkthrough recording with export to VHS tape
-
-Task note:
-
-- `docs/tasks/embedded-shell-go-e2e-vhs.md`
-
----
-
-## Research Backlog
-
-| ID | Feature | Description | Effort |
-|----|---------|-------------|--------|
-| F1.1 | Self-hosted runner persistence | `RUNNER_TRACKING_ID=0`, service install, or equivalent long-lived foothold | L |
-| F1.2 | Cache poisoning | Poison GitHub Actions caches for reinfection on later trusted runs. Product feature is implemented; the remaining work is final goat completion plus follow-up hardening. | XL |
-| F1.3 | Session management | Better operator control when multiple agents and pivots coexist | M |
-| F1.4 | Goal-oriented kill chain planning | Add repo rules / branch protection metadata, a persistent `set goal` concept, and reasoning that combines multiple credentials toward an end state. Task note: `docs/tasks/goal-oriented-killchain.md` | L |
-| F1.5 | Walkthrough recording and replay | Record real operator flows inside SmokedMeat and export them as VHS tapes for replayable demos and GIF generation. Initial design is tracked in `docs/tasks/embedded-shell-go-e2e-vhs.md`. | M |
-| F1.6 | Anti-forensics UX (napkin) | The Brisket agent already implements `napkin` (workflow run/log deletion via GitHub API). Needs Counter TUI integration: dedicated command, tab completion, help text, and optional auto-cleanup after express callbacks. | S |
-
----
-
-## Recommended Next Feature
-
-Land the **final goat post-exploit validation pass** next so the refreshed external Whooli environment completes end-to-end.
-
-The product slice is already in place: writer-side poisoning, victim selection, persistent implants, cache replacement controls, exact-key prediction, and runtime cache staging all exist in SmokedMeat. The external Whooli target and local goat docs now match that design. The next slice is to stabilize the final operator-driven flag path after the trusted victim callback lands.
+| Status | Item | Scope | Spec |
+|--------|------|-------|------|
+| 🔲 | Release prep and launch materials | Tutorial, screenshots, screencast, release notes, blog article inputs, and packaging verification. | Task: [docs/tasks/release-prep-and-launch-materials.md](tasks/release-prep-and-launch-materials.md) |
+| 🔲 | Counter / Kitchen boundary refactor | Audit the split, move client-neutral logic toward Kitchen, and tighten shared contracts. | Task: [docs/tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
+| 🔲 | Goat wizard E2E validation | Finish the final Whooli post-exploit path and harden the surrounding operator flow. | Ref: [docs/WHOOLI.md](WHOOLI.md) |
+| 🔲 | Embedded shell mode + native Go E2E | Replace the tmux shell boundary with an in-app shell and stronger native E2E coverage. | Task: [docs/tasks/embedded-shell-and-native-go-e2e.md](tasks/embedded-shell-and-native-go-e2e.md) |
+| 🔲 | Self-hosted runner enumeration and persistence | Enumerate and validate reusable self-hosted runner footholds using workflow evidence, authenticated web-session metrics, elevated APIs, and active probes. | Task: [docs/tasks/self-hosted-runner-enumeration-and-persistence.md](tasks/self-hosted-runner-enumeration-and-persistence.md) |
+| 🔲 | Operator notifications | Generic outbound webhook notifications for new agent check-ins, high-value loot, and deploy outcomes, with Slack and Discord as obvious consumers. | Task: [docs/tasks/operator-notifications.md](tasks/operator-notifications.md) |
+| 💡 | Browser graph filtering and usability | Improve the browser-based graph for large organizations with filtering and other usability controls so it remains practical beyond small graphs. | Idea |
+| 🔲 | Kitchen audit trail and IOC export | Extend history into append-only audit and exportable IOC reporting. | Task: [docs/tasks/kitchen-audit-trail-and-ioc-export.md](tasks/kitchen-audit-trail-and-ioc-export.md) |
+| 🔲 | Goal-oriented kill chain planning | Combine multiple credentials and repo constraints toward a chosen end state. | Task: [docs/tasks/goal-oriented-killchain.md](tasks/goal-oriented-killchain.md) |
+| 🔲 | Workflow source viewer | Add on-demand workflow source viewing in Counter and browser-facing Kitchen UI. | Task: [docs/tasks/workflow-source-viewer.md](tasks/workflow-source-viewer.md) |
+| 💡 | Pluggable modules | Explore a stable extension surface for community contributions. | Idea |
+| 🔲 | Web operator UI | Add a browser-based operator UI over Kitchen after the backend boundary is cleaner. | Task: [docs/tasks/web-operator-ui-and-kitchen-boundary.md](tasks/web-operator-ui-and-kitchen-boundary.md) |
+| 🔲 | Walkthrough recording and replay | Follow-on work after embedded shell and native Go E2E are stable. | Ref: [docs/tasks/embedded-shell-and-native-go-e2e.md](tasks/embedded-shell-and-native-go-e2e.md) |
+| 💡 | Betterleaks migration watch | Revisit once the replacement project is stable enough as a library and operational fit. | Idea |
+| 💡 | Anti-forensics UX | Surface the existing `napkin` capability in Counter. | Idea |
