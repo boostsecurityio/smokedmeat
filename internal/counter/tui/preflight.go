@@ -248,10 +248,10 @@ func (m Model) deliveryMethodStatus(method DeliveryMethod) (state, reason string
 		return state, reason
 	}
 	if m.wizard != nil && m.wizard.PreflightLoading {
-		return deployStateUnknown, "Validating target..."
+		return deployStateUnknown, "Checking token and target access..."
 	}
 	if m.canUseDeliveryMethodHeuristic(method) {
-		return deployStateUnknown, "Capability not confirmed yet"
+		return deployStateUnknown, "GitHub access for this action could not be pre-verified"
 	}
 	return deployStateFail, "Current token is unlikely to support this path"
 }
@@ -262,7 +262,7 @@ func (m Model) commentTargetStatus(target CommentTarget) (state, reason string) 
 		return state, reason
 	}
 	if m.wizard != nil && m.wizard.PreflightLoading {
-		return deployStateUnknown, "Validating target..."
+		return deployStateUnknown, "Checking token and target access..."
 	}
 	return deployStateUnknown, ""
 }

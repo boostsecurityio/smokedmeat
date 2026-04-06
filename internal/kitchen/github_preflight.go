@@ -309,9 +309,9 @@ func (e deployPreflightEvidence) issueCapability(repoPrivate bool) DeployPreflig
 		return DeployPreflightCapability{State: deployStateFail, Reason: "token lacks issue-write permission"}
 	}
 	if e.tokenType == "fine_grained_pat" {
-		return DeployPreflightCapability{State: deployStateUnknown, Reason: "fine-grained PAT write could not be confirmed safely"}
+		return DeployPreflightCapability{State: deployStateUnknown, Reason: "Issue access could not be pre-verified"}
 	}
-	return DeployPreflightCapability{State: deployStateUnknown, Reason: "token write capability could not be confirmed safely"}
+	return DeployPreflightCapability{State: deployStateUnknown, Reason: "Issue access could not be pre-verified"}
 }
 
 func (e deployPreflightEvidence) commentCapability(repoPrivate bool) DeployPreflightCapability {
@@ -325,9 +325,9 @@ func (e deployPreflightEvidence) commentCapability(repoPrivate bool) DeployPrefl
 		return DeployPreflightCapability{State: deployStateFail, Reason: "token lacks comment-write permission"}
 	}
 	if e.tokenType == "fine_grained_pat" {
-		return DeployPreflightCapability{State: deployStateUnknown, Reason: "fine-grained PAT comment permission could not be confirmed safely"}
+		return DeployPreflightCapability{State: deployStateUnknown, Reason: "Comment access could not be pre-verified"}
 	}
-	return DeployPreflightCapability{State: deployStateUnknown, Reason: "token comment capability could not be confirmed safely"}
+	return DeployPreflightCapability{State: deployStateUnknown, Reason: "Comment access could not be pre-verified"}
 }
 
 func (e deployPreflightEvidence) pullRequestCapability(repoPrivate bool) DeployPreflightCapability {
@@ -341,9 +341,9 @@ func (e deployPreflightEvidence) pullRequestCapability(repoPrivate bool) DeployP
 		return DeployPreflightCapability{State: deployStateFail, Reason: "token lacks PR creation permission"}
 	}
 	if e.tokenType == "fine_grained_pat" {
-		return DeployPreflightCapability{State: deployStateUnknown, Reason: "fine-grained PAT PR capability could not be confirmed safely"}
+		return DeployPreflightCapability{State: deployStateUnknown, Reason: "PR access could not be pre-verified"}
 	}
-	return DeployPreflightCapability{State: deployStateUnknown, Reason: "token PR capability could not be confirmed safely"}
+	return DeployPreflightCapability{State: deployStateUnknown, Reason: "PR access could not be pre-verified"}
 }
 
 func (e deployPreflightEvidence) dispatchCapability(repoPrivate bool) DeployPreflightCapability {
@@ -357,9 +357,9 @@ func (e deployPreflightEvidence) dispatchCapability(repoPrivate bool) DeployPref
 		return DeployPreflightCapability{State: deployStateFail, Reason: "token lacks workflow-dispatch permission"}
 	}
 	if e.tokenType == "fine_grained_pat" {
-		return DeployPreflightCapability{State: deployStateUnknown, Reason: "fine-grained PAT dispatch capability could not be confirmed safely"}
+		return DeployPreflightCapability{State: deployStateUnknown, Reason: "Workflow dispatch access could not be pre-verified"}
 	}
-	return DeployPreflightCapability{State: deployStateUnknown, Reason: "token dispatch capability could not be confirmed safely"}
+	return DeployPreflightCapability{State: deployStateUnknown, Reason: "Workflow dispatch access could not be pre-verified"}
 }
 
 func newDeployCheck(name, state, reason string) DeployPreflightCheck {
@@ -654,7 +654,7 @@ func applyForkingCapability(req DeployPreflightRequest, evidence deployPreflight
 	if tokenOwner == "" {
 		switch capability.State {
 		case deployStatePass, deployStateConfirmed:
-			return DeployPreflightCapability{State: deployStateUnknown, Reason: "direct push eligibility could not be confirmed safely"}
+			return DeployPreflightCapability{State: deployStateUnknown, Reason: "Direct push access could not be pre-verified"}
 		default:
 			return capability
 		}

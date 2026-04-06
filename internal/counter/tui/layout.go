@@ -1551,12 +1551,11 @@ func (m *Model) buildWizardStep2Content(width int) []string {
 		}
 		switch state {
 		case deployStateConfirmed:
-			label += successColor.Render(" (confirmed)")
+			label += successColor.Render(" (worked before)")
 			desc = mutedColor.Render(desc)
 		case deployStatePass:
 			desc = mutedColor.Render(desc)
 		case deployStateUnknown:
-			label += warningColor.Render(" (unconfirmed)")
 			if reason != "" {
 				desc = mutedColor.Render(reason)
 			} else {
@@ -1589,10 +1588,10 @@ func (m *Model) buildWizardStep2Content(width int) []string {
 	}
 
 	if m.wizard.PreflightLoading {
-		lines = append(lines, formatWizardContent(pad, "", warningColor.Render("Validating target..."), innerWidth))
+		lines = append(lines, formatWizardContent(pad, "", warningColor.Render("Checking token and target access..."), innerWidth))
 	}
 	if m.wizard.PreflightError != "" {
-		lines = append(lines, formatWizardContent(pad, "", warningColor.Render("Validation unavailable: "+m.wizard.PreflightError), innerWidth))
+		lines = append(lines, formatWizardContent(pad, "", warningColor.Render("GitHub check unavailable: "+m.wizard.PreflightError), innerWidth))
 	}
 
 	if m.tokenInfo != nil {
@@ -1711,7 +1710,7 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 		state, reason := m.commentTargetStatus(currentTarget)
 		switch {
 		case state == deployStateConfirmed:
-			lines = append(lines, formatWizardContent(pad, "", successColor.Render("Confirmed by prior success"), innerWidth))
+			lines = append(lines, formatWizardContent(pad, "", successColor.Render("This path worked before with this token"), innerWidth))
 		case state == deployStateUnknown && reason != "":
 			lines = append(lines, formatWizardContent(pad, "", warningColor.Render(reason), innerWidth))
 		case (state == deployStateFail || state == deployStateDenied) && reason != "":
@@ -1876,7 +1875,7 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 	statusState, statusReason := m.deliveryMethodStatus(m.wizard.DeliveryMethod)
 	switch statusState {
 	case deployStateConfirmed:
-		lines = append(lines, formatWizardContent(pad, "", successColor.Render("Confirmed by prior success"), innerWidth), emptyLine)
+		lines = append(lines, formatWizardContent(pad, "", successColor.Render("This path worked before with this token"), innerWidth), emptyLine)
 	case deployStateUnknown:
 		if statusReason != "" {
 			lines = append(lines, formatWizardContent(pad, "", warningColor.Render(statusReason), innerWidth), emptyLine)

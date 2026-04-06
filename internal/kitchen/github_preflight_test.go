@@ -78,8 +78,8 @@ func TestMergeObservedCapabilities_RecomputesCommentAny(t *testing.T) {
 		},
 	}, DeployPreflightResponse{
 		Capabilities: map[string]DeployPreflightCapability{
-			deployCapabilityCommentAny:   {State: deployStateUnknown, Reason: "fine-grained PAT comment permission could not be confirmed safely"},
-			deployCapabilityCommentIssue: {State: deployStateUnknown, Reason: "fine-grained PAT comment permission could not be confirmed safely"},
+			deployCapabilityCommentAny:   {State: deployStateUnknown, Reason: "Comment access could not be pre-verified"},
+			deployCapabilityCommentIssue: {State: deployStateUnknown, Reason: "Comment access could not be pre-verified"},
 			deployCapabilityCommentPR:    {State: deployStateFail, Reason: "pull requests are disabled on this repository"},
 			deployCapabilityCommentStub:  {State: deployStateFail, Reason: "pull requests are disabled on this repository"},
 		},
@@ -383,7 +383,7 @@ func TestHandleGitHubDeployPreflight_NoForkBlankOwnerDowngradesPRToUnknown(t *te
 	var resp DeployPreflightResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.Equal(t, deployStateUnknown, resp.Capabilities[deployCapabilityPR].State)
-	assert.Equal(t, "direct push eligibility could not be confirmed safely", resp.Capabilities[deployCapabilityPR].Reason)
+	assert.Equal(t, "Direct push access could not be pre-verified", resp.Capabilities[deployCapabilityPR].Reason)
 	assert.Equal(t, deployStateUnknown, resp.Capabilities[deployCapabilityLOTP].State)
 	assert.Equal(t, deployStatePass, resp.Capabilities[deployCapabilityCommentStub].State)
 }
@@ -400,7 +400,7 @@ func TestMergeObservedCapabilities_ScopesDispatchEvidencePerWorkflow(t *testing.
 		},
 	}, DeployPreflightResponse{
 		Capabilities: map[string]DeployPreflightCapability{
-			deployCapabilityDispatch: {State: deployStateUnknown, Reason: "fine-grained PAT dispatch capability could not be confirmed safely"},
+			deployCapabilityDispatch: {State: deployStateUnknown, Reason: "Workflow dispatch access could not be pre-verified"},
 		},
 	}, cache, nowForTest())
 	assert.Equal(t, deployStateConfirmed, respA.Capabilities[deployCapabilityDispatch].State)
@@ -413,7 +413,7 @@ func TestMergeObservedCapabilities_ScopesDispatchEvidencePerWorkflow(t *testing.
 		},
 	}, DeployPreflightResponse{
 		Capabilities: map[string]DeployPreflightCapability{
-			deployCapabilityDispatch: {State: deployStateUnknown, Reason: "fine-grained PAT dispatch capability could not be confirmed safely"},
+			deployCapabilityDispatch: {State: deployStateUnknown, Reason: "Workflow dispatch access could not be pre-verified"},
 		},
 	}, cache, nowForTest())
 	assert.Equal(t, deployStateUnknown, respB.Capabilities[deployCapabilityDispatch].State)
