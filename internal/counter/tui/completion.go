@@ -242,8 +242,8 @@ func (m *Model) getCompletions(input string) []string {
 				prefix = strings.ToLower(parts[1])
 			}
 			var matches []string
-			if strings.HasPrefix("confirm", prefix) {
-				matches = append(matches, "purge confirm")
+			if candidate := "purge confirm"; strings.HasPrefix(strings.ToLower(candidate), "purge "+prefix) {
+				matches = append(matches, candidate)
 			}
 			for _, spec := range m.purgeTargetSpecs() {
 				candidate := "purge " + spec

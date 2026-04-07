@@ -61,7 +61,7 @@ func (h *Handler) handlePurge(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func normalizePurgeScope(scopeType, scopeValue string) (string, string, error) {
+func normalizePurgeScope(scopeType, scopeValue string) (normalizedType, normalizedValue string, err error) {
 	scopeType = strings.TrimSpace(strings.ToLower(scopeType))
 	scopeValue = strings.TrimSpace(scopeValue)
 
