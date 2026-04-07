@@ -12,6 +12,32 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+var orderSubcommands = []string{
+	"exec",
+	"env",
+	"recon",
+	"cloud-query",
+	"oidc",
+	"transfer",
+	"upload",
+	"download",
+}
+
+var orderSubcommandHints = map[string]string{
+	"exec":        "exec <cmd>",
+	"env":         "env",
+	"recon":       "recon",
+	"cloud-query": "cloud-query <provider> <query>",
+	"oidc":        "oidc <provider>",
+	"transfer":    "transfer <src> <dst>",
+	"upload":      "upload <local> <remote>",
+	"download":    "download <remote> <local>",
+}
+
+func orderUsage() string {
+	return "order <" + strings.Join(orderSubcommands, "|") + "> [args...]"
+}
+
 func (m Model) executeCommand() (result tea.Model, cmd tea.Cmd) {
 	commandText := strings.TrimSpace(m.input.Value())
 	if commandText == "" {
@@ -97,7 +123,7 @@ func (m Model) executeCommand() (result tea.Model, cmd tea.Cmd) {
 
 	case "order":
 		if len(parts) < 2 {
-			m.AddOutput("error", "Usage: order <exec|env|recon|cloud-query|oidc|transfer|upload|download> [args...]")
+			m.AddOutput("error", "Usage: "+orderUsage())
 			m.AddOutput("info", "Examples: order exec whoami | order env | order recon")
 			return m, nil
 		}

@@ -2556,6 +2556,7 @@ func helpCommandsForPhase(phase Phase) []string {
 		return append([]string{
 			"sessions         List active agent sessions",
 			"select <id>      Select agent session for commands",
+			"order <...>      Agent orders: exec, env, recon, cloud-query, oidc, transfer, upload, download",
 			"order exec <cmd> Run shell command on selected agent",
 			"implants         Show persistent implant inventory",
 			"analyze          Re-scan the current target",

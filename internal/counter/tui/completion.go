@@ -21,7 +21,7 @@ func commandsForPhase(phase Phase) []string {
 	case PhaseWizard, PhaseWaiting:
 		// no extras
 	case PhasePostExploit, PhasePivot:
-		cmds = append(cmds, "implants", "select", "sessions", "graph", "set", "status",
+		cmds = append(cmds, "implants", "order", "select", "sessions", "graph", "set", "status",
 			"pivot", "ssh", "cloud", "analyze", "deep-analyze", "exploit", "use")
 	}
 	sort.Strings(cmds)
@@ -212,6 +212,22 @@ func (m *Model) getCompletions(input string) []string {
 		}
 	}
 
+	if parts[0] == "order" {
+		if len(parts) == 1 || (len(parts) == 2 && !hasTrailingSpace) {
+			prefix := ""
+			if len(parts) == 2 {
+				prefix = strings.ToLower(parts[1])
+			}
+			var matches []string
+			for _, sub := range orderSubcommands {
+				if strings.HasPrefix(sub, prefix) {
+					matches = append(matches, "order "+sub)
+				}
+			}
+			return matches
+		}
+	}
+
 	if parts[0] == "select" && len(m.sessions) > 0 {
 		prefix := ""
 		if len(parts) == 2 {
@@ -234,6 +250,10 @@ func (m *Model) completeInput() bool {
 	completions := m.getCompletions(input)
 
 	if len(completions) == 0 {
+		if hint := orderCompletionHint(input); hint != "" {
+			m.completionHint = hint
+			return true
+		}
 		m.completionHint = ""
 		return false
 	}
@@ -259,6 +279,11 @@ func (m *Model) completeInput() bool {
 	// Special hint for target completions with examples
 	if strings.HasPrefix(common, "set target ") {
 		m.completionHint = "org:acme-corp  repo:acme-corp/api"
+		return true
+	}
+
+	if hint := orderCompletionListHint(input, completions); hint != "" {
+		m.completionHint = hint
 		return true
 	}
 
@@ -289,6 +314,41 @@ func longestCommonPrefix(strs []string) string {
 		}
 	}
 	return prefix
+}
+
+func orderCompletionHint(input string) string {
+	hasTrailingSpace := strings.HasSuffix(input, " ")
+	parts := strings.Fields(strings.TrimSpace(input))
+	if len(parts) < 2 || parts[0] != "order" {
+		return ""
+	}
+	if !hasTrailingSpace && len(parts) == 2 {
+		return ""
+	}
+	hint, ok := orderSubcommandHints[parts[1]]
+	if !ok {
+		return ""
+	}
+	return hint
+}
+
+func orderCompletionListHint(input string, completions []string) string {
+	if !strings.HasPrefix(strings.TrimSpace(input), "order") {
+		return ""
+	}
+	hints := make([]string, 0, len(completions))
+	for _, completion := range completions {
+		parts := strings.Fields(completion)
+		if len(parts) != 2 || parts[0] != "order" {
+			return ""
+		}
+		hint, ok := orderSubcommandHints[parts[1]]
+		if !ok {
+			return ""
+		}
+		hints = append(hints, hint)
+	}
+	return strings.Join(hints, "  ")
 }
 
 func (m *Model) targetCompletions(prefix string) []string {

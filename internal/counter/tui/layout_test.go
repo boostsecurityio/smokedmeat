@@ -375,8 +375,8 @@ func TestHelpCommandsForPhase(t *testing.T) {
 	}{
 		{PhaseSetup, "set token", "sessions"},
 		{PhaseRecon, "1-5", "sessions"},
-		{PhasePostExploit, "sessions", "1-5"},
-		{PhasePivot, "select <id>", "1-5"},
+		{PhasePostExploit, "order <...>", "1-5"},
+		{PhasePivot, "order <...>", "1-5"},
 		{PhaseWizard, "help", "analyze"},
 		{PhaseWaiting, "license", "graph"},
 	}
