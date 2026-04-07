@@ -34,6 +34,8 @@ type mockKitchenClient struct {
 	fetchKnownEntitiesResp []counter.KnownEntityPayload
 	fetchKnownEntitiesErr  error
 	recordKnownEntityErr   error
+	purgeResp              *counter.PurgeResponse
+	purgeErr               error
 
 	startConsumingErr error
 	reconnectErr      error
@@ -116,6 +118,10 @@ func (m *mockKitchenClient) RecordKnownEntity(_ context.Context, entity counter.
 	defer m.mu.Unlock()
 	m.recordedEntities = append(m.recordedEntities, entity)
 	return m.recordKnownEntityErr
+}
+
+func (m *mockKitchenClient) Purge(_ context.Context, _ counter.PurgeRequest) (*counter.PurgeResponse, error) {
+	return m.purgeResp, m.purgeErr
 }
 
 func (m *mockKitchenClient) StartConsuming() error             { return m.startConsumingErr }

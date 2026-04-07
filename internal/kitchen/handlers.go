@@ -189,6 +189,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /pantry", h.handleGetPantry)
 	mux.HandleFunc("GET /history", h.handleGetHistory)
 	mux.HandleFunc("POST /history", h.handlePostHistory)
+	mux.HandleFunc("POST /purge", h.handlePurge)
 	mux.HandleFunc("GET /known-entities", h.handleGetKnownEntities)
 	mux.HandleFunc("POST /known-entities", h.handlePostKnownEntities)
 }

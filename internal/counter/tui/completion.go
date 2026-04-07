@@ -17,12 +17,12 @@ func commandsForPhase(phase Phase) []string {
 	case PhaseSetup:
 		cmds = append(cmds, "set", "analyze", "deep-analyze", "status")
 	case PhaseRecon:
-		cmds = append(cmds, "implants", "exploit", "graph", "pivot", "ssh", "set", "analyze", "deep-analyze", "status", "use")
+		cmds = append(cmds, "implants", "exploit", "graph", "pivot", "purge", "ssh", "set", "analyze", "deep-analyze", "status", "use")
 	case PhaseWizard, PhaseWaiting:
 		// no extras
 	case PhasePostExploit, PhasePivot:
 		cmds = append(cmds, "implants", "order", "select", "sessions", "graph", "set", "status",
-			"pivot", "ssh", "cloud", "analyze", "deep-analyze", "exploit", "use")
+			"pivot", "purge", "ssh", "cloud", "analyze", "deep-analyze", "exploit", "use")
 	}
 	sort.Strings(cmds)
 	return cmds
@@ -228,6 +228,50 @@ func (m *Model) getCompletions(input string) []string {
 		}
 	}
 
+	if parts[0] == "purge" {
+		base := "purge"
+		offset := 1
+		if len(parts) > 1 && parts[1] == "confirm" {
+			base = "purge confirm"
+			offset = 2
+		}
+
+		if len(parts) == 1 || (len(parts) == 2 && !hasTrailingSpace && offset == 1) {
+			prefix := ""
+			if len(parts) == 2 {
+				prefix = strings.ToLower(parts[1])
+			}
+			var matches []string
+			if strings.HasPrefix("confirm", prefix) {
+				matches = append(matches, "purge confirm")
+			}
+			for _, spec := range m.purgeTargetSpecs() {
+				candidate := "purge " + spec
+				if strings.HasPrefix(strings.ToLower(candidate), "purge "+prefix) {
+					matches = append(matches, candidate)
+				}
+			}
+			sort.Strings(matches)
+			return compactStrings(matches)
+		}
+
+		if len(parts) == offset || (len(parts) == offset+1 && !hasTrailingSpace) {
+			prefix := ""
+			if len(parts) == offset+1 {
+				prefix = strings.ToLower(parts[offset])
+			}
+			var matches []string
+			for _, spec := range m.purgeTargetSpecs() {
+				candidate := base + " " + spec
+				if strings.HasPrefix(strings.ToLower(candidate), base+" "+prefix) {
+					matches = append(matches, candidate)
+				}
+			}
+			sort.Strings(matches)
+			return compactStrings(matches)
+		}
+	}
+
 	if parts[0] == "select" && len(m.sessions) > 0 {
 		prefix := ""
 		if len(parts) == 2 {
@@ -349,6 +393,31 @@ func orderCompletionListHint(input string, completions []string) string {
 		hints = append(hints, hint)
 	}
 	return strings.Join(hints, "  ")
+}
+
+func compactStrings(values []string) []string {
+	if len(values) == 0 {
+		return values
+	}
+	seen := make(map[string]bool, len(values))
+	result := values[:0]
+	for _, value := range values {
+		if seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
+func (m *Model) purgeTargetSpecs() []string {
+	specs := append([]string{}, m.discoveredTargetSpecs()...)
+	if target := m.currentTargetSpec(); target != "" {
+		specs = append(specs, target)
+	}
+	sort.Strings(specs)
+	return compactStrings(specs)
 }
 
 func (m *Model) targetCompletions(prefix string) []string {

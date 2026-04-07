@@ -18,11 +18,11 @@ func TestCommandsForPhase(t *testing.T) {
 		{
 			PhaseSetup,
 			[]string{"help", "quit", "license", "set", "analyze", "status"},
-			[]string{"sessions", "select", "ls", "graph"},
+			[]string{"sessions", "select", "ls", "graph", "purge"},
 		},
 		{
 			PhaseRecon,
-			[]string{"help", "exploit", "graph", "implants", "set", "analyze", "status"},
+			[]string{"help", "exploit", "graph", "implants", "purge", "set", "analyze", "status"},
 			[]string{"sessions", "select", "ls"},
 		},
 		{
@@ -37,12 +37,12 @@ func TestCommandsForPhase(t *testing.T) {
 		},
 		{
 			PhasePostExploit,
-			[]string{"help", "exploit", "implants", "order", "select", "sessions", "graph", "set", "status", "analyze", "deep-analyze", "ssh", "pivot", "use"},
+			[]string{"help", "exploit", "implants", "order", "select", "sessions", "graph", "set", "status", "analyze", "deep-analyze", "ssh", "pivot", "purge", "use"},
 			[]string{"ls", "exfil", "recon"},
 		},
 		{
 			PhasePivot,
-			[]string{"help", "exploit", "implants", "order", "select", "sessions", "graph", "set", "status", "analyze", "deep-analyze", "ssh", "pivot", "use"},
+			[]string{"help", "exploit", "implants", "order", "select", "sessions", "graph", "set", "status", "analyze", "deep-analyze", "ssh", "pivot", "purge", "use"},
 			[]string{"ls", "exfil", "recon"},
 		},
 	}
@@ -72,7 +72,7 @@ func TestGetCompletions_PhaseLimited(t *testing.T) {
 			PhaseSetup,
 			"",
 			[]string{"set", "analyze", "help"},
-			[]string{"graph", "sessions"},
+			[]string{"graph", "sessions", "purge"},
 		},
 		{
 			"recon phase prefix 'i' matches implants",
@@ -228,4 +228,20 @@ func TestCompleteInput_OrderHints(t *testing.T) {
 			assert.Equal(t, tt.wantHint, m.completionHint)
 		})
 	}
+}
+
+func TestGetCompletions_PurgeIncludesConfirmAndTargets(t *testing.T) {
+	m := NewModel(Config{})
+	m.phase = PhaseRecon
+	m.target = "acme/api"
+	m.targetType = "repo"
+	m.knownEntities["org:acme"] = &KnownEntity{Name: "acme", EntityType: "org"}
+	m.knownEntities["repo:globex/portal"] = &KnownEntity{Name: "globex/portal", EntityType: "repo"}
+
+	completions := m.getCompletions("purge ")
+
+	assert.Contains(t, completions, "purge confirm")
+	assert.Contains(t, completions, "purge org:acme")
+	assert.Contains(t, completions, "purge repo:acme/api")
+	assert.Contains(t, completions, "purge repo:globex/portal")
 }

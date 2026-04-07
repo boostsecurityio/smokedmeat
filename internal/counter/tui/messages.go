@@ -78,6 +78,20 @@ type AnalysisErrorMsg struct {
 	Err error
 }
 
+type PurgePreviewMsg struct {
+	Response counter.PurgeResponse
+}
+
+type PurgeCompletedMsg struct {
+	Response      counter.PurgeResponse
+	Pantry        *pantry.Pantry
+	KnownEntities []counter.KnownEntityPayload
+}
+
+type PurgeErrorMsg struct {
+	Err error
+}
+
 // Token capability messages
 
 // TokenInfoFetchedMsg indicates token capabilities were successfully fetched
