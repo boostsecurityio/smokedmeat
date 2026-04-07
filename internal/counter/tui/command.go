@@ -12,6 +12,32 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+var orderSubcommands = []string{
+	"exec",
+	"env",
+	"recon",
+	"cloud-query",
+	"oidc",
+	"transfer",
+	"upload",
+	"download",
+}
+
+var orderSubcommandHints = map[string]string{
+	"exec":        "exec <cmd>",
+	"env":         "env",
+	"recon":       "recon",
+	"cloud-query": "cloud-query <provider> <query-type>",
+	"oidc":        "oidc pivot <provider> [args...] | oidc audience=<value>",
+	"transfer":    "transfer <upload|download|list> <path> [base64_data]",
+	"upload":      "upload <remote_path> <base64_data>",
+	"download":    "download <path>",
+}
+
+func orderUsage() string {
+	return "order <" + strings.Join(orderSubcommands, "|") + "> [args...]"
+}
+
 func (m Model) executeCommand() (result tea.Model, cmd tea.Cmd) {
 	commandText := strings.TrimSpace(m.input.Value())
 	if commandText == "" {
@@ -97,8 +123,12 @@ func (m Model) executeCommand() (result tea.Model, cmd tea.Cmd) {
 
 	case "order":
 		if len(parts) < 2 {
-			m.AddOutput("error", "Usage: order <exec|env|recon|cloud-query|oidc|transfer|upload|download> [args...]")
+			m.AddOutput("error", "Usage: "+orderUsage())
 			m.AddOutput("info", "Examples: order exec whoami | order env | order recon")
+			if m.SelectedSession() == nil {
+				m.AddOutput("error", "No session selected")
+				m.AddOutput("info", "Use 'sessions' then 'select <agent_id>' before sending agent orders")
+			}
 			return m, nil
 		}
 		if m.SelectedSession() == nil {

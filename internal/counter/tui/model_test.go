@@ -204,6 +204,23 @@ func TestExecuteCommand_OrderWithoutSelectedSessionShowsGuidance(t *testing.T) {
 	assert.Equal(t, "Use 'sessions' then 'select <agent_id>' before sending agent orders", model.output[2].Content)
 }
 
+func TestExecuteCommand_OrderWithoutSubcommandStillShowsSessionGuidance(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+	m.phase = PhaseRecon
+	m.view = ViewFindings
+	m.input.SetValue("order")
+
+	result, cmd := m.executeCommand()
+	model := result.(Model)
+
+	assert.Nil(t, cmd)
+	require.Len(t, model.output, 5)
+	assert.Equal(t, "Usage: order <exec|env|recon|cloud-query|oidc|transfer|upload|download> [args...]", model.output[1].Content)
+	assert.Equal(t, "Examples: order exec whoami | order env | order recon", model.output[2].Content)
+	assert.Equal(t, "No session selected", model.output[3].Content)
+	assert.Equal(t, "Use 'sessions' then 'select <agent_id>' before sending agent orders", model.output[4].Content)
+}
+
 func TestHandleSetCommand_ActivityLogAutoExpandToggle(t *testing.T) {
 	m := NewModel(Config{SessionID: "test-session"})
 	m.activityLogExpandedUntil = time.Now().Add(2 * time.Second)

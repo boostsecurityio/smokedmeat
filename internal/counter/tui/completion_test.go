@@ -37,13 +37,13 @@ func TestCommandsForPhase(t *testing.T) {
 		},
 		{
 			PhasePostExploit,
-			[]string{"help", "exploit", "implants", "select", "sessions", "graph", "set", "status", "analyze", "deep-analyze", "ssh", "pivot", "use"},
-			[]string{"ls", "exfil", "order", "recon"},
+			[]string{"help", "exploit", "implants", "order", "select", "sessions", "graph", "set", "status", "analyze", "deep-analyze", "ssh", "pivot", "use"},
+			[]string{"ls", "exfil", "recon"},
 		},
 		{
 			PhasePivot,
-			[]string{"help", "exploit", "implants", "select", "sessions", "graph", "set", "status", "analyze", "deep-analyze", "ssh", "pivot", "use"},
-			[]string{"ls", "exfil", "order", "recon"},
+			[]string{"help", "exploit", "implants", "order", "select", "sessions", "graph", "set", "status", "analyze", "deep-analyze", "ssh", "pivot", "use"},
+			[]string{"ls", "exfil", "recon"},
 		},
 	}
 	for _, tt := range tests {
@@ -124,6 +124,13 @@ func TestGetCompletions_PhaseLimited(t *testing.T) {
 			[]string{"ls"},
 		},
 		{
+			"post-exploit prefix 'o' matches order",
+			PhasePostExploit,
+			"o",
+			[]string{"order"},
+			[]string{"exploit"},
+		},
+		{
 			"set activity-log subcommand completes",
 			PhaseRecon,
 			"set a",
@@ -163,4 +170,62 @@ func TestGetCompletions_SetTargetUsesDiscoveredRepos(t *testing.T) {
 
 	assert.Contains(t, completions, "set target repo:whooli/xyz")
 	assert.Contains(t, completions, "set target repo:whooli/infrastructure-definitions")
+}
+
+func TestGetCompletions_OrderSubcommands(t *testing.T) {
+	m := NewModel(Config{})
+	m.phase = PhasePostExploit
+
+	completions := m.getCompletions("order ")
+
+	assert.Contains(t, completions, "order exec")
+	assert.Contains(t, completions, "order env")
+	assert.Contains(t, completions, "order recon")
+	assert.Contains(t, completions, "order cloud-query")
+	assert.Contains(t, completions, "order oidc")
+	assert.Contains(t, completions, "order transfer")
+	assert.Contains(t, completions, "order upload")
+	assert.Contains(t, completions, "order download")
+}
+
+func TestCompleteInput_OrderHints(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantValue string
+		wantHint  string
+	}{
+		{
+			name:      "order root completes",
+			input:     "ord",
+			wantValue: "order ",
+			wantHint:  "",
+		},
+		{
+			name:      "order subcommands show compact hints",
+			input:     "order ",
+			wantValue: "order ",
+			wantHint:  "exec <cmd>  env  recon  cloud-query <provider> <query-type>  oidc pivot <provider> [args...] | oidc audience=<value>  transfer <upload|download|list> <path> [base64_data]  upload <remote_path> <base64_data>  download <path>",
+		},
+		{
+			name:      "order exec shows subcommand hint",
+			input:     "order exec ",
+			wantValue: "order exec ",
+			wantHint:  "exec <cmd>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewModel(Config{})
+			m.phase = PhasePostExploit
+			m.input.SetValue(tt.input)
+
+			ok := m.completeInput()
+
+			assert.True(t, ok)
+			assert.Equal(t, tt.wantValue, m.input.Value())
+			assert.Equal(t, tt.wantHint, m.completionHint)
+		})
+	}
 }
