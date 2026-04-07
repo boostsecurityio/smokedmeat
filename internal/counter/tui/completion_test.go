@@ -205,7 +205,7 @@ func TestCompleteInput_OrderHints(t *testing.T) {
 			name:      "order subcommands show compact hints",
 			input:     "order ",
 			wantValue: "order ",
-			wantHint:  "exec <cmd>  env  recon  cloud-query <provider> <query>  oidc <provider>  transfer <src> <dst>  upload <local> <remote>  download <remote> <local>",
+			wantHint:  "exec <cmd>  env  recon  cloud-query <provider> <query-type>  oidc pivot <provider> [args...] | oidc audience=<value>  transfer <upload|download|list> <path> [base64_data]  upload <remote_path> <base64_data>  download <path>",
 		},
 		{
 			name:      "order exec shows subcommand hint",

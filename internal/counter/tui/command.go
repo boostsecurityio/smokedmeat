@@ -27,11 +27,11 @@ var orderSubcommandHints = map[string]string{
 	"exec":        "exec <cmd>",
 	"env":         "env",
 	"recon":       "recon",
-	"cloud-query": "cloud-query <provider> <query>",
-	"oidc":        "oidc <provider>",
-	"transfer":    "transfer <src> <dst>",
-	"upload":      "upload <local> <remote>",
-	"download":    "download <remote> <local>",
+	"cloud-query": "cloud-query <provider> <query-type>",
+	"oidc":        "oidc pivot <provider> [args...] | oidc audience=<value>",
+	"transfer":    "transfer <upload|download|list> <path> [base64_data]",
+	"upload":      "upload <remote_path> <base64_data>",
+	"download":    "download <path>",
 }
 
 func orderUsage() string {
@@ -125,6 +125,10 @@ func (m Model) executeCommand() (result tea.Model, cmd tea.Cmd) {
 		if len(parts) < 2 {
 			m.AddOutput("error", "Usage: "+orderUsage())
 			m.AddOutput("info", "Examples: order exec whoami | order env | order recon")
+			if m.SelectedSession() == nil {
+				m.AddOutput("error", "No session selected")
+				m.AddOutput("info", "Use 'sessions' then 'select <agent_id>' before sending agent orders")
+			}
 			return m, nil
 		}
 		if m.SelectedSession() == nil {
