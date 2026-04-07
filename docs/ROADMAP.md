@@ -2,7 +2,7 @@
 
 CI/CD Red Team Framework
 
-Last updated: 2026-04-06
+Last updated: 2026-04-07
 
 Status: `✅` shipped, `🔲` planned, `💡` idea
 Spec: `Task` = planned in `docs/tasks`, `Ref` = related reference, `Idea` = tracked only
@@ -42,6 +42,7 @@ This is the recommended pre-freeze queue. Only items that are realistically ship
 | 🔲 | Counter / Kitchen boundary refactor | Audit the split, move client-neutral logic toward Kitchen, and tighten shared contracts. | Task: [docs/tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
 | 🔲 | Goat wizard E2E validation | Finish the final Whooli post-exploit path and harden the surrounding operator flow. | Ref: [docs/WHOOLI.md](WHOOLI.md) |
 | 🔲 | Embedded shell mode + native Go E2E | Replace the tmux shell boundary with an in-app shell and stronger native E2E coverage. | Task: [docs/tasks/embedded-shell-and-native-go-e2e.md](tasks/embedded-shell-and-native-go-e2e.md) |
+| 🔲 | Interactive agent terminal via Kitchen | Move beyond one-shot `order exec` toward a real PTY-backed remote shell that tunnels through Kitchen, stays native Go, and avoids CGO. | Task: [docs/tasks/interactive-agent-terminal-via-kitchen.md](tasks/interactive-agent-terminal-via-kitchen.md) |
 | 🔲 | Self-hosted runner enumeration and persistence | Enumerate and validate reusable self-hosted runner footholds using workflow evidence, authenticated web-session metrics, elevated APIs, and active probes. | Task: [docs/tasks/self-hosted-runner-enumeration-and-persistence.md](tasks/self-hosted-runner-enumeration-and-persistence.md) |
 | 🔲 | Operator notifications | Generic outbound webhook notifications for new agent check-ins, high-value loot, and deploy outcomes, with Slack and Discord as obvious consumers. | Task: [docs/tasks/operator-notifications.md](tasks/operator-notifications.md) |
 | 💡 | Browser graph filtering and usability | Improve the browser-based graph for large organizations with filtering and other usability controls so it remains practical beyond small graphs. | Idea |
