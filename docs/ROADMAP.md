@@ -4,7 +4,7 @@ CI/CD Red Team Framework
 
 Last updated: 2026-04-08
 
-Status: `🔶` partial, `🔲` planned, `💡` idea
+Status: `🔲` planned, `💡` idea
 Spec: `Task` = planned in `docs/tasks`, `Ref` = related reference, `Idea` = tracked only
 
 ## Product Snapshot
@@ -29,9 +29,8 @@ This is the recommended pre-freeze queue. Only items that are realistically ship
 
 | Priority | Item | Status | Scope | Spec |
 |----------|------|--------|-------|------|
-| 1 | Analysis progress and streaming | 🔶 | Counter and Kitchen live progress work is in flight. The remaining external dependency is truthful repo-complete `poutine` progress from the upstream library. | Task: [docs/tasks/analysis-progress-and-streaming.md](tasks/analysis-progress-and-streaming.md) |
-| 2 | Large-org tree and graph filtering | 🔲 | Large orgs are not practically usable today. Change the existing tree filter to hide nodes with no vuln-bearing path, and default the browser graph to a safer filtered mode above a size threshold. | Task: [docs/tasks/browser-graph-filtering-and-usability.md](tasks/browser-graph-filtering-and-usability.md) |
-| 3 | OIDC trust cloud node tree placement | 🔲 | Fix the vuln tree so `oidc_trust/...` cloud nodes attach under their associated workflow job instead of dangling at the bottom as root-level cloud leaves. | Task: [docs/tasks/oidc-trust-cloud-node-tree-placement.md](tasks/oidc-trust-cloud-node-tree-placement.md) |
+| 1 | Large-org tree and graph filtering | 🔲 | Large orgs are not practically usable today. Change the existing tree filter to hide nodes with no vuln-bearing path, and default the browser graph to a safer filtered mode above a size threshold. | Task: [docs/tasks/browser-graph-filtering-and-usability.md](tasks/browser-graph-filtering-and-usability.md) |
+| 2 | OIDC trust cloud node tree placement | 🔲 | Fix the vuln tree so `oidc_trust/...` cloud nodes attach under their associated workflow job instead of dangling at the bottom as root-level cloud leaves. | Task: [docs/tasks/oidc-trust-cloud-node-tree-placement.md](tasks/oidc-trust-cloud-node-tree-placement.md) |
 
 ## Planned Backlog
 
@@ -39,8 +38,8 @@ This is the recommended pre-freeze queue. Only items that are realistically ship
 |--------|------|-------|------|
 | 🔲 | Release prep and launch materials | Tutorial, screenshots, screencast, release notes, blog article inputs, and packaging verification. | Task: [docs/tasks/release-prep-and-launch-materials.md](tasks/release-prep-and-launch-materials.md) |
 | 🔲 | Counter / Kitchen boundary refactor | Audit the split, move client-neutral logic toward Kitchen, and tighten shared contracts. | Task: [docs/tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
-| 🔲 | Shared analysis progress phase constants | Move `workflow_analysis`, `secret_scan`, and `import` into one shared Kitchen ↔ Counter protocol definition so progress rendering cannot drift on string changes. | Ref: [docs/tasks/analysis-progress-and-streaming.md](tasks/analysis-progress-and-streaming.md), [docs/tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
-| 🔲 | Shared analysis progress payload contract | Deduplicate `AnalysisProgressPayload` across Kitchen and Counter so the WebSocket protocol shape is defined once and the client/server contract stays in lockstep. | Ref: [docs/tasks/analysis-progress-and-streaming.md](tasks/analysis-progress-and-streaming.md), [docs/tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
+| 🔲 | Shared analysis progress phase constants | Move `workflow_analysis`, `secret_scan`, and `import` into one shared Kitchen ↔ Counter protocol definition so progress rendering cannot drift on string changes. | Ref: [docs/tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
+| 🔲 | Shared analysis progress payload contract | Deduplicate `AnalysisProgressPayload` across Kitchen and Counter so the WebSocket protocol shape is defined once and the client/server contract stays in lockstep. | Ref: [docs/tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
 | 💡 | Incremental poutine result streaming | Preserve per-repo `PackageInsights` from poutine observer callbacks so Kitchen can post-process findings and workflows as repos finish, instead of waiting for a large end-of-scan finalization step. | Idea |
 | 🔲 | Goat wizard E2E validation | Finish the final Whooli post-exploit path and harden the surrounding operator flow. | Ref: [docs/WHOOLI.md](WHOOLI.md) |
 | 🔲 | Embedded shell mode + native Go E2E | Replace the tmux shell boundary with an in-app shell and stronger native E2E coverage. | Task: [docs/tasks/embedded-shell-and-native-go-e2e.md](tasks/embedded-shell-and-native-go-e2e.md) |
