@@ -4,7 +4,7 @@ CI/CD Red Team Framework
 
 Last updated: 2026-04-08
 
-Status: `✅` shipped, `🔶` partial, `🔲` planned, `💡` idea
+Status: `🔶` partial, `🔲` planned, `💡` idea
 Spec: `Task` = planned in `docs/tasks`, `Ref` = related reference, `Idea` = tracked only
 
 ## Product Snapshot
@@ -32,9 +32,6 @@ This is the recommended pre-freeze queue. Only items that are realistically ship
 | 1 | Analysis progress and streaming | 🔶 | Counter and Kitchen live progress work is in flight. The remaining external dependency is truthful repo-complete `poutine` progress from the upstream library. | Task: [docs/tasks/analysis-progress-and-streaming.md](tasks/analysis-progress-and-streaming.md) |
 | 2 | Large-org tree and graph filtering | 🔲 | Large orgs are not practically usable today. Change the existing tree filter to hide nodes with no vuln-bearing path, and default the browser graph to a safer filtered mode above a size threshold. | Task: [docs/tasks/browser-graph-filtering-and-usability.md](tasks/browser-graph-filtering-and-usability.md) |
 | 3 | OIDC trust cloud node tree placement | 🔲 | Fix the vuln tree so `oidc_trust/...` cloud nodes attach under their associated workflow job instead of dangling at the bottom as root-level cloud leaves. | Task: [docs/tasks/oidc-trust-cloud-node-tree-placement.md](tasks/oidc-trust-cloud-node-tree-placement.md) |
-| 4 | Callback fanout and session management | 🔶 | Slice 1 is shipped to `main`: bounded callback budgets, wizard controls, and correct stager cleanup. Remaining slices are the grouped callback and session-management UX in Counter. | Task: [docs/tasks/callback-fanout-and-session-management.md](tasks/callback-fanout-and-session-management.md) |
-| 5 | Operator command discoverability | ✅ | Shipped to `main`. Completion, hints, help, and no-session guidance now match the real `order` surface, including `order exec`. | Task: [docs/tasks/operator-command-discoverability.md](tasks/operator-command-discoverability.md) |
-| 6 | Selective Kitchen purge | ✅ | Shipped to `main`. Repo-scoped and org-scoped preview + confirm purge is in product, preserves audit trail, and nudges the operator to reset target when needed. | Task: [docs/tasks/selective-kitchen-purge.md](tasks/selective-kitchen-purge.md) |
 
 ## Planned Backlog
 
@@ -47,7 +44,7 @@ This is the recommended pre-freeze queue. Only items that are realistically ship
 | 🔲 | Goat wizard E2E validation | Finish the final Whooli post-exploit path and harden the surrounding operator flow. | Ref: [docs/WHOOLI.md](WHOOLI.md) |
 | 🔲 | Embedded shell mode + native Go E2E | Replace the tmux shell boundary with an in-app shell and stronger native E2E coverage. | Task: [docs/tasks/embedded-shell-and-native-go-e2e.md](tasks/embedded-shell-and-native-go-e2e.md) |
 | 🔲 | Interactive agent terminal via Kitchen | Move beyond one-shot `order exec` toward a real PTY-backed remote shell that tunnels through Kitchen, stays native Go, and avoids CGO. | Task: [docs/tasks/interactive-agent-terminal-via-kitchen.md](tasks/interactive-agent-terminal-via-kitchen.md) |
-| 🔲 | Grouped callback / session-management UX | Finish slices 2-3 from the callback fanout task: stronger arrival notifications, grouped callback and agent navigation, unseen activity markers, and faster sibling switching. | Task: [docs/tasks/callback-fanout-and-session-management.md](tasks/callback-fanout-and-session-management.md) |
+| 🔲 | Grouped callback / session-management UX | Follow on from the shipped bounded-fanout slice with stronger arrival notifications, grouped callback and agent navigation, unseen activity markers, and faster sibling switching. | Task: [docs/tasks/grouped-callback-session-management-ux.md](tasks/grouped-callback-session-management-ux.md) |
 | 🔲 | Self-hosted runner enumeration and persistence | Enumerate and validate reusable self-hosted runner footholds using workflow evidence, authenticated web-session metrics, elevated APIs, and active probes. | Task: [docs/tasks/self-hosted-runner-enumeration-and-persistence.md](tasks/self-hosted-runner-enumeration-and-persistence.md) |
 | 🔲 | Operator notifications | Generic outbound webhook notifications for new agent check-ins, high-value loot, and deploy outcomes, with Slack and Discord as obvious consumers. | Task: [docs/tasks/operator-notifications.md](tasks/operator-notifications.md) |
 | 🔲 | Kitchen audit trail and IOC export | Extend history into append-only audit and exportable IOC reporting. | Task: [docs/tasks/kitchen-audit-trail-and-ioc-export.md](tasks/kitchen-audit-trail-and-ioc-export.md) |
