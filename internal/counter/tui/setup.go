@@ -434,7 +434,13 @@ func (m Model) startSetupAnalysis(resetAttempt bool) (tea.Model, tea.Cmd) {
 	sw.AnalysisRetryPending = false
 	sw.AnalysisRunning = true
 	sw.AnalysisStart = time.Now()
-	m.beginAnalysisProgress(newAnalysisID(), m.target, m.targetType, false)
+	analysisID, err := newAnalysisID()
+	if err != nil {
+		sw.AnalysisRunning = false
+		sw.Error = fmt.Sprintf("Failed to start analysis: %v", err)
+		return m, nil
+	}
+	m.beginAnalysisProgress(analysisID, m.target, m.targetType, false)
 	return m, tea.Batch(m.runSetupAnalysis(), timerTickCmd())
 }
 

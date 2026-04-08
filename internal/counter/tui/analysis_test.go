@@ -6,6 +6,7 @@ package tui
 import (
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,17 @@ import (
 	"github.com/boostsecurityio/smokedmeat/internal/counter"
 	"github.com/boostsecurityio/smokedmeat/internal/poutine"
 )
+
+func TestNewAnalysisID(t *testing.T) {
+	first, err := newAnalysisID()
+	require.NoError(t, err)
+	second, err := newAnalysisID()
+	require.NoError(t, err)
+
+	assert.NotEqual(t, first, second)
+	assert.True(t, strings.HasPrefix(first, "analysis_"))
+	assert.Len(t, strings.TrimPrefix(first, "analysis_"), 32)
+}
 
 func TestModel_Update_AnalysisStarted(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})

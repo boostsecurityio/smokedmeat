@@ -46,11 +46,11 @@ type cachedAnalysisResult struct {
 func analysisRequestTimeout(targetType string, deep bool) time.Duration {
 	switch {
 	case deep && targetType == "org":
-		return 60 * time.Minute
+		return 90 * time.Minute
 	case deep:
 		return 30 * time.Minute
 	case targetType == "org":
-		return 45 * time.Minute
+		return 60 * time.Minute
 	default:
 		return 20 * time.Minute
 	}
@@ -153,6 +153,14 @@ func (h *Handler) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TargetType != "org" && req.TargetType != "repo" {
 		http.Error(w, "target_type must be 'org' or 'repo'", http.StatusBadRequest)
+		return
+	}
+	if req.AnalysisID != "" && !isValidID(req.AnalysisID) {
+		http.Error(w, "analysis_id contains invalid characters", http.StatusBadRequest)
+		return
+	}
+	if req.AnalysisID != "" && req.SessionID == "" {
+		http.Error(w, "session_id is required when analysis_id is provided", http.StatusBadRequest)
 		return
 	}
 
@@ -354,7 +362,7 @@ func newAnalysisProgressObserver(handler *Handler, req AnalyzeRequest, startedAt
 }
 
 func (h *Handler) recordAnalysisPending(req AnalyzeRequest) {
-	if req.AnalysisID == "" {
+	if req.AnalysisID == "" || req.SessionID == "" {
 		return
 	}
 	h.analysisMu.Lock()
@@ -368,7 +376,7 @@ func (h *Handler) recordAnalysisPending(req AnalyzeRequest) {
 }
 
 func (h *Handler) recordAnalysisCompleted(req AnalyzeRequest, result *poutine.AnalysisResult) {
-	if req.AnalysisID == "" {
+	if req.AnalysisID == "" || req.SessionID == "" {
 		return
 	}
 	h.analysisMu.Lock()
@@ -383,7 +391,7 @@ func (h *Handler) recordAnalysisCompleted(req AnalyzeRequest, result *poutine.An
 }
 
 func (h *Handler) recordAnalysisFailure(req AnalyzeRequest, err string) {
-	if req.AnalysisID == "" {
+	if req.AnalysisID == "" || req.SessionID == "" {
 		return
 	}
 	h.analysisMu.Lock()
@@ -398,7 +406,7 @@ func (h *Handler) recordAnalysisFailure(req AnalyzeRequest, err string) {
 }
 
 func (h *Handler) lookupAnalysisResult(analysisID, sessionID string) (*cachedAnalysisResult, bool) {
-	if analysisID == "" {
+	if analysisID == "" || sessionID == "" {
 		return nil, false
 	}
 	h.analysisMu.Lock()
@@ -408,10 +416,7 @@ func (h *Handler) lookupAnalysisResult(analysisID, sessionID string) (*cachedAna
 	if !ok {
 		return nil, false
 	}
-	if entry.SessionID != "" && sessionID != "" && entry.SessionID != sessionID {
-		return nil, false
-	}
-	if entry.SessionID != "" && sessionID == "" {
+	if entry.SessionID == "" || entry.SessionID != sessionID {
 		return nil, false
 	}
 	entryCopy := *entry

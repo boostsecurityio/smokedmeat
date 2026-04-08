@@ -1086,7 +1086,7 @@ analyze-perf:
 		TARGET_VALUE=$$(grep '^SM_ANALYZE_PERF_TARGET=' $(E2E_ENV) | cut -d= -f2-); \
 	fi; \
 	if [ -z "$$TARGET_VALUE" ]; then \
-		echo "ERROR: set TARGET=org-or-repo or add SM_ANALYZE_PERF_TARGET to $(E2E_ENV)"; \
+		echo "ERROR: set TARGET=<org-or-owner/repo> or add SM_ANALYZE_PERF_TARGET to $(E2E_ENV)"; \
 		exit 1; \
 	fi; \
 	TARGET_TYPE_VALUE="$(TARGET_TYPE)"; \

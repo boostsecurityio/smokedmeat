@@ -241,6 +241,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// Operator routes (require operator auth - token or SSH-based)
 	mux.Handle("GET /ws", opAuth(http.HandlerFunc(s.operators.HandleWebSocket)))
 	mux.Handle("POST /analyze", opAuth(http.HandlerFunc(s.handler.handleAnalyze)))
+	mux.Handle("GET /analyze/result/{analysisID}", opAuth(http.HandlerFunc(s.handler.handleGetAnalyzeResult)))
 	mux.Handle("POST /github/deploy/pr", opAuth(http.HandlerFunc(s.handler.handleGitHubDeployPR)))
 	mux.Handle("POST /github/deploy/issue", opAuth(http.HandlerFunc(s.handler.handleGitHubDeployIssue)))
 	mux.Handle("POST /github/deploy/comment", opAuth(http.HandlerFunc(s.handler.handleGitHubDeployComment)))

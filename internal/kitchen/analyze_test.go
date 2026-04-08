@@ -73,6 +73,36 @@ func TestHandler_Analyze_InvalidTargetType(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "target_type must be 'org' or 'repo'")
 }
 
+func TestHandler_Analyze_InvalidAnalysisID(t *testing.T) {
+	mock := &mockPublisher{}
+	_, mux := newTestHandler(mock, nil)
+
+	body := `{"token":"ghp_xxx","target":"acme/repo","target_type":"repo","session_id":"sess-1","analysis_id":"analysis 123"}`
+	req := httptest.NewRequest(http.MethodPost, "/analyze", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "analysis_id contains invalid characters")
+}
+
+func TestHandler_Analyze_AnalysisIDRequiresSessionID(t *testing.T) {
+	mock := &mockPublisher{}
+	_, mux := newTestHandler(mock, nil)
+
+	body := `{"token":"ghp_xxx","target":"acme/repo","target_type":"repo","analysis_id":"analysis_123"}`
+	req := httptest.NewRequest(http.MethodPost, "/analyze", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "session_id is required when analysis_id is provided")
+}
+
 func TestHandler_Analyze_InvalidJSON(t *testing.T) {
 	mock := &mockPublisher{}
 	_, mux := newTestHandler(mock, nil)
@@ -111,6 +141,26 @@ func TestAnalyzeRequest_Structure(t *testing.T) {
 	assert.Equal(t, "ghp_test", req.Token)
 	assert.Equal(t, "acme/repo", req.Target)
 	assert.Equal(t, "repo", req.TargetType)
+}
+
+func TestAnalysisRequestTimeout(t *testing.T) {
+	tests := []struct {
+		name       string
+		targetType string
+		deep       bool
+		want       time.Duration
+	}{
+		{name: "repo", targetType: "repo", deep: false, want: 20 * time.Minute},
+		{name: "org", targetType: "org", deep: false, want: 60 * time.Minute},
+		{name: "deep repo", targetType: "repo", deep: true, want: 30 * time.Minute},
+		{name: "deep org", targetType: "org", deep: true, want: 90 * time.Minute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, analysisRequestTimeout(tt.targetType, tt.deep))
+		})
+	}
 }
 
 func TestHandler_GetAnalyzeResult_ReturnsStatuses(t *testing.T) {
@@ -172,6 +222,25 @@ func TestHandler_GetAnalyzeResult_HidesOtherSessions(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/analyze/result/analysis_123?session_id=sess-2", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var status AnalyzeResultStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &status))
+	assert.Equal(t, analysisStatusUnknown, status.Status)
+}
+
+func TestHandler_GetAnalyzeResult_RequiresSessionID(t *testing.T) {
+	mock := &mockPublisher{}
+	h, mux := newTestHandler(mock, nil)
+
+	h.recordAnalysisPending(AnalyzeRequest{
+		AnalysisID: "analysis_123",
+		SessionID:  "sess-1",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/analyze/result/analysis_123", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 

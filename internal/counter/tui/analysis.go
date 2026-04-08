@@ -5,6 +5,8 @@ package tui
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -46,8 +48,12 @@ func analysisRequestTimeout(targetType string, deep bool) time.Duration {
 	}
 }
 
-func newAnalysisID() string {
-	return fmt.Sprintf("analysis_%d", time.Now().UnixNano())
+func newAnalysisID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return "analysis_" + hex.EncodeToString(raw[:]), nil
 }
 
 func isRecoverableDroppedAnalysisError(err error) bool {
@@ -106,7 +112,11 @@ func (m Model) handleAnalyzeForTarget(target, targetType string, deep, selection
 		targetType = "org"
 	}
 	targetSpec := targetType + ":" + target
-	analysisID := newAnalysisID()
+	analysisID, err := newAnalysisID()
+	if err != nil {
+		m.AddOutput("error", fmt.Sprintf("Failed to start analysis: %v", err))
+		return m, nil
+	}
 
 	m.analysisFocusRepo = ""
 	m.beginAnalysisProgress(analysisID, target, targetType, deep)
@@ -288,7 +298,13 @@ func (m Model) runPivotAnalysis() tea.Cmd {
 }
 
 func (m Model) runAnalysis() tea.Cmd {
-	return m.runAnalysisForTarget(newAnalysisID(), m.target, m.targetType)
+	analysisID, err := newAnalysisID()
+	if err != nil {
+		return func() tea.Msg {
+			return AnalysisErrorMsg{Err: fmt.Errorf("failed to start analysis: %w", err)}
+		}
+	}
+	return m.runAnalysisForTarget(analysisID, m.target, m.targetType)
 }
 
 func (m Model) runAnalysisForTarget(analysisID, target, targetType string) tea.Cmd {
