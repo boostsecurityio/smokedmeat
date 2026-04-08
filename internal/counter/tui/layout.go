@@ -2570,6 +2570,7 @@ func helpCommandsForPhase(phase Phase) []string {
 			"analyze          Scan target for CI/CD vulnerabilities",
 			"deep-analyze     Analyze workflows (poutine) + secrets (gitleaks)",
 			"graph            Open attack graph in browser",
+			"purge <target>   Preview purge for repo/org analysis state",
 			"pivot ssh [scope] Validate repos with selected SSH key loot",
 			"ssh status       Show SSH key + confirmed repos",
 			"ssh shell        Open isolated git/ssh shell for active SSH key",

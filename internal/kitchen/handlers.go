@@ -965,33 +965,35 @@ func (h *Handler) handleStager(w http.ResponseWriter, r *http.Request) {
 		"payload_len", len(payload),
 	)
 
-	go func() {
-		ctx := context.Background()
-		if prURL := stager.Metadata["lotp_pr_url"]; prURL != "" {
-			token := stager.Metadata["lotp_token"]
-			if err := closePRByURL(ctx, token, prURL); err != nil {
-				slog.Warn("failed to close LOTP PR", "pr_url", prURL, "error", err)
-			} else {
-				slog.Info("closed LOTP PR after callback", "pr_url", prURL)
+	if shouldAutoCloseStager(stager) {
+		go func() {
+			ctx := context.Background()
+			if prURL := stager.Metadata["lotp_pr_url"]; prURL != "" {
+				token := stager.Metadata["lotp_token"]
+				if err := closePRByURL(ctx, token, prURL); err != nil {
+					slog.Warn("failed to close LOTP PR", "pr_url", prURL, "error", err)
+				} else {
+					slog.Info("closed LOTP PR after callback", "pr_url", prURL)
+				}
 			}
-		}
-		if prURL := stager.Metadata["pr_url"]; prURL != "" {
-			token := stager.Metadata["deploy_token"]
-			if err := closePRByURL(ctx, token, prURL); err != nil {
-				slog.Warn("failed to close deployed PR", "pr_url", prURL, "error", err)
-			} else {
-				slog.Info("closed deployed PR after callback", "pr_url", prURL)
+			if prURL := stager.Metadata["pr_url"]; prURL != "" {
+				token := stager.Metadata["deploy_token"]
+				if err := closePRByURL(ctx, token, prURL); err != nil {
+					slog.Warn("failed to close deployed PR", "pr_url", prURL, "error", err)
+				} else {
+					slog.Info("closed deployed PR after callback", "pr_url", prURL)
+				}
 			}
-		}
-		if issueURL := stager.Metadata["issue_url"]; issueURL != "" {
-			token := stager.Metadata["deploy_token"]
-			if err := closeIssueByURL(ctx, token, issueURL); err != nil {
-				slog.Warn("failed to close deployed issue", "issue_url", issueURL, "error", err)
-			} else {
-				slog.Info("closed deployed issue after callback", "issue_url", issueURL)
+			if issueURL := stager.Metadata["issue_url"]; issueURL != "" {
+				token := stager.Metadata["deploy_token"]
+				if err := closeIssueByURL(ctx, token, issueURL); err != nil {
+					slog.Warn("failed to close deployed issue", "issue_url", issueURL, "error", err)
+				} else {
+					slog.Info("closed deployed issue after callback", "issue_url", issueURL)
+				}
 			}
-		}
-	}()
+		}()
+	}
 
 	if h.sessions != nil && stager.SessionID != "" && invocation.DwellTime > 0 {
 		deadline := time.Now().Add(invocation.DwellTime)
@@ -1137,6 +1139,13 @@ func (h *Handler) persistAgent(agent *AgentState) {
 	if err := agentRepo.Upsert(row); err != nil {
 		slog.Warn("failed to persist agent", "agent_id", agent.AgentID, "error", err)
 	}
+}
+
+func shouldAutoCloseStager(stager *RegisteredStager) bool {
+	if stager == nil || stager.Persistent || stager.MaxCallbacks <= 0 {
+		return false
+	}
+	return stager.CallbackCount >= stager.MaxCallbacks
 }
 
 // HistoryRequest is the request body for recording history.

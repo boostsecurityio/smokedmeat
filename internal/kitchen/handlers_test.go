@@ -85,7 +85,60 @@ func TestHandler_RegisterRoutes_RegistersPurge(t *testing.T) {
 
 	mux.ServeHTTP(rec, req)
 
-	assert.NotEqual(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "session_id is required")
+}
+
+func TestShouldAutoCloseStager(t *testing.T) {
+	tests := []struct {
+		name   string
+		stager *RegisteredStager
+		want   bool
+	}{
+		{
+			name: "nil stager",
+			want: false,
+		},
+		{
+			name: "persistent stager never auto closes",
+			stager: &RegisteredStager{
+				Persistent:    true,
+				MaxCallbacks:  0,
+				CallbackCount: 1,
+			},
+			want: false,
+		},
+		{
+			name: "fanout before final callback",
+			stager: &RegisteredStager{
+				MaxCallbacks:  3,
+				CallbackCount: 2,
+			},
+			want: false,
+		},
+		{
+			name: "fanout on final callback",
+			stager: &RegisteredStager{
+				MaxCallbacks:  3,
+				CallbackCount: 3,
+			},
+			want: true,
+		},
+		{
+			name: "default one shot closes on first callback",
+			stager: &RegisteredStager{
+				MaxCallbacks:  1,
+				CallbackCount: 1,
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, shouldAutoCloseStager(tt.stager))
+		})
+	}
 }
 
 // =============================================================================

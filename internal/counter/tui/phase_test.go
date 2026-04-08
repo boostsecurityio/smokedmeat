@@ -72,7 +72,6 @@ func TestWizardState_Reset(t *testing.T) {
 func TestNewModel_DefaultWizardCallbackBudget(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 
-	assert.NotNil(t, m.wizard)
 	assert.Equal(t, 1, m.wizard.CallbackBudget)
 }
 
