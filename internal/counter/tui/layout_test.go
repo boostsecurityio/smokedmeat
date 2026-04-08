@@ -386,6 +386,9 @@ func TestHelpCommandsForPhase(t *testing.T) {
 			joined := strings.Join(cmds, "\n")
 			assert.Contains(t, joined, tt.present, "phase %s should include %q", tt.phase, tt.present)
 			assert.NotContains(t, joined, tt.absent, "phase %s should not include %q", tt.phase, tt.absent)
+			if tt.phase == PhasePostExploit || tt.phase == PhasePivot {
+				assert.Contains(t, joined, "purge <target>", "phase %s should include purge help", tt.phase)
+			}
 		})
 	}
 }

@@ -53,6 +53,7 @@ func TestStagerStore_Register_SetsDefaults(t *testing.T) {
 	assert.NotZero(t, retrieved.CreatedAt)
 	assert.NotZero(t, retrieved.ExpiresAt)
 	assert.True(t, retrieved.ExpiresAt.After(retrieved.CreatedAt))
+	assert.Equal(t, 1, retrieved.MaxCallbacks)
 }
 
 func TestStagerStore_Get_NotFound(t *testing.T) {
@@ -308,6 +309,7 @@ func TestRegisteredStager_AllFields(t *testing.T) {
 		CallbackIP:   "10.0.0.1",
 		SessionID:    "session-abc",
 		Metadata:     map[string]string{"env": "production"},
+		MaxCallbacks: 3,
 	}
 
 	assert.Equal(t, "full-stager", stager.ID)
@@ -320,6 +322,7 @@ func TestRegisteredStager_AllFields(t *testing.T) {
 	assert.Equal(t, "10.0.0.1", stager.CallbackIP)
 	assert.Equal(t, "session-abc", stager.SessionID)
 	assert.Equal(t, "production", stager.Metadata["env"])
+	assert.Equal(t, 3, stager.MaxCallbacks)
 }
 
 func TestStagerStore_ValidateStager(t *testing.T) {
@@ -512,6 +515,65 @@ func TestStagerStore_ResolveCallback_AcceptsValid(t *testing.T) {
 	stager, _, ok := store.ResolveCallback("valid-cb", "127.0.0.1", "agt-1")
 	assert.True(t, ok, "ResolveCallback should accept valid stagers")
 	assert.NotNil(t, stager)
+	assert.Nil(t, store.Get("valid-cb"))
+}
+
+func TestStagerStore_ResolveCallback_RetainsFanoutStagerUntilBudgetExhausted(t *testing.T) {
+	store := NewStagerStore(DefaultStagerStoreConfig())
+	err := store.Register(&RegisteredStager{
+		ID:           "fanout-cb",
+		SessionID:    "session-1",
+		ExpiresAt:    time.Now().Add(time.Hour),
+		MaxCallbacks: 3,
+	})
+	require.NoError(t, err)
+
+	first, _, ok := store.ResolveCallback("fanout-cb", "127.0.0.1", "agt-1")
+	require.True(t, ok)
+	require.NotNil(t, first)
+	assert.Equal(t, 1, first.CallbackCount)
+	current := store.Get("fanout-cb")
+	require.NotNil(t, current)
+	assert.Equal(t, 1, current.CallbackCount)
+
+	second, _, ok := store.ResolveCallback("fanout-cb", "127.0.0.1", "agt-2")
+	require.True(t, ok)
+	require.NotNil(t, second)
+	assert.Equal(t, 2, second.CallbackCount)
+	current = store.Get("fanout-cb")
+	require.NotNil(t, current)
+	assert.Equal(t, 2, current.CallbackCount)
+
+	third, _, ok := store.ResolveCallback("fanout-cb", "127.0.0.1", "agt-3")
+	require.True(t, ok)
+	require.NotNil(t, third)
+	assert.Equal(t, 3, third.CallbackCount)
+	assert.Nil(t, store.Get("fanout-cb"))
+}
+
+func TestStagerStore_ResolveCallback_InvokesDeleteHookWhenBudgetExhausted(t *testing.T) {
+	config := DefaultStagerStoreConfig()
+	deleted := make([]string, 0, 1)
+	config.DeleteHook = func(id string) {
+		deleted = append(deleted, id)
+	}
+	store := NewStagerStore(config)
+
+	err := store.Register(&RegisteredStager{
+		ID:           "fanout-cb",
+		SessionID:    "session-1",
+		ExpiresAt:    time.Now().Add(time.Hour),
+		MaxCallbacks: 2,
+	})
+	require.NoError(t, err)
+
+	_, _, ok := store.ResolveCallback("fanout-cb", "127.0.0.1", "agt-1")
+	require.True(t, ok)
+	assert.Empty(t, deleted)
+
+	_, _, ok = store.ResolveCallback("fanout-cb", "127.0.0.1", "agt-2")
+	require.True(t, ok)
+	assert.Equal(t, []string{"fanout-cb"}, deleted)
 }
 
 func TestStagerStore_Register_PersistentSkipsDefaultTTL(t *testing.T) {

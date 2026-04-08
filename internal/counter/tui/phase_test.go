@@ -69,6 +69,13 @@ func TestWizardState_Reset(t *testing.T) {
 	assert.False(t, w.CachePoisonReplace)
 }
 
+func TestNewModel_DefaultWizardCallbackBudget(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+
+	assert.NotNil(t, m.wizard)
+	assert.Equal(t, 1, m.wizard.CallbackBudget)
+}
+
 func TestWaitingState_TimeoutBehavior(t *testing.T) {
 	t.Run("fresh state is not warning or timed out", func(t *testing.T) {
 		w := NewWaitingState("stg-1", "org/repo", "V001", ".github/workflows/ci.yml", "build", "PR", 0)

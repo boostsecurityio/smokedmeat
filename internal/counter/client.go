@@ -154,6 +154,7 @@ type CallbackPayload struct {
 	CallbackIP    string            `json:"callback_ip,omitempty"`
 	DwellTime     string            `json:"dwell_time,omitempty"`
 	Persistent    bool              `json:"persistent"`
+	MaxCallbacks  int               `json:"max_callbacks,omitempty"`
 	DefaultMode   string            `json:"default_mode,omitempty"`
 	NextMode      string            `json:"next_mode,omitempty"`
 	CallbackCount int               `json:"callback_count"`

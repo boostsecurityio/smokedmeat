@@ -23,6 +23,7 @@ type CallbackSummary struct {
 	CallbackIP    string            `json:"callback_ip,omitempty"`
 	DwellTime     string            `json:"dwell_time,omitempty"`
 	Persistent    bool              `json:"persistent"`
+	MaxCallbacks  int               `json:"max_callbacks,omitempty"`
 	DefaultMode   string            `json:"default_mode,omitempty"`
 	NextMode      string            `json:"next_mode,omitempty"`
 	CallbackCount int               `json:"callback_count"`
@@ -91,6 +92,7 @@ func callbackSummary(stager *RegisteredStager) CallbackSummary {
 		CalledBack:    stager.CalledBack,
 		CallbackIP:    stager.CallbackIP,
 		Persistent:    stager.Persistent,
+		MaxCallbacks:  stager.MaxCallbacks,
 		DefaultMode:   stager.DefaultMode,
 		NextMode:      stager.NextMode,
 		CallbackCount: stager.CallbackCount,
@@ -149,6 +151,7 @@ func stagerRowFromRegistered(stager *RegisteredStager) *db.StagerRow {
 		Metadata:      stager.Metadata,
 		DwellTime:     stager.DwellTime,
 		Persistent:    stager.Persistent,
+		MaxCallbacks:  stager.MaxCallbacks,
 		DefaultMode:   stager.DefaultMode,
 		NextMode:      stager.NextMode,
 		CallbackCount: stager.CallbackCount,
@@ -175,6 +178,7 @@ func registeredStagerFromRow(row *db.StagerRow) *RegisteredStager {
 		Metadata:      row.Metadata,
 		DwellTime:     row.DwellTime,
 		Persistent:    row.Persistent,
+		MaxCallbacks:  row.MaxCallbacks,
 		DefaultMode:   row.DefaultMode,
 		NextMode:      row.NextMode,
 		CallbackCount: row.CallbackCount,

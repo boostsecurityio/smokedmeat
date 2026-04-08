@@ -216,6 +216,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.handler.SetDatabase(s.database)
 	s.handler.SetOperatorHub(s.operators)
 	s.handler.SetAuth(s.auth)
+	s.handler.StagerStore().StartCleanup()
 
 	// Create GraphHub for real-time graph visualization
 	s.graphHub = NewGraphHub(s.handler.Pantry())
@@ -299,6 +300,10 @@ func (s *Server) Start(ctx context.Context) error {
 	case <-ctx.Done():
 		return s.Shutdown(context.Background())
 	case err := <-errChan:
+		shutdownErr := s.Shutdown(context.Background())
+		if shutdownErr != nil {
+			return errors.Join(err, shutdownErr)
+		}
 		return err
 	}
 }
@@ -376,6 +381,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 
 	if s.handler != nil {
+		s.handler.StagerStore().StopCleanup()
 		if err := s.handler.SavePantry(); err != nil {
 			slog.Warn("failed to save pantry on shutdown", "error", err)
 		} else {

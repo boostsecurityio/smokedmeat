@@ -81,7 +81,7 @@ func (m *Model) prepareWizardStager(vuln *Vulnerability, injCtx rye.InjectionCon
 	m.wizard.VictimStagerID = ""
 
 	if m.wizard == nil || !m.wizard.CachePoisonEnabled {
-		if err := m.registerStagerForVuln(stager.ID, m.wizard.DwellTime, vuln); err != nil {
+		if err := m.registerStagerForVuln(stager.ID, m.wizard.DwellTime, m.wizard.CallbackBudget, vuln); err != nil {
 			return stager, payload, err
 		}
 		return stager, payload, nil

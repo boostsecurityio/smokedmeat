@@ -50,6 +50,7 @@ func TestKitchenClient_RegisterCallback_SendsRequest(t *testing.T) {
 		SessionID:    "sess-1",
 		DwellTime:    "30s",
 		Persistent:   true,
+		MaxCallbacks: 4,
 		DefaultMode:  "express",
 		Metadata:     map[string]string{"repository": "acme/api"},
 	})
@@ -62,6 +63,7 @@ func TestKitchenClient_RegisterCallback_SendsRequest(t *testing.T) {
 	assert.Equal(t, "payload", gotBody.Payload)
 	assert.Equal(t, "30s", gotBody.DwellTime)
 	assert.True(t, gotBody.Persistent)
+	assert.Equal(t, 4, gotBody.MaxCallbacks)
 	assert.Equal(t, "express", gotBody.DefaultMode)
 	assert.Equal(t, "acme/api", gotBody.Metadata["repository"])
 	assert.Equal(t, "stg-1", resp.Callback.ID)

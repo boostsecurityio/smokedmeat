@@ -1674,6 +1674,7 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 			emptyLine,
 		)
 		lines = append(lines, m.renderDwellTimeOption(pad, innerWidth)...)
+		lines = append(lines, m.renderCallbackBudgetOption(pad, innerWidth)...)
 		lines = append(lines, m.renderAutoCloseOption(pad, innerWidth)...)
 	case DeliveryComment:
 		targets := m.availableCommentTargets()
@@ -1734,6 +1735,7 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 			emptyLine,
 		)
 		lines = append(lines, m.renderDwellTimeOption(pad, innerWidth)...)
+		lines = append(lines, m.renderCallbackBudgetOption(pad, innerWidth)...)
 		if currentTarget == CommentTargetStubPullRequest {
 			lines = append(lines, m.renderAutoCloseOption(pad, innerWidth)...)
 		}
@@ -1745,6 +1747,7 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 			emptyLine,
 		)
 		lines = append(lines, m.renderDwellTimeOption(pad, innerWidth)...)
+		lines = append(lines, m.renderCallbackBudgetOption(pad, innerWidth)...)
 		lines = append(lines, m.renderDraftOption(pad, innerWidth)...)
 		lines = append(lines, m.renderAutoCloseOption(pad, innerWidth)...)
 	case DeliveryCopyOnly:
@@ -1753,6 +1756,7 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 			emptyLine,
 		)
 		lines = append(lines, m.renderDwellTimeOption(pad, innerWidth)...)
+		lines = append(lines, m.renderCallbackBudgetOption(pad, innerWidth)...)
 		if m.wizard.Payload != "" {
 			lines = append(lines,
 				formatWizardContent(pad, "", mutedColor.Render("Payload:"), innerWidth),
@@ -1770,6 +1774,7 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 			emptyLine,
 		)
 		lines = append(lines, m.renderDwellTimeOption(pad, innerWidth)...)
+		lines = append(lines, m.renderCallbackBudgetOption(pad, innerWidth)...)
 		if m.wizard.SelectedVuln != nil {
 			vuln := m.wizard.SelectedVuln
 			trigger := strings.ToLower(vuln.Trigger)
@@ -1864,6 +1869,7 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 				emptyLine,
 			)
 			lines = append(lines, m.renderDwellTimeOption(pad, innerWidth)...)
+			lines = append(lines, m.renderCallbackBudgetOption(pad, innerWidth)...)
 		}
 	default:
 		lines = append(lines,
@@ -1935,6 +1941,22 @@ func (m *Model) renderDwellTimeOption(pad string, innerWidth int) []string {
 	}
 	return []string{
 		formatWizardContent(pad, "Mode:", dwellLabel+" "+mutedColor.Render("[d] to cycle"), innerWidth),
+		emptyLine,
+	}
+}
+
+func (m *Model) renderCallbackBudgetOption(pad string, innerWidth int) []string {
+	if m.wizard == nil || m.wizard.CachePoisonEnabled {
+		return nil
+	}
+	emptyLine := strings.Repeat(" ", innerWidth)
+	budget := m.wizard.CallbackBudget
+	if budget <= 0 {
+		budget = 1
+	}
+	label := fmt.Sprintf("Stager expires after %d callback(s)", budget)
+	return []string{
+		formatWizardContent(pad, "Callbacks:", label+" "+mutedColor.Render("[b] to cycle"), innerWidth),
 		emptyLine,
 	}
 }
@@ -2105,7 +2127,10 @@ func (m *Model) buildWizardStep3LOTP(width int) []string {
 	lines = append(lines,
 		emptyLine,
 		formatWizardContent(pad, "", warningColor.Render("⚠️  THIS WILL CREATE A PR WITH MALICIOUS "+warningFile), innerWidth),
+		emptyLine,
 	)
+	lines = append(lines, m.renderDwellTimeOption(pad, innerWidth)...)
+	lines = append(lines, m.renderCallbackBudgetOption(pad, innerWidth)...)
 
 	return lines
 }
@@ -2545,7 +2570,6 @@ func helpCommandsForPhase(phase Phase) []string {
 			"analyze          Scan target for CI/CD vulnerabilities",
 			"deep-analyze     Analyze workflows (poutine) + secrets (gitleaks)",
 			"graph            Open attack graph in browser",
-			"purge <target>   Preview purge for repo/org analysis state",
 			"pivot ssh [scope] Validate repos with selected SSH key loot",
 			"ssh status       Show SSH key + confirmed repos",
 			"ssh shell        Open isolated git/ssh shell for active SSH key",

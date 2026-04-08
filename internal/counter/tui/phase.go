@@ -269,6 +269,7 @@ type WizardState struct {
 	PayloadPreview         string
 	IssueNumber            int
 	DwellTime              time.Duration
+	CallbackBudget         int
 	Draft                  *bool
 	AutoClose              *bool
 	CachePoisonEnabled     bool
@@ -292,6 +293,7 @@ func (w *WizardState) Reset() {
 	w.PayloadPreview = ""
 	w.IssueNumber = 0
 	w.DwellTime = 0
+	w.CallbackBudget = 1
 	w.Draft = nil
 	w.AutoClose = nil
 	w.CachePoisonEnabled = false

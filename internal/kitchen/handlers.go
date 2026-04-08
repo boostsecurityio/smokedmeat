@@ -943,9 +943,8 @@ func (h *Handler) handleStager(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	h.persistStager(stager)
-	if !stager.Persistent {
-		h.deleteStager(stagerID)
+	if stager.Persistent || h.stagerStore.Get(stagerID) != nil {
+		h.persistStager(stager)
 	}
 
 	var payload string
@@ -1029,6 +1028,7 @@ type StagerRegisterRequest struct {
 	Metadata     map[string]string `json:"metadata"`
 	DwellTime    string            `json:"dwell_time"`
 	Persistent   bool              `json:"persistent,omitempty"`
+	MaxCallbacks int               `json:"max_callbacks,omitempty"`
 	DefaultMode  string            `json:"default_mode,omitempty"`
 }
 
@@ -1078,6 +1078,7 @@ func (h *Handler) handleStagerRegister(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    time.Now(),
 		DwellTime:    dwellTime,
 		Persistent:   req.Persistent,
+		MaxCallbacks: req.MaxCallbacks,
 		DefaultMode:  req.DefaultMode,
 	}
 

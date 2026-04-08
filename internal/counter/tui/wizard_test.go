@@ -4,6 +4,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -187,6 +188,28 @@ func TestExecuteWizardDeployment_CopyOnly(t *testing.T) {
 	assert.True(t, hasPayloadOutput, "Should have payload in output")
 }
 
+func TestExecuteWizardDeployment_CopyOnly_ShowsCallbackBudgetInModeLabel(t *testing.T) {
+	mock := &mockKitchenClient{}
+	m := newModelForWizardDeploy(t, mock)
+	m.wizard.SelectedVuln = &Vulnerability{Repository: "acme/api", Context: "pr_body", ID: "V005"}
+	m.wizard.DeliveryMethod = DeliveryCopyOnly
+	m.wizard.DwellTime = 30 * time.Second
+	m.wizard.CallbackBudget = 3
+
+	result, _ := m.executeWizardDeployment()
+	model := result.(Model)
+
+	require.NotEmpty(t, model.output)
+	found := false
+	for _, line := range model.output {
+		if line.Type == "muted" && strings.Contains(line.Content, "Mode: dwell 30s, 3 callbacks") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found)
+}
+
 func TestExecuteWizardDeployment_ManualSteps(t *testing.T) {
 	mock := &mockKitchenClient{}
 	m := newModelForWizardDeploy(t, mock)
@@ -251,6 +274,36 @@ func TestExecuteWizardDeployment_AutoDispatch_UsesActiveSessionToken(t *testing.
 	assert.Nil(t, model.waiting)
 	require.NotEmpty(t, model.output)
 	assert.Contains(t, model.output[len(model.output)-1].Content, "Triggering workflow_dispatch")
+}
+
+func TestExecuteWizardDeployment_AutoDispatch_ShowsCallbackBudgetInModeLabel(t *testing.T) {
+	mock := &mockKitchenClient{}
+	m := newModelForWizardDeploy(t, mock)
+	m.jobDeadline = time.Now().Add(2 * time.Minute)
+	m.sessionLoot = []CollectedSecret{{
+		Name:      "GITHUB_TOKEN",
+		Value:     "ghs_live123",
+		Ephemeral: true,
+		Type:      "github_token",
+	}}
+	m.tokenPermissions = map[string]string{"actions": "write"}
+	m.wizard.SelectedVuln = &Vulnerability{
+		Repository:       "acme/api",
+		Workflow:         "ci.yml",
+		Context:          "workflow_dispatch_input",
+		ID:               "V007",
+		InjectionSources: []string{"github.event.inputs.payload"},
+	}
+	m.wizard.DeliveryMethod = DeliveryAutoDispatch
+	m.wizard.Step = 3
+	m.wizard.DwellTime = 30 * time.Second
+	m.wizard.CallbackBudget = 3
+
+	result, _ := m.executeWizardDeployment()
+	model := result.(Model)
+
+	require.NotEmpty(t, model.output)
+	assert.Contains(t, model.output[len(model.output)-1].Content, "dwell 30s, 3 callbacks")
 }
 
 func TestExecuteWizardDeployment_AutoDispatch_UsesActiveLootToken(t *testing.T) {
@@ -691,6 +744,50 @@ func TestWizardKeyMsg_DKey_IgnoredOnStep2(t *testing.T) {
 
 	model := result.(Model)
 	assert.Equal(t, time.Duration(0), model.wizard.DwellTime, "d key should be ignored on step 2")
+}
+
+func TestWizardKeyMsg_BKey_TogglesCallbackBudget(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWizard
+	m.wizard = &WizardState{Step: 3, CallbackBudget: 1}
+
+	result, _ := m.handleWizardKeyMsg(tea.KeyPressMsg{Code: 'b'})
+
+	model := result.(Model)
+	assert.Equal(t, 2, model.wizard.CallbackBudget)
+}
+
+func TestWizardKeyMsg_BKey_CyclesCallbackBudgetPresets(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWizard
+	m.wizard = &WizardState{Step: 3, CallbackBudget: 5}
+
+	result, _ := m.handleWizardKeyMsg(tea.KeyPressMsg{Code: 'b'})
+
+	model := result.(Model)
+	assert.Equal(t, 1, model.wizard.CallbackBudget)
+}
+
+func TestWizardKeyMsg_BKey_WorksForCommentDelivery(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWizard
+	m.wizard = &WizardState{Step: 3, DeliveryMethod: DeliveryComment, CallbackBudget: 1}
+
+	result, _ := m.handleWizardKeyMsg(tea.KeyPressMsg{Code: 'b'})
+
+	model := result.(Model)
+	assert.Equal(t, 2, model.wizard.CallbackBudget)
+}
+
+func TestWizardKeyMsg_BKey_IgnoredForCachePoison(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWizard
+	m.wizard = &WizardState{Step: 3, CallbackBudget: 1, CachePoisonEnabled: true}
+
+	result, _ := m.handleWizardKeyMsg(tea.KeyPressMsg{Code: 'b'})
+
+	model := result.(Model)
+	assert.Equal(t, 1, model.wizard.CallbackBudget)
 }
 
 func TestWizardKeyMsg_FKey_TogglesDraft(t *testing.T) {
