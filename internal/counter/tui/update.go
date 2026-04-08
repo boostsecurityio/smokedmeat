@@ -907,6 +907,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.recordHistoryCmd(historyEntry)
 
+	case PurgePreviewMsg:
+		scopeSpec := msg.Response.ScopeType + ":" + msg.Response.ScopeValue
+		m.AddOutput("info", fmt.Sprintf("Purge preview for %s", scopeSpec))
+		m.AddOutput("info", fmt.Sprintf("Would remove %d pantry assets and %d known entity records", msg.Response.PantryAssets, msg.Response.KnownEntities))
+		m.AddOutput("info", "Run 'purge confirm "+scopeSpec+"' to execute")
+		return m, nil
+
+	case PurgeCompletedMsg:
+		scopeSpec := msg.Response.ScopeType + ":" + msg.Response.ScopeValue
+		m.replaceKnownEntities(msg.KnownEntities)
+		m.applyPurgedPantry(msg.Pantry)
+		m.AddOutput("success", fmt.Sprintf("Purged %s", scopeSpec))
+		m.AddOutput("info", fmt.Sprintf("Removed %d pantry assets and %d known entity records", msg.Response.PantryAssets, msg.Response.KnownEntities))
+		if purgeScopeCoversTarget(msg.Response.ScopeType, msg.Response.ScopeValue, m.targetType, m.target) {
+			m.clearPurgedTarget(msg.Response.ScopeType, msg.Response.ScopeValue)
+		} else {
+			m.activityLog.Add(IconWarning, "Purged "+scopeSpec)
+		}
+		return m, nil
+
+	case PurgeErrorMsg:
+		m.AddOutput("error", fmt.Sprintf("Purge failed: %v", msg.Err))
+		m.activityLog.Add(IconError, fmt.Sprintf("Purge failed: %v", msg.Err))
+		return m, nil
+
 	case HistoryFetchedMsg:
 		m.opHistory.SetEntries(msg.Entries)
 		for _, e := range msg.Entries {

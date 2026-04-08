@@ -32,6 +32,7 @@ type KitchenAPI interface {
 	ControlCallback(ctx context.Context, callbackID string, request CallbackControlRequest) (*CallbackPayload, error)
 	FetchKnownEntities(ctx context.Context, sessionID string) ([]KnownEntityPayload, error)
 	RecordKnownEntity(ctx context.Context, entity KnownEntityPayload) error
+	Purge(ctx context.Context, req PurgeRequest) (*PurgeResponse, error)
 	StartConsuming() error
 	IsConnected() bool
 	Close()

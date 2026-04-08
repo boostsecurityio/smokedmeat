@@ -63,6 +63,7 @@ func TestIconForHistoryType(t *testing.T) {
 		{"exploit.failed", IconError},
 		{"agent.connected", IconAgent},
 		{"secret.extracted", IconSecret},
+		{"purge.executed", IconWarning},
 		{"unknown.type", IconInfo},
 		{"", IconInfo},
 	}
@@ -143,6 +144,11 @@ func TestMessageForHistoryEntry(t *testing.T) {
 			"secret extracted",
 			HistoryEntry{Type: "secret.extracted"},
 			"Secrets extracted",
+		},
+		{
+			"purge executed",
+			HistoryEntry{Type: "purge.executed", TargetType: "repo", Target: "acme/api", Outcome: "3 pantry assets, 1 known entities"},
+			"Purged repo:acme/api → 3 pantry assets, 1 known entities",
 		},
 		{
 			"unknown type",

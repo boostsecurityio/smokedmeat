@@ -76,6 +76,8 @@ func iconForHistoryType(t string) string {
 		return IconAgent
 	case "secret.extracted":
 		return IconSecret
+	case "purge.executed":
+		return IconWarning
 	default:
 		return IconInfo
 	}
@@ -117,6 +119,12 @@ func messageForHistoryEntry(e HistoryEntry) string {
 		return "Agent " + e.AgentID
 	case "secret.extracted":
 		return "Secrets extracted"
+	case "purge.executed":
+		msg := "Purged " + e.TargetType + ":" + e.Target
+		if e.Outcome != "" {
+			msg += " → " + e.Outcome
+		}
+		return msg
 	default:
 		return e.Type
 	}

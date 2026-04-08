@@ -23,6 +23,7 @@ const (
 	HistoryExploitFailed     HistoryEventType = "exploit.failed"
 	HistoryAgentConnected    HistoryEventType = "agent.connected"
 	HistorySecretExtracted   HistoryEventType = "secret.extracted"
+	HistoryPurgeExecuted     HistoryEventType = "purge.executed"
 )
 
 type HistoryRow struct {

@@ -257,6 +257,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.Handle("GET /pantry", opAuth(http.HandlerFunc(s.handler.handleGetPantry)))
 	mux.Handle("GET /history", opAuth(http.HandlerFunc(s.handler.handleGetHistory)))
 	mux.Handle("POST /history", opAuth(http.HandlerFunc(s.handler.handlePostHistory)))
+	mux.Handle("POST /purge", opAuth(http.HandlerFunc(s.handler.handlePurge)))
 	mux.Handle("GET /callbacks", opAuth(http.HandlerFunc(s.handler.handleGetCallbacks)))
 	mux.Handle("POST /callbacks/{callbackID}", opAuth(http.HandlerFunc(s.handler.handlePostCallback)))
 	mux.Handle("GET /known-entities", opAuth(http.HandlerFunc(s.handler.handleGetKnownEntities)))

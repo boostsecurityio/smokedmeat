@@ -165,6 +165,9 @@ func (m Model) executeCommand() (result tea.Model, cmd tea.Cmd) {
 	case "deep-analyze":
 		return m.handleDeepAnalyzeCommand()
 
+	case "purge":
+		return m.handlePurgeCommand(parts[1:])
+
 	case "vulns":
 		m.showVulnerabilities()
 
@@ -402,6 +405,7 @@ var localCommandNames = []string{
 	"order",
 	"payload",
 	"pivot",
+	"purge",
 	"quit",
 	"scan",
 	"select",

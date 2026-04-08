@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -124,4 +125,95 @@ func (r *KnownEntityRepository) ListOrgs(sessionID string) ([]*KnownEntityRow, e
 	}
 
 	return orgs, nil
+}
+
+func (r *KnownEntityRepository) CountByScope(scopeType EntityType, scopeValue string) (int, error) {
+	return r.CountByScopeAndSession(scopeType, scopeValue, "")
+}
+
+func (r *KnownEntityRepository) CountByScopeAndSession(scopeType EntityType, scopeValue, sessionID string) (int, error) {
+	count := 0
+
+	err := r.db.bolt.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(BucketKnownEntities)
+		return b.ForEach(func(_, v []byte) error {
+			var entity KnownEntityRow
+			if err := json.Unmarshal(v, &entity); err != nil {
+				return err
+			}
+			if sessionID != "" && entity.SessionID != sessionID {
+				return nil
+			}
+			if knownEntityMatchesScope(&entity, scopeType, scopeValue) {
+				count++
+			}
+			return nil
+		})
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
+func (r *KnownEntityRepository) DeleteByScope(scopeType EntityType, scopeValue string) (int, error) {
+	return r.DeleteByScopeAndSession(scopeType, scopeValue, "")
+}
+
+func (r *KnownEntityRepository) DeleteByScopeAndSession(scopeType EntityType, scopeValue, sessionID string) (int, error) {
+	deleted := 0
+
+	err := r.db.bolt.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(BucketKnownEntities)
+
+		var keys [][]byte
+		if err := b.ForEach(func(k, v []byte) error {
+			var entity KnownEntityRow
+			if err := json.Unmarshal(v, &entity); err != nil {
+				return err
+			}
+			if sessionID != "" && entity.SessionID != sessionID {
+				return nil
+			}
+			if knownEntityMatchesScope(&entity, scopeType, scopeValue) {
+				keys = append(keys, append([]byte(nil), k...))
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+
+		for _, key := range keys {
+			if err := b.Delete(key); err != nil {
+				return err
+			}
+			deleted++
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return deleted, nil
+}
+
+func knownEntityMatchesScope(entity *KnownEntityRow, scopeType EntityType, scopeValue string) bool {
+	if entity == nil {
+		return false
+	}
+
+	switch scopeType {
+	case EntityTypeRepo:
+		return entity.EntityType == EntityTypeRepo && entity.Name == scopeValue
+	case EntityTypeOrg:
+		return (entity.EntityType == EntityTypeOrg && entity.Name == scopeValue) ||
+			(entity.EntityType == EntityTypeRepo && strings.HasPrefix(entity.Name, scopeValue+"/"))
+	default:
+		return false
+	}
 }
