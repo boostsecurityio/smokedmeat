@@ -33,6 +33,7 @@ This is the recommended pre-freeze queue. Only items that are realistically ship
 | 2 | Analysis progress and streaming | 🔶 | Counter and Kitchen live progress work is in flight. The remaining external dependency is truthful repo-complete `poutine` progress from the upstream library. | Task: [docs/tasks/analysis-progress-and-streaming.md](tasks/analysis-progress-and-streaming.md) |
 | 3 | Selective Kitchen purge | ✅ | Shipped to `main`. Repo-scoped and org-scoped preview + confirm purge is in product, preserves audit trail, and nudges the operator to reset target when needed. | Task: [docs/tasks/selective-kitchen-purge.md](tasks/selective-kitchen-purge.md) |
 | 4 | Callback fanout and session management | 🔶 | Slice 1 is shipped to `main`: bounded callback budgets, wizard controls, and correct stager cleanup. Remaining slices are the grouped callback and session-management UX in Counter. | Task: [docs/tasks/callback-fanout-and-session-management.md](tasks/callback-fanout-and-session-management.md) |
+| 5 | OIDC trust cloud node tree placement | 🔲 | Fix the vuln tree so `oidc_trust/...` cloud nodes attach under their associated workflow job instead of dangling at the bottom as root-level cloud leaves. | Task: [docs/tasks/oidc-trust-cloud-node-tree-placement.md](tasks/oidc-trust-cloud-node-tree-placement.md) |
 
 ## Planned Backlog
 
