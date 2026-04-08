@@ -346,7 +346,7 @@ func (m *Model) clearAnalysisProgress() {
 }
 
 func (m *Model) applyAnalysisProgress(progress counter.AnalysisProgressPayload) {
-	if m.activeAnalysisID == "" && progress.AnalysisID != "" && progress.AnalysisID == m.lastAnalysisID {
+	if m.activeAnalysisID == "" {
 		return
 	}
 	if m.activeAnalysisID != "" && progress.AnalysisID != "" && progress.AnalysisID != m.activeAnalysisID {

@@ -62,9 +62,11 @@ func TestModel_Update_AnalysisStarted_PreservesExistingDeepProgress(t *testing.T
 func TestModel_Update_AnalysisProgress_TracksStateWithoutSpammingLog(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	startedAt := time.Now().Add(-3 * time.Second)
+	m.beginAnalysisProgress("analysis_123", "acme", "org", false)
 
 	result, _ := m.Update(AnalysisProgressMsg{
 		Progress: counter.AnalysisProgressPayload{
+			AnalysisID: "analysis_123",
 			Phase:      analysisPhaseSecret,
 			ReposTotal: 3,
 			StartedAt:  startedAt,
@@ -78,6 +80,7 @@ func TestModel_Update_AnalysisProgress_TracksStateWithoutSpammingLog(t *testing.
 
 	result, _ = model.Update(AnalysisProgressMsg{
 		Progress: counter.AnalysisProgressPayload{
+			AnalysisID:     "analysis_123",
 			Phase:          analysisPhaseSecret,
 			CurrentRepo:    "acme/api",
 			ReposCompleted: 1,
@@ -92,8 +95,9 @@ func TestModel_Update_AnalysisProgress_TracksStateWithoutSpammingLog(t *testing.
 
 	result, _ = model.Update(AnalysisProgressMsg{
 		Progress: counter.AnalysisProgressPayload{
-			Phase:     analysisPhaseImport,
-			StartedAt: startedAt,
+			AnalysisID: "analysis_123",
+			Phase:      analysisPhaseImport,
+			StartedAt:  startedAt,
 		},
 	})
 	model = result.(Model)
@@ -162,6 +166,23 @@ func TestModel_Update_AnalysisProgress_IgnoresLateProgressAfterCompletion(t *tes
 	model := result.(Model)
 	assert.Nil(t, model.analysisProgress)
 	assert.Equal(t, "analysis_123", model.lastAnalysisID)
+}
+
+func TestModel_Update_AnalysisProgress_IgnoresProgressWithoutActiveAnalysisID(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.lastAnalysisID = "analysis_previous"
+
+	result, _ := m.Update(AnalysisProgressMsg{
+		Progress: counter.AnalysisProgressPayload{
+			AnalysisID:  "analysis_other",
+			Phase:       analysisPhaseImport,
+			Message:     "Persisting attack graph",
+			CurrentRepo: "acme/repo",
+		},
+	})
+
+	model := result.(Model)
+	assert.Nil(t, model.analysisProgress)
 }
 
 func TestModel_Update_AnalysisCompleted(t *testing.T) {
