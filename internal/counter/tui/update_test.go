@@ -672,6 +672,39 @@ func TestModel_Update_PantryFetched(t *testing.T) {
 
 	model := result.(Model)
 	assert.NotNil(t, model.pantry)
+	require.Len(t, model.output, 1)
+	assert.Contains(t, model.output[0].Content, "Loaded attack graph:")
+}
+
+func TestModel_Update_PantryFetched_AnnouncesInitialVulnerabilityLoad(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	p := pantry.New()
+	repo := pantry.NewRepository("acme", "api", "github")
+	vuln := pantry.NewVulnerability("injection", "pkg:github/acme/api", ".github/workflows/ci.yml", 42)
+	require.NoError(t, p.AddAsset(repo))
+	require.NoError(t, p.AddAsset(vuln))
+
+	result, _ := m.Update(PantryFetchedMsg{Pantry: p})
+
+	model := result.(Model)
+	assert.NotNil(t, model.pantry)
+	require.Len(t, model.output, 2)
+	assert.Contains(t, model.output[1].Content, "Loaded 1 vulnerabilities from attack graph")
+	assert.NotContains(t, model.output[1].Content, "previous session")
+}
+
+func TestModel_Update_PantryFetched_DoesNotAnnounceRestoreAfterCurrentAnalysis(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.analysisComplete = true
+	m.vulnerabilities = []Vulnerability{{ID: "V001", Repository: "acme/api", RuleID: "injection"}}
+	p := createTestPantry()
+
+	result, _ := m.Update(PantryFetchedMsg{Pantry: p})
+
+	model := result.(Model)
+	assert.NotNil(t, model.pantry)
+	require.Len(t, model.output, 1)
+	assert.Contains(t, model.output[0].Content, "Loaded attack graph:")
 }
 
 func TestModel_Update_PantryFetchError(t *testing.T) {

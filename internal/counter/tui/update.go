@@ -391,6 +391,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PantryFetchedMsg:
 		if msg.Pantry != nil && msg.Pantry.Size() > 0 {
+			hadVulnerabilities := len(m.vulnerabilities) > 0
 			m.pantry = msg.Pantry
 			m.activityLog.Add(IconSuccess, fmt.Sprintf("Loaded %d assets, %d edges", msg.Pantry.Size(), msg.Pantry.EdgeCount()))
 			m.AddOutput("info", fmt.Sprintf("Loaded attack graph: %d repos, %d workflows, %d vulns (%d edges)",
@@ -401,7 +402,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			m.vulnerabilities = m.extractVulnerabilitiesFromPantry()
 			if len(m.vulnerabilities) > 0 {
-				m.AddOutput("success", fmt.Sprintf("Restored %d vulnerabilities from previous session", len(m.vulnerabilities)))
+				if !hadVulnerabilities {
+					m.AddOutput("success", fmt.Sprintf("Loaded %d vulnerabilities from attack graph", len(m.vulnerabilities)))
+				}
 				m.analysisComplete = true
 				if m.phase != PhasePostExploit && m.phase != PhasePivot && m.phase != PhaseWaiting {
 					m.TransitionToPhase(PhaseRecon)
