@@ -1,8 +1,8 @@
-# Browser Graph Filtering And Usability
+# Large-Org Tree And Graph Filtering
 
 ## Why This Exists
 
-The browser graph works on small and medium targets, but it becomes hard to use on very large organizations.
+Large organizations are not practically usable today in either the vuln tree or the browser graph.
 
 Real operator feedback from a large AWS org test:
 
@@ -13,14 +13,22 @@ Real operator feedback from a large AWS org test:
 - `Radial` became a dense sphere with little operator value
 - `Force` was heavy enough to jam the browser runtime
 
-The immediate product gap is not only layout quality. It is that the graph is trying to render too much low-value structure by default.
+Related TUI feedback from the same kind of target:
+
+- the existing `f` tree filter technically works
+- but it filters to `Top 5 Attack Paths` from the current suggestion set
+- that is too narrow and too opaque for large-org browsing
+- the operator needs a filter that hides repos and workflows with no vuln-bearing path, not a suggestion-driven shortcut
+
+The immediate product gap is not only layout quality. It is that both views render too much low-value structure by default.
 
 ## Product Goal
 
-Make the browser graph practical on large targets by default.
+Make large-org browsing practical in both the TUI tree and the browser graph.
 
 The operator should be able to:
 
+- browse the vuln tree without wading through hundreds of irrelevant repos and workflows
 - open the graph without rendering thousands of low-value nodes by default
 - hide repos, workflows, and related nodes that have no vuln-bearing path
 - understand when the graph is filtered versus full
@@ -40,7 +48,19 @@ The first goal is safe, useful defaults and a graph that stays explorable.
 
 ## Current Problems
 
-### 1. Large graphs render everything by default
+### 1. The existing tree filter is the wrong filter for large orgs
+
+The current `f` shortcut in the TUI tree toggles a narrow `Top 5 Attack Paths` view derived from the current suggestion list.
+
+That behavior is useful for a very specific shortlist workflow, but it does not solve the large-org browsing problem.
+
+On large orgs, the operator needs:
+
+- a stable relevance filter
+- predictable hiding of repos and workflows with no vuln-bearing path
+- something they can trust as a browsing mode, not a suggestion side effect
+
+### 2. Large graphs render everything by default
 
 For very large orgs, the browser graph currently attempts to render the full graph immediately.
 
@@ -51,7 +71,7 @@ That causes:
 - heavy browser CPU and memory use
 - low signal because the operator sees thousands of nodes with no immediate exploitation value
 
-### 2. Low-value nodes overwhelm the useful ones
+### 3. Low-value nodes overwhelm the useful ones
 
 Operators often care first about:
 
@@ -61,7 +81,7 @@ Operators often care first about:
 
 They do not usually need every repo and every workflow node with no vuln-bearing path on first open.
 
-### 3. Layout choice is not scale-aware
+### 4. Layout choice is not scale-aware
 
 Some layouts remain usable only below certain sizes.
 
@@ -75,16 +95,29 @@ On very large graphs:
 
 Treat this as a filtering-first problem, not a layout-first problem.
 
-The graph should have two default modes:
+Both views should have a practical filtered mode for large targets:
 
-- small or medium graph
-  - render the full graph by default
-- large graph
-  - render a filtered graph by default
+- vuln tree
+  - `f` should mean a relevance filter for large-org browsing, not only `Top 5 Attack Paths`
+- browser graph
+  - above a size threshold, render a filtered graph by default
 
 The filtered default should aim for high operator signal, not completeness.
 
 ## Proposed First Slice
+
+### Change the tree filter to hide nodes with no vuln-bearing path
+
+For the first slice, the existing `f` shortcut should switch from suggestion-driven `Top 5 Attack Paths` behavior to a large-org relevance filter.
+
+Desired first-pass behavior:
+
+- keep vulnerable workflows
+- keep repos that contain vulnerable workflows
+- keep jobs, secrets, tokens, cloud nodes, and other descendants that sit on vuln-bearing paths
+- hide repos and workflows that have no vuln-bearing path
+
+If the old `Top 5 Attack Paths` behavior remains useful, it should be a different mode later, not the main large-org filter.
 
 ### Automatic filtered mode above a graph-size threshold
 
@@ -150,6 +183,10 @@ If the implementation needs one default plus one escape hatch for the first slic
 
 ## Implementation Notes
 
+The tree and graph do not have to share identical implementation, but they should share the same high-level relevance rule:
+
+- hide nodes with no vuln-bearing path by default on large targets
+
 Open design choice:
 
 - pre-filter in Kitchen before sending browser data
@@ -162,8 +199,10 @@ If the browser still has to download the full 10k-node graph before filtering, t
 
 ## Acceptance Cases
 
-- Small graphs still open in full mode by default.
-- Large graphs open in filtered mode by default.
+- The TUI tree filter hides repos and workflows with no vuln-bearing path instead of showing only a suggestion-derived top-5 shortlist.
+- On a large org, pressing `f` in the tree produces a materially smaller, still-useful browsing tree.
+- Small graphs still open in full mode by default in the browser.
+- Large graphs open in filtered mode by default in the browser.
 - On a very large org, the first rendered graph is materially smaller and more readable than the full graph.
 - Repos and workflows with no vuln-bearing path are hidden in the default large-graph mode.
 - The operator can intentionally switch to full graph mode.
