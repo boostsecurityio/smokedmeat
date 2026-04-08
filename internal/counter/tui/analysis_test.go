@@ -5,11 +5,14 @@ package tui
 
 import (
 	"errors"
+	"io"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/boostsecurityio/smokedmeat/internal/counter"
 	"github.com/boostsecurityio/smokedmeat/internal/poutine"
 )
 
@@ -24,6 +27,122 @@ func TestModel_Update_AnalysisStarted(t *testing.T) {
 	model := result.(Model)
 	require.NotEmpty(t, model.output)
 	assert.Contains(t, model.output[0].Content, "acme/api")
+	require.NotNil(t, model.analysisProgress)
+	assert.Equal(t, analysisPhaseWorkflow, model.analysisProgress.Phase)
+}
+
+func TestModel_Update_AnalysisStarted_PreservesExistingDeepProgress(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	startedAt := time.Now().Add(-5 * time.Second)
+	m.analysisProgress = &counter.AnalysisProgressPayload{
+		Target:         "acme",
+		TargetType:     "org",
+		Deep:           true,
+		Phase:          analysisPhaseSecret,
+		ReposCompleted: 3,
+		ReposTotal:     10,
+		StartedAt:      startedAt,
+		UpdatedAt:      startedAt,
+	}
+
+	result, _ := m.Update(AnalysisStartedMsg{
+		Target:     "acme",
+		TargetType: "org",
+	})
+
+	model := result.(Model)
+	require.NotNil(t, model.analysisProgress)
+	assert.True(t, model.analysisProgress.Deep)
+	assert.Equal(t, analysisPhaseSecret, model.analysisProgress.Phase)
+	assert.Equal(t, 3, model.analysisProgress.ReposCompleted)
+	assert.Equal(t, 10, model.analysisProgress.ReposTotal)
+	assert.Equal(t, startedAt, model.analysisProgress.StartedAt)
+}
+
+func TestModel_Update_AnalysisProgress_TracksStateWithoutSpammingLog(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	startedAt := time.Now().Add(-3 * time.Second)
+
+	result, _ := m.Update(AnalysisProgressMsg{
+		Progress: counter.AnalysisProgressPayload{
+			Phase:      analysisPhaseSecret,
+			ReposTotal: 3,
+			StartedAt:  startedAt,
+		},
+	})
+	model := result.(Model)
+	require.NotNil(t, model.analysisProgress)
+	assert.Equal(t, analysisPhaseSecret, model.analysisProgress.Phase)
+	require.Len(t, model.activityLog.entries, 1)
+	assert.Contains(t, model.activityLog.entries[0].Message, "Secret scan running")
+
+	result, _ = model.Update(AnalysisProgressMsg{
+		Progress: counter.AnalysisProgressPayload{
+			Phase:          analysisPhaseSecret,
+			CurrentRepo:    "acme/api",
+			ReposCompleted: 1,
+			ReposTotal:     3,
+			StartedAt:      startedAt,
+		},
+	})
+	model = result.(Model)
+	require.Len(t, model.activityLog.entries, 1)
+	require.NotNil(t, model.analysisProgress)
+	assert.Equal(t, "acme/api", model.analysisProgress.CurrentRepo)
+
+	result, _ = model.Update(AnalysisProgressMsg{
+		Progress: counter.AnalysisProgressPayload{
+			Phase:     analysisPhaseImport,
+			StartedAt: startedAt,
+		},
+	})
+	model = result.(Model)
+	require.Len(t, model.activityLog.entries, 2)
+	assert.Contains(t, model.activityLog.entries[1].Message, "Importing analysis results")
+}
+
+func TestModel_Update_AnalysisProgress_IgnoresStaleAnalysisID(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.activeAnalysisID = "analysis_current"
+	m.analysisProgress = &counter.AnalysisProgressPayload{
+		AnalysisID:  "analysis_current",
+		Phase:       analysisPhaseWorkflow,
+		CurrentRepo: "acme/api",
+	}
+
+	result, _ := m.Update(AnalysisProgressMsg{
+		Progress: counter.AnalysisProgressPayload{
+			AnalysisID:  "analysis_old",
+			Phase:       analysisPhaseImport,
+			CurrentRepo: "acme/old",
+		},
+	})
+
+	model := result.(Model)
+	require.NotNil(t, model.analysisProgress)
+	assert.Equal(t, "analysis_current", model.analysisProgress.AnalysisID)
+	assert.Equal(t, analysisPhaseWorkflow, model.analysisProgress.Phase)
+	assert.Equal(t, "acme/api", model.analysisProgress.CurrentRepo)
+}
+
+func TestModel_Update_AnalysisResponseDropped_StartsRecoveryPoll(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.activeAnalysisID = "analysis_123"
+	m.analysisProgress = &counter.AnalysisProgressPayload{
+		AnalysisID: "analysis_123",
+		Phase:      analysisPhaseImport,
+	}
+
+	result, cmd := m.Update(AnalysisResponseDroppedMsg{
+		AnalysisID: "analysis_123",
+		Err:        io.EOF,
+	})
+
+	model := result.(Model)
+	require.NotNil(t, model.analysisResultPoll)
+	assert.Equal(t, "analysis_123", model.analysisResultPoll.AnalysisID)
+	assert.NotNil(t, model.analysisProgress)
+	assert.NotNil(t, cmd)
 }
 
 func TestModel_Update_AnalysisCompleted(t *testing.T) {
@@ -47,6 +166,7 @@ func TestModel_Update_AnalysisCompleted(t *testing.T) {
 
 	model := result.(Model)
 	assert.True(t, model.analysisComplete)
+	assert.Nil(t, model.analysisProgress)
 }
 
 func TestModel_Update_AnalysisCompleted_AddsSecretsWithoutVulns(t *testing.T) {

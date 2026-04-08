@@ -166,30 +166,36 @@ func (sl *StickersLayout) RenderContent(renderers ContentRenderers, activityFocu
 	return sl.renderIdleContent(renderers, sl.FlexHeight())
 }
 
-func (sl *StickersLayout) RenderContentWithActivity(renderers ContentRenderers, activityFocused bool) string {
+func (sl *StickersLayout) RenderContentWithActivity(renderers ContentRenderers, activityFocused bool, progressLine string) string {
 	content := sl.RenderContent(renderers, activityFocused)
-	activity := sl.renderActivityRegion(renderers, activityFocused)
+	activity := sl.renderActivityRegion(renderers, activityFocused, progressLine)
 	return content + "\n" + activity
 }
 
-func (sl *StickersLayout) renderActivityRegion(renderers ContentRenderers, activityFocused bool) string {
+func (sl *StickersLayout) renderActivityRegion(renderers ContentRenderers, activityFocused bool, progressLine string) string {
 	sep := mutedColor.Render(strings.Repeat("─", sl.width))
 	logLines := sl.ActivityHeight() - 1
+	if progressLine != "" {
+		logLines--
+	}
 	if logLines < 1 {
 		logLines = 1
 	}
 	content := renderers.Activity(sl.width, logLines, activityFocused)
-	return sep + "\n" + content
+	if progressLine == "" {
+		return sep + "\n" + content
+	}
+	return sep + "\n" + content + "\n" + progressLine
 }
 
-func (sl *StickersLayout) RenderIdle(header, input, status string, hintActive bool, renderers ContentRenderers, activityFocused bool) string {
+func (sl *StickersLayout) RenderIdle(header, input, status string, hintActive bool, renderers ContentRenderers, activityFocused bool, progressLine string) string {
 	flexH := sl.FlexHeight()
 	if hintActive {
 		flexH--
 	}
 
 	content := sl.renderIdleContent(renderers, flexH)
-	activity := sl.renderActivityRegion(renderers, activityFocused)
+	activity := sl.renderActivityRegion(renderers, activityFocused, progressLine)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		header,
@@ -200,14 +206,14 @@ func (sl *StickersLayout) RenderIdle(header, input, status string, hintActive bo
 	)
 }
 
-func (sl *StickersLayout) RenderAgent(header, input, status string, hintActive bool, renderers ContentRenderers, activityFocused bool) string {
+func (sl *StickersLayout) RenderAgent(header, input, status string, hintActive bool, renderers ContentRenderers, activityFocused bool, progressLine string) string {
 	flexH := sl.FlexHeight()
 	if hintActive {
 		flexH--
 	}
 
 	content := sl.renderAgentContent(renderers, flexH)
-	activity := sl.renderActivityRegion(renderers, activityFocused)
+	activity := sl.renderActivityRegion(renderers, activityFocused, progressLine)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		header,
@@ -255,6 +261,10 @@ func (m *Model) RenderStickersLayout() string {
 
 	flexHeight := m.stickersLayout.FlexHeight()
 	hintActive := m.completionHint != "" && !m.view.IsModal()
+	progressLine := ""
+	if m.view != ViewSetupWizard {
+		progressLine = m.renderAnalysisProgressLine()
+	}
 
 	var screen string
 	switch m.view {
@@ -266,41 +276,41 @@ func (m *Model) RenderStickersLayout() string {
 		content := m.renderWaitingView(contentHeight)
 		screen = lipgloss.JoinVertical(lipgloss.Left, header, content, status)
 	case ViewWizard:
-		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused)
+		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused, progressLine)
 		overlayStr := m.renderWizardOverlay(background, flexHeight+activityHeight)
 		screen = lipgloss.JoinVertical(lipgloss.Left, header, overlayStr, input, status)
 	case ViewLicense:
-		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused)
+		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused, progressLine)
 		overlayStr := m.renderLicenseOverlay(background, flexHeight+activityHeight)
 		screen = lipgloss.JoinVertical(lipgloss.Left, header, overlayStr, input, status)
 	case ViewHelp:
-		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused)
+		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused, progressLine)
 		overlayStr := m.renderHelpOverlay(background, flexHeight+activityHeight)
 		screen = lipgloss.JoinVertical(lipgloss.Left, header, overlayStr, input, status)
 	case ViewReAuth:
-		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused)
+		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused, progressLine)
 		overlayStr := m.renderReAuthOverlay(background, flexHeight+activityHeight)
 		screen = lipgloss.JoinVertical(lipgloss.Left, header, overlayStr, input, status)
 	case ViewKillChain:
-		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused)
+		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused, progressLine)
 		overlayStr := m.renderKillChainOverlay(background, flexHeight+activityHeight)
 		screen = lipgloss.JoinVertical(lipgloss.Left, header, overlayStr, input, status)
 	case ViewTheme:
-		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused)
+		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused, progressLine)
 		overlayStr := m.renderThemeOverlay(background, flexHeight+activityHeight)
 		screen = lipgloss.JoinVertical(lipgloss.Left, header, overlayStr, input, status)
 	case ViewOmnibox:
-		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused)
+		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused, progressLine)
 		overlayStr := m.renderOmniboxOverlay(background, flexHeight+activityHeight)
 		screen = lipgloss.JoinVertical(lipgloss.Left, header, overlayStr, input, status)
 	case ViewCallbacks:
-		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused)
+		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused, progressLine)
 		overlayStr := m.renderCallbacksOverlay(background, flexHeight+activityHeight)
 		screen = lipgloss.JoinVertical(lipgloss.Left, header, overlayStr, input, status)
 	case ViewAgent:
-		screen = m.stickersLayout.RenderAgent(header, input, status, hintActive, renderers, activityFocused)
+		screen = m.stickersLayout.RenderAgent(header, input, status, hintActive, renderers, activityFocused, progressLine)
 	default:
-		screen = m.stickersLayout.RenderIdle(header, input, status, hintActive, renderers, activityFocused)
+		screen = m.stickersLayout.RenderIdle(header, input, status, hintActive, renderers, activityFocused, progressLine)
 	}
 
 	if m.flashMessage != "" && time.Now().Before(m.flashUntil) {
@@ -308,6 +318,73 @@ func (m *Model) RenderStickersLayout() string {
 	}
 
 	return screen
+}
+
+func (m Model) renderAnalysisProgressLine() string {
+	if m.analysisProgress == nil || m.width <= 0 {
+		return ""
+	}
+	progress := *m.analysisProgress
+	startedAt := progress.StartedAt
+	if startedAt.IsZero() {
+		startedAt = progress.UpdatedAt
+	}
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
+	elapsed := analysisElapsed(startedAt)
+	spinner := analysisSpinner(elapsed)
+
+	label := analysisPhaseLabel(progress.Phase)
+	if progress.Message != "" {
+		label = progress.Message
+	}
+	parts := []string{spinner, label}
+	if progress.ReposTotal > 0 {
+		parts = append(parts, fmt.Sprintf("%d/%d repos", progress.ReposCompleted, progress.ReposTotal))
+	}
+	if progress.SecretFindings > 0 {
+		parts = append(parts, fmt.Sprintf("%d secrets", progress.SecretFindings))
+	}
+	if elapsed = elapsed.Round(time.Second); elapsed > 0 {
+		parts = append(parts, fmt.Sprintf("elapsed %s", elapsed))
+	}
+	if progress.CurrentRepo != "" {
+		parts = append(parts, progress.CurrentRepo)
+	}
+
+	line := strings.Join(parts, " | ")
+	return mutedColor.Render(truncateVisual(line, m.width))
+}
+
+func analysisElapsed(startedAt time.Time) time.Duration {
+	if startedAt.IsZero() {
+		return 0
+	}
+	elapsed := time.Since(startedAt)
+	if elapsed < 0 {
+		return 0
+	}
+	return elapsed
+}
+
+func analysisSpinner(elapsed time.Duration) string {
+	spinnerFrames := []string{"◐", "◓", "◑", "◒"}
+	spinnerIdx := int(elapsed.Seconds()) % len(spinnerFrames)
+	return spinnerFrames[spinnerIdx]
+}
+
+func analysisPhaseLabel(phase string) string {
+	switch phase {
+	case analysisPhaseWorkflow:
+		return "Workflow analysis"
+	case analysisPhaseSecret:
+		return "Secret scan"
+	case analysisPhaseImport:
+		return "Import"
+	default:
+		return "Analysis"
+	}
 }
 
 func (m *Model) renderThemeOverlay(background string, height int) string {
@@ -1114,21 +1191,53 @@ func (m *Model) renderSetupWizardView(height int) string {
 				pad+"",
 				pad+"  "+mutedColor.Render("Target: "+targetLabel),
 			)
-		case sw.AnalysisRunning:
-			spinnerFrames := []string{"◐", "◓", "◑", "◒"}
-			elapsed := time.Since(sw.AnalysisStart)
-			spinnerIdx := int(elapsed.Seconds()) % len(spinnerFrames)
-			spinner := spinnerFrames[spinnerIdx]
-
+		case sw.AnalysisRunning || (sw.Error != "" && m.analysisProgress != nil):
 			targetLabel := sw.TargetValue
 			if targetLabel == "" {
 				targetLabel = m.target
 			}
+			progressLine := "Running poutine analysis..."
+			currentRepo := ""
+			repoProgress := ""
+			secretProgress := ""
+			if m.analysisProgress != nil {
+				progressLine = analysisPhaseLabel(m.analysisProgress.Phase)
+				if m.analysisProgress.Message != "" {
+					progressLine = m.analysisProgress.Message
+				}
+				if m.analysisProgress.CurrentRepo != "" {
+					currentRepo = m.analysisProgress.CurrentRepo
+				}
+				if m.analysisProgress.ReposTotal > 0 {
+					repoProgress = fmt.Sprintf("%d / %d repos", m.analysisProgress.ReposCompleted, m.analysisProgress.ReposTotal)
+				}
+				if m.analysisProgress.SecretFindings > 0 {
+					secretProgress = fmt.Sprintf("%d secrets found", m.analysisProgress.SecretFindings)
+				}
+			}
+			elapsed := analysisElapsed(sw.AnalysisStart)
+			if m.analysisProgress != nil && !m.analysisProgress.StartedAt.IsZero() {
+				elapsed = analysisElapsed(m.analysisProgress.StartedAt)
+			}
+			prefix := analysisSpinner(elapsed)
+			if !sw.AnalysisRunning {
+				prefix = "•"
+			}
+
 			lines = append(lines,
-				pad+"  "+spinner+" Running poutine analysis...          "+mutedColor.Render(fmt.Sprintf("(elapsed: %s)", formatWaitingDuration(elapsed))),
+				pad+"  "+prefix+" "+progressLine+"          "+mutedColor.Render(fmt.Sprintf("(elapsed: %s)", formatWaitingDuration(elapsed))),
 				pad+"",
 				pad+"  "+mutedColor.Render("Target: "+targetLabel),
 			)
+			if currentRepo != "" {
+				lines = append(lines, pad+"  "+mutedColor.Render("Current repo: "+currentRepo))
+			}
+			if repoProgress != "" {
+				lines = append(lines, pad+"  "+mutedColor.Render("Progress: "+repoProgress))
+			}
+			if secretProgress != "" {
+				lines = append(lines, pad+"  "+mutedColor.Render(secretProgress))
+			}
 		case sw.AnalysisSummary != "":
 			lines = append(lines,
 				pad+"  "+successColor.Render("✓ Analysis complete"),

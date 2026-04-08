@@ -155,13 +155,15 @@ type Model struct {
 	kitchenClient counter.KitchenAPI
 
 	// WebSocket message channels (for Bubble Tea subscriptions)
-	beaconCh       chan counter.Beacon
-	coleslawCh     chan *models.Coleslaw
-	historyCh      chan counter.HistoryPayload
-	expressDataCh  chan counter.ExpressDataPayload
-	authExpiredCh  chan struct{}
-	reconnectingCh chan int
-	reconnectedCh  chan struct{}
+	beaconCh           chan counter.Beacon
+	coleslawCh         chan *models.Coleslaw
+	historyCh          chan counter.HistoryPayload
+	expressDataCh      chan counter.ExpressDataPayload
+	analysisProgressCh chan counter.AnalysisProgressPayload
+	analysisMetadataCh chan counter.AnalysisMetadataSyncPayload
+	authExpiredCh      chan struct{}
+	reconnectingCh     chan int
+	reconnectedCh      chan struct{}
 
 	// Connection status
 	connected        bool
@@ -187,7 +189,9 @@ type Model struct {
 	vulnerabilities  []Vulnerability // Found CI/CD vulnerabilities (injection, pwn request)
 	selectedVuln     int             // Index of selected vulnerability (-1 = none)
 	analysisComplete bool            // True after analysis has run (even with no findings)
-	lightRye         *rye.LightRye   // Payload generator
+	analysisProgress *counter.AnalysisProgressPayload
+	activeAnalysisID string
+	lightRye         *rye.LightRye // Payload generator
 
 	// Token acquisition state
 	opPromptActive bool // Waiting for 1Password secret reference input
@@ -295,6 +299,8 @@ type Model struct {
 	// Theme picker state
 	themeCursor   int
 	themeOriginal ThemeName
+
+	analysisResultPoll *analysisResultPollState
 }
 
 type KillChainViewModel struct {
@@ -302,6 +308,14 @@ type KillChainViewModel struct {
 	ScrollPos int
 	VulnLabel string
 	Prereq    *Prerequisite
+}
+
+type analysisResultPollState struct {
+	AnalysisID  string
+	Deep        bool
+	Setup       bool
+	Attempts    int
+	OriginalErr error
 }
 
 func (m *Model) updatePlaceholder() {
@@ -599,6 +613,27 @@ func (m Model) fetchPantryCmd() tea.Cmd {
 		}
 
 		return PantryFetchedMsg{Pantry: p}
+	}
+}
+
+func (m Model) fetchKnownEntitiesCmd() tea.Cmd {
+	return func() tea.Msg {
+		if m.kitchenClient == nil {
+			return nil
+		}
+		if strings.TrimSpace(m.config.SessionID) == "" {
+			return nil
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		entities, err := m.kitchenClient.FetchKnownEntities(ctx, m.config.SessionID)
+		if err != nil {
+			return KnownEntitiesFetchErrorMsg{Err: err}
+		}
+
+		return KnownEntitiesFetchedMsg{Entities: entities}
 	}
 }
 

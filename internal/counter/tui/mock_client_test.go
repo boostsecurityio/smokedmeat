@@ -197,5 +197,9 @@ func (m *mockKitchenClient) SetCallbacks(_ func(counter.Beacon), _ func(*models.
 func (m *mockKitchenClient) SetEventCallback(_ func(counter.KitchenEvent))             {}
 func (m *mockKitchenClient) SetHistoryCallback(_ func(counter.HistoryPayload))         {}
 func (m *mockKitchenClient) SetExpressDataCallback(_ func(counter.ExpressDataPayload)) {}
-func (m *mockKitchenClient) SetAuthExpiredCallback(_ func())                           {}
-func (m *mockKitchenClient) SetReconnectCallbacks(_ func(int), _ func())               {}
+func (m *mockKitchenClient) SetAnalysisProgressCallback(_ func(counter.AnalysisProgressPayload)) {
+}
+func (m *mockKitchenClient) SetAnalysisMetadataSyncCallback(_ func(counter.AnalysisMetadataSyncPayload)) {
+}
+func (m *mockKitchenClient) SetAuthExpiredCallback(_ func())             {}
+func (m *mockKitchenClient) SetReconnectCallbacks(_ func(int), _ func()) {}

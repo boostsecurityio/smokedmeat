@@ -223,11 +223,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case SetupAnalysisCompletedMsg:
+		if msg.AnalysisID != "" && m.activeAnalysisID != "" && msg.AnalysisID != m.activeAnalysisID {
+			return m, nil
+		}
 		if m.setupWizard == nil || m.setupWizard.Step != 7 {
-			return m.handleAnalysisCompleted(AnalysisCompletedMsg{Result: msg.Result})
+			return m.handleAnalysisCompleted(AnalysisCompletedMsg{AnalysisID: msg.AnalysisID, Result: msg.Result})
 		}
 
-		updated, _ := m.handleAnalysisCompleted(AnalysisCompletedMsg{Result: msg.Result})
+		updated, _ := m.handleAnalysisCompleted(AnalysisCompletedMsg{AnalysisID: msg.AnalysisID, Result: msg.Result})
 		if um, ok := updated.(Model); ok {
 			m = um
 		}
@@ -241,6 +244,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		sw.VulnsFound = len(msg.Result.Findings)
 		sw.SecretsFound = len(msg.Result.SecretFindings)
 		sw.AnalysisSummary = "complete"
+		m.clearAnalysisProgress()
 
 		cfg, _ := counter.LoadConfig()
 		if cfg == nil {
@@ -252,12 +256,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case SetupAnalysisErrorMsg:
+		if msg.AnalysisID != "" && m.activeAnalysisID != "" && msg.AnalysisID != m.activeAnalysisID {
+			return m, nil
+		}
 		if m.setupWizard == nil || m.setupWizard.Step != 7 {
 			return m, nil
 		}
 		sw := m.setupWizard
 		sw.AnalysisRunning = false
 		if isRetryableSetupAnalysisError(msg.Err) {
+			if m.analysisProgress != nil {
+				sw.AnalysisRetryPending = false
+				sw.Status = ""
+				sw.Error = "Analyze response dropped. Kitchen may still be finishing. Press r to retry if progress stalls."
+				return m, nil
+			}
+			m.clearAnalysisProgress()
 			retryDelays := setupAnalysisRetryDelays()
 			if sw.AnalysisAttempt < len(retryDelays) {
 				sw.AnalysisAttempt++
@@ -271,11 +285,89 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			sw.Error = fmt.Sprintf("Analysis failed after %d retries: %v", len(retryDelays), msg.Err)
 		} else {
+			m.clearAnalysisProgress()
 			sw.Error = fmt.Sprintf("Analysis failed: %v", msg.Err)
 		}
 		sw.AnalysisRetryPending = false
 		sw.Status = ""
 		return m, nil
+
+	case AnalysisResponseDroppedMsg:
+		if msg.AnalysisID != "" && m.activeAnalysisID != "" && msg.AnalysisID != m.activeAnalysisID {
+			return m, nil
+		}
+		if msg.Setup && m.setupWizard != nil && m.setupWizard.Step == 7 {
+			m.setupWizard.AnalysisRunning = true
+			m.setupWizard.AnalysisRetryPending = false
+			m.setupWizard.Error = ""
+			m.setupWizard.Status = "Analyze response dropped. Waiting for Kitchen result..."
+		} else {
+			m.AddOutput("warning", "Kitchen response dropped. Waiting for the final analysis result...")
+		}
+		return m, m.startAnalysisResultPoll(msg.AnalysisID, msg.Deep, msg.Setup, msg.Err)
+
+	case AnalysisResultStatusFetchedMsg:
+		if m.analysisResultPoll == nil || msg.AnalysisID == "" || msg.AnalysisID != m.analysisResultPoll.AnalysisID {
+			return m, nil
+		}
+		poll := *m.analysisResultPoll
+		switch msg.Response.Status {
+		case "completed":
+			if msg.Response.Result == nil {
+				err := fmt.Errorf("kitchen reported analysis complete without a result body")
+				if poll.Setup {
+					return m.Update(SetupAnalysisErrorMsg{AnalysisID: msg.AnalysisID, Err: err})
+				}
+				return m.Update(AnalysisErrorMsg{AnalysisID: msg.AnalysisID, Err: err})
+			}
+			if poll.Setup {
+				return m.Update(SetupAnalysisCompletedMsg{AnalysisID: msg.AnalysisID, Result: msg.Response.Result})
+			}
+			return m.Update(AnalysisCompletedMsg{AnalysisID: msg.AnalysisID, Result: msg.Response.Result, Deep: poll.Deep})
+		case "failed":
+			err := fmt.Errorf("analysis failed after response dropped: %s", msg.Response.Error)
+			if poll.Setup {
+				return m.Update(SetupAnalysisErrorMsg{AnalysisID: msg.AnalysisID, Err: err})
+			}
+			return m.Update(AnalysisErrorMsg{AnalysisID: msg.AnalysisID, Err: err})
+		default:
+			m.analysisResultPoll.Attempts++
+			if m.analysisResultPoll.Attempts >= analysisResultPollMaxTries || (msg.Response.Status == "unknown" && m.analysisResultPoll.Attempts >= 3) {
+				err := fmt.Errorf("lost Kitchen analysis result after dropped response: %v", poll.OriginalErr)
+				if poll.Setup {
+					return m.Update(SetupAnalysisErrorMsg{AnalysisID: msg.AnalysisID, Err: err})
+				}
+				return m.Update(AnalysisErrorMsg{AnalysisID: msg.AnalysisID, Err: err})
+			}
+			if poll.Setup && m.setupWizard != nil && m.setupWizard.Step == 7 {
+				m.setupWizard.AnalysisRunning = true
+				if msg.Response.Status == "unknown" {
+					m.setupWizard.Status = "Checking whether Kitchen accepted the analysis request..."
+				} else {
+					m.setupWizard.Status = "Waiting for Kitchen result..."
+				}
+			}
+			return m, m.pollAnalysisResultCmd(msg.AnalysisID)
+		}
+
+	case AnalysisResultStatusErrorMsg:
+		if m.analysisResultPoll == nil || msg.AnalysisID == "" || msg.AnalysisID != m.analysisResultPoll.AnalysisID {
+			return m, nil
+		}
+		poll := *m.analysisResultPoll
+		m.analysisResultPoll.Attempts++
+		if m.analysisResultPoll.Attempts >= analysisResultPollMaxTries {
+			err := fmt.Errorf("failed to recover Kitchen analysis result after dropped response: %v", msg.Err)
+			if poll.Setup {
+				return m.Update(SetupAnalysisErrorMsg{AnalysisID: msg.AnalysisID, Err: err})
+			}
+			return m.Update(AnalysisErrorMsg{AnalysisID: msg.AnalysisID, Err: err})
+		}
+		if poll.Setup && m.setupWizard != nil && m.setupWizard.Step == 7 {
+			m.setupWizard.AnalysisRunning = true
+			m.setupWizard.Status = "Waiting for Kitchen result..."
+		}
+		return m, m.pollAnalysisResultCmd(msg.AnalysisID)
 
 	case setupAnalysisRetryMsg:
 		if m.setupWizard == nil || m.setupWizard.Step != 7 || m.setupWizard.AnalysisRunning || !m.setupWizard.AnalysisRetryPending {
@@ -295,7 +387,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.connectionState = "connected"
 		m.AddOutput("success", "Connected to Kitchen")
 
-		return m, tea.Batch(m.fetchPantryCmd(), m.fetchHistoryCmd(), m.fetchCallbacksCmd())
+		return m, tea.Batch(m.fetchPantryCmd(), m.fetchKnownEntitiesCmd(), m.fetchHistoryCmd(), m.fetchCallbacksCmd())
 
 	case PantryFetchedMsg:
 		if msg.Pantry != nil && msg.Pantry.Size() > 0 {
@@ -317,6 +409,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.RebuildTree()
 		}
+		return m, nil
+
+	case KnownEntitiesFetchedMsg:
+		m.replaceKnownEntities(msg.Entities)
+		m.lootStashDirty = true
+		m.RebuildTree()
+		m.RebuildLootTree()
+		m.GenerateSuggestions()
+		return m, nil
+
+	case KnownEntitiesFetchErrorMsg:
+		m.AddOutput("warning", fmt.Sprintf("Failed to load known entities: %v", msg.Err))
 		return m, nil
 
 	case CallbacksFetchedMsg:
@@ -364,6 +468,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.listenForColeslaw(),
 			m.listenForHistory(),
 			m.listenForExpressData(),
+			m.listenForAnalysisProgress(),
+			m.listenForAnalysisMetadataSync(),
+			m.fetchPantryCmd(),
+			m.fetchKnownEntitiesCmd(),
 			m.fetchCallbacksCmd(),
 		)
 
@@ -870,11 +978,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case AnalysisStartedMsg:
+		if m.analysisProgress == nil {
+			m.beginAnalysisProgress(msg.AnalysisID, msg.Target, msg.TargetType, false)
+		}
 		m.AddOutput("info", fmt.Sprintf("Analyzing %s (%s)...", msg.Target, msg.TargetType))
 		m.AddOutput("info", "This may take a moment - cloning and analyzing workflows.")
 		return m, nil
 
+	case AnalysisProgressMsg:
+		m.applyAnalysisProgress(msg.Progress)
+		if m.setupWizard != nil && m.setupWizard.Step == 7 && m.setupWizard.AnalysisRunning {
+			m.setupWizard.Status = ""
+		}
+		return m, m.listenForAnalysisProgress()
+
+	case AnalysisMetadataSyncMsg:
+		switch msg.Sync.Status {
+		case counter.AnalysisMetadataSyncStatusStarted:
+			if msg.Sync.Message != "" {
+				m.activityLog.Add(IconInfo, msg.Sync.Message)
+			}
+			return m, m.listenForAnalysisMetadataSync()
+		case counter.AnalysisMetadataSyncStatusCompleted:
+			if msg.Sync.Message != "" {
+				m.activityLog.Add(IconSuccess, msg.Sync.Message)
+			}
+			return m, tea.Batch(m.listenForAnalysisMetadataSync(), m.fetchPantryCmd(), m.fetchKnownEntitiesCmd())
+		case counter.AnalysisMetadataSyncStatusFailed:
+			if msg.Sync.Message != "" {
+				m.activityLog.Add(IconWarning, msg.Sync.Message)
+			}
+			if msg.Sync.Error != "" {
+				m.AddOutput("warning", "Repository access update incomplete: "+msg.Sync.Error)
+			}
+			return m, tea.Batch(m.listenForAnalysisMetadataSync(), m.fetchPantryCmd(), m.fetchKnownEntitiesCmd())
+		default:
+			return m, m.listenForAnalysisMetadataSync()
+		}
+
 	case AnalysisCompletedMsg:
+		if msg.AnalysisID != "" && m.activeAnalysisID != "" && msg.AnalysisID != m.activeAnalysisID {
+			return m, nil
+		}
 		model, cmd := m.handleAnalysisCompleted(msg)
 		outcome := fmt.Sprintf("%d repos, %d vulns", msg.Result.ReposAnalyzed, len(msg.Result.Findings))
 		if len(msg.Result.SecretFindings) > 0 {
@@ -897,6 +1042,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return model, tea.Batch(cmd, m.recordHistoryCmd(historyEntry))
 
 	case AnalysisErrorMsg:
+		if msg.AnalysisID != "" && m.activeAnalysisID != "" && msg.AnalysisID != m.activeAnalysisID {
+			return m, nil
+		}
+		m.clearAnalysisProgress()
 		m.AddOutput("error", fmt.Sprintf("Analysis failed: %v", msg.Err))
 		historyEntry := counter.HistoryPayload{
 			Type:        "analysis.failed",

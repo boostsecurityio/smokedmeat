@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/boostsecurityio/smokedmeat/internal/gitleaks"
@@ -17,6 +18,74 @@ import (
 	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 	"github.com/boostsecurityio/smokedmeat/internal/poutine"
 )
+
+const (
+	analysisPhaseWorkflow   = "workflow_analysis"
+	analysisPhaseSecret     = "secret_scan"
+	analysisPhaseImport     = "import"
+	analysisMetadataStarted = "started"
+	analysisMetadataDone    = "completed"
+	analysisMetadataFailed  = "failed"
+	analysisResultTTL       = 2 * time.Hour
+	analysisStatusUnknown   = "unknown"
+	analysisStatusPending   = "pending"
+	analysisStatusCompleted = "completed"
+	analysisStatusFailed    = "failed"
+)
+
+var analyzeRemoteWithObserverFunc = poutine.AnalyzeRemoteWithObserver
+
+type cachedAnalysisResult struct {
+	SessionID string
+	UpdatedAt time.Time
+	Status    string
+	Result    *poutine.AnalysisResult
+	Error     string
+}
+
+func analysisRequestTimeout(targetType string, deep bool) time.Duration {
+	switch {
+	case deep && targetType == "org":
+		return 60 * time.Minute
+	case deep:
+		return 30 * time.Minute
+	case targetType == "org":
+		return 45 * time.Minute
+	default:
+		return 20 * time.Minute
+	}
+}
+
+func analysisMetadataSyncTimeout(targetType string) time.Duration {
+	if targetType == "org" {
+		return 20 * time.Minute
+	}
+	return 5 * time.Minute
+}
+
+func formatImportPhaseMessage(result *poutine.AnalysisResult) string {
+	var parts []string
+	if len(result.Workflows) > 0 {
+		parts = append(parts, fmt.Sprintf("%d workflows", len(result.Workflows)))
+	}
+	if len(result.Findings) > 0 {
+		parts = append(parts, fmt.Sprintf("%d findings", len(result.Findings)))
+	}
+	if len(result.SecretFindings) > 0 {
+		parts = append(parts, fmt.Sprintf("%d secrets", len(result.SecretFindings)))
+	}
+	if len(parts) == 0 {
+		return "Importing analysis results"
+	}
+	return "Importing " + strings.Join(parts, ", ")
+}
+
+func formatRepoVisibilityPhaseMessage(repoCount int) string {
+	if repoCount == 1 {
+		return "Updating repository access for 1 repo"
+	}
+	return fmt.Sprintf("Updating repository access for %d repos", repoCount)
+}
 
 // AnalyzeRequest is the request body for remote analysis.
 // SECURITY: The token is used ephemerally and never persisted.
@@ -36,11 +105,20 @@ type AnalyzeRequest struct {
 
 	// SessionID identifies the operator session (for known entity lookups).
 	SessionID string `json:"session_id,omitempty"`
+
+	AnalysisID string `json:"analysis_id,omitempty"`
 }
 
 // AnalyzeResponse wraps the analysis result.
 type AnalyzeResponse struct {
 	*poutine.AnalysisResult
+}
+
+type AnalyzeResultStatusResponse struct {
+	AnalysisID string                  `json:"analysis_id"`
+	Status     string                  `json:"status"`
+	Result     *poutine.AnalysisResult `json:"result,omitempty"`
+	Error      string                  `json:"error,omitempty"`
 }
 
 // handleAnalyze handles remote poutine analysis requests from Counter.
@@ -78,20 +156,17 @@ func (h *Handler) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Run analysis with timeout
-	// For orgs, this can take a while - allow up to 10 minutes
-	timeout := 10 * time.Minute
-	if req.TargetType == "repo" {
-		timeout = 5 * time.Minute // Single repo is faster
-	}
+	h.recordAnalysisPending(req)
 
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), analysisRequestTimeout(req.TargetType, req.Deep))
 	defer cancel()
+	startedAt := time.Now()
+	progressObserver := newAnalysisProgressObserver(h, req, startedAt)
 
 	slog.Info("analysis starting", "target", req.Target, "type", req.TargetType, "token_len", len(req.Token), "deep", req.Deep)
-
-	result, err := poutine.AnalyzeRemote(ctx, req.Token, req.Target, req.TargetType)
+	result, err := analyzeRemoteWithObserverFunc(ctx, req.Token, req.Target, req.TargetType, progressObserver)
 	if err != nil {
+		h.recordAnalysisFailure(req, sanitizeError(err))
 		slog.Warn("analysis failed", "target", req.Target, "error", sanitizeError(err))
 		http.Error(w, "analysis failed: "+sanitizeError(err), http.StatusInternalServerError)
 		return
@@ -101,33 +176,315 @@ func (h *Handler) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	// Gitleaks deep scan: clone repos and scan for private keys
 	if req.Deep {
-		h.runGitleaksScan(ctx, req, result)
+		repos := collectScanTargets(req, result)
+		if len(repos) > 0 {
+			h.broadcastAnalysisProgress(req, startedAt, analysisPhaseSecret, fmt.Sprintf("Scanning %d repos for secrets", len(repos)), "", 0, len(repos), 0)
+		}
+		h.runGitleaksScan(ctx, req, result, startedAt, repos)
 	}
 
 	// Import findings and workflows to Kitchen's pantry and persist
+	h.broadcastAnalysisProgress(req, startedAt, analysisPhaseImport, formatImportPhaseMessage(result), "", result.ReposAnalyzed, result.ReposAnalyzed, len(result.SecretFindings))
 	if len(result.Findings) > 0 || len(result.Workflows) > 0 || len(result.SecretFindings) > 0 {
+		importStarted := time.Now()
 		imported := h.importAnalysisToPantry(result)
 		slog.Info("imported analysis to pantry",
 			"findings", len(result.Findings),
 			"workflows", len(result.Workflows),
 			"secrets", len(result.SecretFindings),
-			"assets", imported)
+			"assets", imported,
+			"duration", time.Since(importStarted))
 	}
 
-	if req.SessionID != "" && h.database != nil {
-		h.recordAnalyzedRepoVisibility(ctx, req.Token, req.SessionID, result)
-		h.importPrivateReposToPantry(req.SessionID)
-	}
-
+	h.broadcastAnalysisProgress(req, startedAt, analysisPhaseImport, "Persisting attack graph", "", result.ReposAnalyzed, result.ReposAnalyzed, len(result.SecretFindings))
+	saveStarted := time.Now()
 	if err := h.SavePantry(); err != nil {
 		slog.Warn("failed to persist pantry", "error", err)
+	} else {
+		slog.Info("analysis pantry persisted",
+			"target", req.Target,
+			"assets", h.Pantry().Size(),
+			"edges", h.Pantry().EdgeCount(),
+			"duration", time.Since(saveStarted))
 	}
+
+	h.recordAnalysisCompleted(req, result)
 
 	// Return result
 	// Note: result does NOT contain the token
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(AnalyzeResponse{AnalysisResult: result})
+
+	h.startAnalysisMetadataSync(req, result)
+}
+
+func (h *Handler) handleGetAnalyzeResult(w http.ResponseWriter, r *http.Request) {
+	analysisID := r.PathValue("analysisID")
+	sessionID := r.URL.Query().Get("session_id")
+
+	result := AnalyzeResultStatusResponse{
+		AnalysisID: analysisID,
+		Status:     analysisStatusUnknown,
+	}
+	if entry, ok := h.lookupAnalysisResult(analysisID, sessionID); ok {
+		result.Status = entry.Status
+		result.Result = entry.Result
+		result.Error = entry.Error
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+func (h *Handler) broadcastAnalysisProgress(req AnalyzeRequest, startedAt time.Time, phase, message, currentRepo string, reposCompleted, reposTotal, secretFindings int) {
+	if h.operators == nil || req.SessionID == "" {
+		return
+	}
+	h.operators.BroadcastAnalysisProgress(AnalysisProgressPayload{
+		AnalysisID:     req.AnalysisID,
+		SessionID:      req.SessionID,
+		Target:         req.Target,
+		TargetType:     req.TargetType,
+		Deep:           req.Deep,
+		Phase:          phase,
+		Message:        message,
+		CurrentRepo:    currentRepo,
+		ReposCompleted: reposCompleted,
+		ReposTotal:     reposTotal,
+		SecretFindings: secretFindings,
+		StartedAt:      startedAt,
+		UpdatedAt:      time.Now(),
+	})
+}
+
+func (h *Handler) broadcastAnalysisMetadataSync(req AnalyzeRequest, status, message string, reposTotal int, err error) {
+	if h.operators == nil || req.SessionID == "" {
+		return
+	}
+	payload := AnalysisMetadataSyncPayload{
+		AnalysisID: req.AnalysisID,
+		SessionID:  req.SessionID,
+		Target:     req.Target,
+		TargetType: req.TargetType,
+		Status:     status,
+		Message:    message,
+		ReposTotal: reposTotal,
+		UpdatedAt:  time.Now(),
+	}
+	if err != nil {
+		payload.Error = sanitizeError(err)
+	}
+	h.operators.BroadcastAnalysisMetadataSync(payload)
+}
+
+func (h *Handler) startAnalysisMetadataSync(req AnalyzeRequest, result *poutine.AnalysisResult) {
+	if req.SessionID == "" || h.database == nil {
+		return
+	}
+
+	repoCount := len(collectAnalyzedRepos(result))
+	if repoCount == 0 {
+		return
+	}
+
+	go h.runAnalysisMetadataSync(req, result, repoCount)
+}
+
+func (h *Handler) runAnalysisMetadataSync(req AnalyzeRequest, result *poutine.AnalysisResult, repoCount int) {
+	message := formatRepoVisibilityPhaseMessage(repoCount) + " in background"
+	h.broadcastAnalysisMetadataSync(req, analysisMetadataStarted, message, repoCount, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), analysisMetadataSyncTimeout(req.TargetType))
+	defer cancel()
+
+	started := time.Now()
+	visibilityStarted := time.Now()
+	h.recordAnalyzedRepoVisibility(ctx, req, result)
+	slog.Info("analysis repository access updated",
+		"target", req.Target,
+		"type", req.TargetType,
+		"repos", repoCount,
+		"duration", time.Since(visibilityStarted))
+
+	inventoryStarted := time.Now()
+	h.importPrivateReposToPantry(req.SessionID)
+	slog.Info("analysis private repo inventory updated",
+		"target", req.Target,
+		"session", req.SessionID,
+		"duration", time.Since(inventoryStarted))
+
+	saveStarted := time.Now()
+	if err := h.SavePantry(); err != nil {
+		slog.Warn("failed to persist pantry after analysis metadata sync", "target", req.Target, "error", err)
+		h.broadcastAnalysisMetadataSync(req, analysisMetadataFailed, "Repository access update incomplete", repoCount, err)
+		return
+	}
+
+	slog.Info("analysis metadata sync completed",
+		"target", req.Target,
+		"type", req.TargetType,
+		"repos", repoCount,
+		"persist_duration", time.Since(saveStarted),
+		"duration", time.Since(started))
+	h.broadcastAnalysisMetadataSync(req, analysisMetadataDone, "Repository access updated", repoCount, nil)
+}
+
+type analysisProgressObserver struct {
+	mu             sync.Mutex
+	handler        *Handler
+	req            AnalyzeRequest
+	startedAt      time.Time
+	reposCompleted int
+	reposTotal     int
+	currentRepo    string
+}
+
+func newAnalysisProgressObserver(handler *Handler, req AnalyzeRequest, startedAt time.Time) *analysisProgressObserver {
+	observer := &analysisProgressObserver{
+		handler:   handler,
+		req:       req,
+		startedAt: startedAt,
+	}
+	if req.TargetType == "repo" {
+		observer.reposTotal = 1
+	}
+	return observer
+}
+
+func (h *Handler) recordAnalysisPending(req AnalyzeRequest) {
+	if req.AnalysisID == "" {
+		return
+	}
+	h.analysisMu.Lock()
+	defer h.analysisMu.Unlock()
+	h.pruneAnalysisResultsLocked()
+	h.analysisRuns[req.AnalysisID] = &cachedAnalysisResult{
+		SessionID: req.SessionID,
+		UpdatedAt: time.Now(),
+		Status:    analysisStatusPending,
+	}
+}
+
+func (h *Handler) recordAnalysisCompleted(req AnalyzeRequest, result *poutine.AnalysisResult) {
+	if req.AnalysisID == "" {
+		return
+	}
+	h.analysisMu.Lock()
+	defer h.analysisMu.Unlock()
+	h.pruneAnalysisResultsLocked()
+	h.analysisRuns[req.AnalysisID] = &cachedAnalysisResult{
+		SessionID: req.SessionID,
+		UpdatedAt: time.Now(),
+		Status:    analysisStatusCompleted,
+		Result:    result,
+	}
+}
+
+func (h *Handler) recordAnalysisFailure(req AnalyzeRequest, err string) {
+	if req.AnalysisID == "" {
+		return
+	}
+	h.analysisMu.Lock()
+	defer h.analysisMu.Unlock()
+	h.pruneAnalysisResultsLocked()
+	h.analysisRuns[req.AnalysisID] = &cachedAnalysisResult{
+		SessionID: req.SessionID,
+		UpdatedAt: time.Now(),
+		Status:    analysisStatusFailed,
+		Error:     err,
+	}
+}
+
+func (h *Handler) lookupAnalysisResult(analysisID, sessionID string) (*cachedAnalysisResult, bool) {
+	if analysisID == "" {
+		return nil, false
+	}
+	h.analysisMu.Lock()
+	defer h.analysisMu.Unlock()
+	h.pruneAnalysisResultsLocked()
+	entry, ok := h.analysisRuns[analysisID]
+	if !ok {
+		return nil, false
+	}
+	if entry.SessionID != "" && sessionID != "" && entry.SessionID != sessionID {
+		return nil, false
+	}
+	if entry.SessionID != "" && sessionID == "" {
+		return nil, false
+	}
+	entryCopy := *entry
+	return &entryCopy, true
+}
+
+func (h *Handler) pruneAnalysisResultsLocked() {
+	cutoff := time.Now().Add(-analysisResultTTL)
+	for id, entry := range h.analysisRuns {
+		if entry == nil || entry.UpdatedAt.Before(cutoff) {
+			delete(h.analysisRuns, id)
+		}
+	}
+}
+
+func (o *analysisProgressObserver) OnAnalysisStarted(description string) {
+	o.broadcast(description, "", 0, 0, false)
+}
+
+func (o *analysisProgressObserver) OnDiscoveryCompleted(_ string, totalCount int) {
+	o.broadcast("Analyzing workflows", "", 0, totalCount, false)
+}
+
+func (o *analysisProgressObserver) OnRepoStarted(repo string) {
+	o.broadcast("Analyzing workflows", repo, 0, 0, false)
+}
+
+func (o *analysisProgressObserver) OnRepoCompleted(repo string) {
+	o.broadcast("Analyzing workflows", repo, 1, 0, false)
+}
+
+func (o *analysisProgressObserver) OnRepoError(repo string, _ error) {
+	o.broadcast("Analyzing workflows", repo, 1, 0, false)
+}
+
+func (o *analysisProgressObserver) OnRepoSkipped(repo, _ string) {
+	o.broadcast("Analyzing workflows", repo, 1, 0, false)
+}
+
+func (o *analysisProgressObserver) OnStepCompleted(description string) {
+	o.broadcast(description, "", 0, 0, false)
+}
+
+func (o *analysisProgressObserver) OnFinalizeStarted(_ int) {
+	o.broadcast("Finalizing analysis results", "", 0, 0, true)
+}
+
+func (o *analysisProgressObserver) OnFinalizeCompleted() {
+	o.broadcast("Finalizing analysis results", "", 0, 0, true)
+}
+
+func (o *analysisProgressObserver) broadcast(message, repo string, completedDelta, reposTotal int, clearRepo bool) {
+	o.mu.Lock()
+	if reposTotal > o.reposTotal {
+		o.reposTotal = reposTotal
+	}
+	if completedDelta > 0 {
+		o.reposCompleted += completedDelta
+	}
+	if clearRepo {
+		o.currentRepo = ""
+	} else if repo != "" {
+		o.currentRepo = repo
+	}
+	currentRepo := o.currentRepo
+	if currentRepo == "" && !clearRepo && o.req.TargetType == "repo" {
+		currentRepo = o.req.Target
+	}
+	reposCompleted := o.reposCompleted
+	reposKnown := o.reposTotal
+	o.mu.Unlock()
+
+	o.handler.broadcastAnalysisProgress(o.req, o.startedAt, analysisPhaseWorkflow, message, currentRepo, reposCompleted, reposKnown, 0)
 }
 
 // importAnalysisToPantry imports poutine findings into the Kitchen's pantry.
@@ -510,27 +867,53 @@ func (h *Handler) importAnalysisToPantry(result *poutine.AnalysisResult) int {
 	return imported
 }
 
-func (h *Handler) recordAnalyzedRepoVisibility(ctx context.Context, token, sessionID string, result *poutine.AnalysisResult) {
+func collectAnalyzedRepos(result *poutine.AnalysisResult) map[string]struct{} {
 	repos := make(map[string]struct{})
 	for _, r := range result.AnalyzedRepos {
-		repos[r] = struct{}{}
+		if r != "" {
+			repos[r] = struct{}{}
+		}
 	}
 	for _, f := range result.Findings {
-		repos[f.Repository] = struct{}{}
+		if f.Repository != "" {
+			repos[f.Repository] = struct{}{}
+		}
 	}
+	return repos
+}
 
-	client := newGitHubClient(token)
+func (h *Handler) recordAnalyzedRepoVisibility(ctx context.Context, req AnalyzeRequest, result *poutine.AnalysisResult) {
+	repos := collectAnalyzedRepos(result)
+	client := newGitHubClient(req.Token)
 	entityRepo := db.NewKnownEntityRepository(h.database)
+	repoInfoByName := make(map[string]RepoInfo, len(repos))
+
+	if req.TargetType == "org" && req.Target != "" && !strings.Contains(req.Target, "/") {
+		infos, err := client.listOwnerReposWithInfoGraphQL(ctx, req.Target)
+		if err != nil {
+			slog.Debug("failed to prefetch owner repo visibility during analysis", "target", req.Target, "repo_count", len(repos), "error", err)
+		} else {
+			for _, info := range infos {
+				if _, ok := repos[info.FullName]; ok {
+					repoInfoByName[info.FullName] = info
+				}
+			}
+		}
+	}
 
 	for fullName := range repos {
 		parts := strings.Split(fullName, "/")
 		if len(parts) < 2 {
 			continue
 		}
-		info, err := client.getRepoInfo(ctx, parts[0], parts[1])
-		if err != nil {
-			slog.Debug("failed to get repo info during analysis", "repo", fullName, "error", err)
-			continue
+		info, ok := repoInfoByName[fullName]
+		if !ok {
+			var err error
+			info, err = client.getRepoInfo(ctx, parts[0], parts[1])
+			if err != nil {
+				slog.Debug("failed to get repo info during analysis", "repo", fullName, "error", err)
+				continue
+			}
 		}
 
 		var perms []string
@@ -542,7 +925,7 @@ func (h *Handler) recordAnalyzedRepoVisibility(ctx context.Context, token, sessi
 			ID:            "repo:" + fullName,
 			EntityType:    db.EntityTypeRepo,
 			Name:          fullName,
-			SessionID:     sessionID,
+			SessionID:     req.SessionID,
 			DiscoveredVia: "analysis",
 			IsPrivate:     info.IsPrivate,
 			Permissions:   perms,
@@ -594,13 +977,14 @@ func upsertKnownRepoAsset(p *pantry.Pantry, entity *db.KnownEntityRow) {
 }
 
 // runGitleaksScan runs gitleaks on repos discovered during analysis.
-func (h *Handler) runGitleaksScan(ctx context.Context, req AnalyzeRequest, result *poutine.AnalysisResult) {
-	repos := collectScanTargets(req, result)
-	for _, repo := range repos {
+func (h *Handler) runGitleaksScan(ctx context.Context, req AnalyzeRequest, result *poutine.AnalysisResult, startedAt time.Time, repos []string) {
+	for i, repo := range repos {
+		h.broadcastAnalysisProgress(req, startedAt, analysisPhaseSecret, "Scanning repository for secrets", repo, i, len(repos), len(result.SecretFindings))
 		scanResult, err := gitleaks.CloneAndScan(ctx, req.Token, repo)
 		if err != nil {
 			slog.Warn("gitleaks scan failed", "repo", repo, "error", err)
 			result.Errors = append(result.Errors, fmt.Sprintf("gitleaks scan failed for %s: %s", repo, sanitizeError(err)))
+			h.broadcastAnalysisProgress(req, startedAt, analysisPhaseSecret, "Secret scan error", repo, i+1, len(repos), len(result.SecretFindings))
 			continue
 		}
 
@@ -624,6 +1008,7 @@ func (h *Handler) runGitleaksScan(ctx context.Context, req AnalyzeRequest, resul
 		if len(scanResult.Findings) > 0 {
 			slog.Info("gitleaks found secrets", "repo", repo, "count", len(scanResult.Findings))
 		}
+		h.broadcastAnalysisProgress(req, startedAt, analysisPhaseSecret, "Secret scan updated", repo, i+1, len(repos), len(result.SecretFindings))
 	}
 }
 

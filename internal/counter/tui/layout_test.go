@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
+	"github.com/boostsecurityio/smokedmeat/internal/counter"
 	"github.com/boostsecurityio/smokedmeat/internal/models"
 )
 
@@ -72,8 +73,8 @@ func TestStickersLayout_InputHeightConstant(t *testing.T) {
 	inputNoHint := fixedInput(120)
 	inputWithHint := fixedInput(120)
 
-	out1 := sl.RenderIdle(fixedHeader(120), inputNoHint, fixedStatus(120), false, renderers, false)
-	out2 := sl.RenderIdle(fixedHeader(120), inputWithHint, fixedStatus(120), false, renderers, false)
+	out1 := sl.RenderIdle(fixedHeader(120), inputNoHint, fixedStatus(120), false, renderers, false, "")
+	out2 := sl.RenderIdle(fixedHeader(120), inputWithHint, fixedStatus(120), false, renderers, false, "")
 
 	lines1 := strings.Split(out1, "\n")
 	lines2 := strings.Split(out2, "\n")
@@ -90,10 +91,10 @@ func TestStickersLayout_ResizeReflows(t *testing.T) {
 	renderers := stubRenderers()
 
 	sl.Resize(120, 40)
-	out1 := sl.RenderIdle(fixedHeader(120), fixedInput(120), fixedStatus(120), false, renderers, false)
+	out1 := sl.RenderIdle(fixedHeader(120), fixedInput(120), fixedStatus(120), false, renderers, false, "")
 
 	sl.Resize(200, 60)
-	out2 := sl.RenderIdle(fixedHeader(200), fixedInput(200), fixedStatus(200), false, renderers, false)
+	out2 := sl.RenderIdle(fixedHeader(200), fixedInput(200), fixedStatus(200), false, renderers, false, "")
 
 	lines1 := strings.Split(out1, "\n")
 	lines2 := strings.Split(out2, "\n")
@@ -109,7 +110,7 @@ func TestStickersLayout_NarrowCollapse(t *testing.T) {
 	sl.Resize(70, 30)
 	assert.True(t, sl.IsNarrow())
 
-	out := sl.RenderIdle(fixedHeader(70), fixedInput(70), fixedStatus(70), false, renderers, false)
+	out := sl.RenderIdle(fixedHeader(70), fixedInput(70), fixedStatus(70), false, renderers, false, "")
 	lines := strings.Split(out, "\n")
 
 	require.Equal(t, 30, len(lines), "should fill terminal height")
@@ -125,7 +126,7 @@ func TestStickersLayout_WideShowsBothColumns(t *testing.T) {
 	sl.Resize(120, 40)
 	assert.False(t, sl.IsNarrow())
 
-	out := sl.RenderIdle(fixedHeader(120), fixedInput(120), fixedStatus(120), false, renderers, false)
+	out := sl.RenderIdle(fixedHeader(120), fixedInput(120), fixedStatus(120), false, renderers, false, "")
 
 	assert.Contains(t, out, "TREE", "wide mode should show tree")
 	assert.Contains(t, out, "MENU", "wide mode should show menu")
@@ -138,7 +139,7 @@ func TestStickersLayout_AgentView(t *testing.T) {
 	renderers := stubRenderers()
 
 	sl.Resize(120, 40)
-	out := sl.RenderAgent(fixedHeader(120), fixedInput(120), fixedStatus(120), false, renderers, false)
+	out := sl.RenderAgent(fixedHeader(120), fixedInput(120), fixedStatus(120), false, renderers, false, "")
 
 	assert.Contains(t, out, "TREE", "agent view should show tree")
 	assert.Contains(t, out, "AGENT", "agent view should show agent panel")
@@ -210,7 +211,7 @@ func TestStickersLayout_HeaderPositionStable(t *testing.T) {
 	sl.Resize(120, 40)
 
 	input3Lines := fixedInput(120)
-	out := sl.RenderIdle(fixedHeader(120), input3Lines, fixedStatus(120), false, renderers, false)
+	out := sl.RenderIdle(fixedHeader(120), input3Lines, fixedStatus(120), false, renderers, false, "")
 
 	lines := strings.Split(out, "\n")
 	require.True(t, len(lines) >= 1)
@@ -228,7 +229,7 @@ func TestStickersLayout_MultipleResizes(t *testing.T) {
 	for _, size := range sizes {
 		w, h := size[0], size[1]
 		sl.Resize(w, h)
-		out := sl.RenderIdle(fixedHeader(w), fixedInput(w), fixedStatus(w), false, renderers, false)
+		out := sl.RenderIdle(fixedHeader(w), fixedInput(w), fixedStatus(w), false, renderers, false, "")
 		lines := strings.Split(out, "\n")
 		assert.Equal(t, h, len(lines), "output should match terminal height for %dx%d", w, h)
 	}
@@ -322,6 +323,39 @@ func TestRenderWaitingView_ShowsWriterCacheStatus(t *testing.T) {
 	out := stripANSI(m.renderWaitingView(24))
 
 	assert.Contains(t, out, "Writer cache: armed")
+}
+
+func TestRenderAnalysisProgressLine_StabilizesRepoProgressPosition(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 120
+	m.analysisProgress = &counter.AnalysisProgressPayload{
+		Phase:          analysisPhaseWorkflow,
+		Message:        "Analyzing workflows",
+		CurrentRepo:    "org/repo-with-a-very-long-name",
+		ReposCompleted: 12,
+		ReposTotal:     493,
+		StartedAt:      time.Now().Add(-5 * time.Second),
+		UpdatedAt:      time.Now().Add(-5 * time.Second),
+	}
+
+	out := stripANSI(m.renderAnalysisProgressLine())
+
+	assert.Contains(t, out, "Analyzing workflows | 12/493 repos")
+	assert.Contains(t, out, "| org/repo-with-a-very-long-name")
+}
+
+func TestRenderAnalysisProgressLine_FutureStartDoesNotPanic(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 120
+	m.analysisProgress = &counter.AnalysisProgressPayload{
+		Phase:     analysisPhaseWorkflow,
+		StartedAt: time.Now().Add(5 * time.Second),
+		UpdatedAt: time.Now().Add(5 * time.Second),
+	}
+
+	assert.NotPanics(t, func() {
+		_ = m.renderAnalysisProgressLine()
+	})
 }
 
 func TestBuildWizardStep2Content_AppTokenIssueWriteDoesNotWarn(t *testing.T) {
@@ -598,6 +632,6 @@ func BenchmarkStickersLayout_Render(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		sl.RenderIdle(header, input, status, false, renderers, false)
+		sl.RenderIdle(header, input, status, false, renderers, false, "")
 	}
 }

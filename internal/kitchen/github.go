@@ -631,6 +631,88 @@ func (c *gitHubClient) listAccessibleReposWithInfo(ctx context.Context) ([]RepoI
 	return repos, nil
 }
 
+func viewerPermissionCanPush(permission string) bool {
+	switch strings.ToUpper(strings.TrimSpace(permission)) {
+	case "ADMIN", "MAINTAIN", "WRITE":
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *gitHubClient) listOwnerReposWithInfoGraphQL(ctx context.Context, owner string) ([]RepoInfo, error) {
+	const query = `query OwnerReposWithInfo($login: String!, $cursor: String) {
+  repositoryOwner(login: $login) {
+    repositories(first: 100, after: $cursor) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        nameWithOwner
+        isPrivate
+        viewerPermission
+      }
+    }
+  }
+}`
+
+	var repos []RepoInfo
+	var cursor *string
+
+	for {
+		var data struct {
+			RepositoryOwner *struct {
+				Repositories struct {
+					PageInfo struct {
+						HasNextPage bool   `json:"hasNextPage"`
+						EndCursor   string `json:"endCursor"`
+					} `json:"pageInfo"`
+					Nodes []struct {
+						NameWithOwner    string `json:"nameWithOwner"`
+						IsPrivate        bool   `json:"isPrivate"`
+						ViewerPermission string `json:"viewerPermission"`
+					} `json:"nodes"`
+				} `json:"repositories"`
+			} `json:"repositoryOwner"`
+		}
+
+		variables := map[string]interface{}{
+			"login":  owner,
+			"cursor": cursor,
+		}
+		gqlErrors, err := c.executeGraphQL(ctx, query, variables, &data)
+		if err != nil {
+			return nil, err
+		}
+		if len(gqlErrors) > 0 {
+			return nil, errors.New(gqlErrors[0].Message)
+		}
+		if data.RepositoryOwner == nil {
+			return nil, fmt.Errorf("repository owner not found")
+		}
+
+		for _, node := range data.RepositoryOwner.Repositories.Nodes {
+			if node.NameWithOwner == "" {
+				continue
+			}
+			repos = append(repos, RepoInfo{
+				FullName:  node.NameWithOwner,
+				IsPrivate: node.IsPrivate,
+				CanPush:   viewerPermissionCanPush(node.ViewerPermission),
+			})
+		}
+
+		if !data.RepositoryOwner.Repositories.PageInfo.HasNextPage || data.RepositoryOwner.Repositories.PageInfo.EndCursor == "" {
+			break
+		}
+		nextCursor := data.RepositoryOwner.Repositories.PageInfo.EndCursor
+		cursor = &nextCursor
+	}
+
+	return repos, nil
+}
+
 func (c *gitHubClient) getRepoInfo(ctx context.Context, owner, repo string) (RepoInfo, error) {
 	r, _, err := c.client.Repositories.Get(ctx, owner, repo)
 	if err != nil {

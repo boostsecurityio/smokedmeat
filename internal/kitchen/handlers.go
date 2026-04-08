@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/boostsecurityio/smokedmeat/internal/gump"
@@ -93,6 +94,8 @@ type Handler struct {
 	pantry         *pantry.Pantry
 	auth           *auth.Auth
 	preflightCache *deployPreflightCache
+	analysisMu     sync.Mutex
+	analysisRuns   map[string]*cachedAnalysisResult
 }
 
 // NewHandler creates a new Handler.
@@ -103,6 +106,7 @@ func NewHandler(publisher *pass.Publisher, store *OrderStore, sessions *SessionR
 		stagerStore:    NewStagerStore(DefaultStagerStoreConfig()),
 		sessions:       sessions,
 		preflightCache: newDeployPreflightCache(),
+		analysisRuns:   make(map[string]*cachedAnalysisResult),
 	}
 }
 
@@ -114,6 +118,7 @@ func NewHandlerWithPublisher(publisher Publisher, store *OrderStore) *Handler {
 		stagerStore:    NewStagerStore(DefaultStagerStoreConfig()),
 		sessions:       NewSessionRegistry(DefaultSessionRegistryConfig()),
 		preflightCache: newDeployPreflightCache(),
+		analysisRuns:   make(map[string]*cachedAnalysisResult),
 	}
 }
 
@@ -172,6 +177,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /r/{stagerID}", h.handleStagerRegister)
 	mux.HandleFunc("GET /agent/{filename}", h.handleAgentDownload)
 	mux.HandleFunc("POST /analyze", h.handleAnalyze)
+	mux.HandleFunc("GET /analyze/result/{analysisID}", h.handleGetAnalyzeResult)
 	mux.HandleFunc("POST /github/deploy/pr", h.handleGitHubDeployPR)
 	mux.HandleFunc("POST /github/deploy/issue", h.handleGitHubDeployIssue)
 	mux.HandleFunc("POST /github/deploy/comment", h.handleGitHubDeployComment)

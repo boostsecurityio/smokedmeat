@@ -5,8 +5,11 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -21,6 +24,45 @@ import (
 	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 	"github.com/boostsecurityio/smokedmeat/internal/poutine"
 )
+
+const (
+	analysisPhaseWorkflow      = "workflow_analysis"
+	analysisPhaseSecret        = "secret_scan"
+	analysisPhaseImport        = "import"
+	analysisResultPollInterval = 2 * time.Second
+	analysisResultPollMaxTries = 600
+)
+
+func analysisRequestTimeout(targetType string, deep bool) time.Duration {
+	switch {
+	case deep && targetType == "org":
+		return 90 * time.Minute
+	case deep:
+		return 30 * time.Minute
+	case targetType == "org":
+		return 60 * time.Minute
+	default:
+		return 20 * time.Minute
+	}
+}
+
+func newAnalysisID() string {
+	return fmt.Sprintf("analysis_%d", time.Now().UnixNano())
+}
+
+func isRecoverableDroppedAnalysisError(err error) bool {
+	switch {
+	case errors.Is(err, io.EOF):
+		return true
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return true
+	case errors.Is(err, context.DeadlineExceeded):
+		return true
+	}
+
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
 
 func (m Model) handleAnalyzeCommand() (tea.Model, tea.Cmd) {
 	return m.handleAnalyzeForTarget(m.target, m.targetType, false, false)
@@ -64,8 +106,10 @@ func (m Model) handleAnalyzeForTarget(target, targetType string, deep, selection
 		targetType = "org"
 	}
 	targetSpec := targetType + ":" + target
+	analysisID := newAnalysisID()
 
 	m.analysisFocusRepo = ""
+	m.beginAnalysisProgress(analysisID, target, targetType, deep)
 
 	m.AddOutput("info", "")
 	if deep {
@@ -86,14 +130,14 @@ func (m Model) handleAnalyzeForTarget(target, targetType string, deep, selection
 				m.activityLog.Add(IconScan, fmt.Sprintf("Starting deep analysis of %d repos in %s", len(repos), target))
 				m.flashMessage = "Deep-analyzing " + target
 				m.flashUntil = time.Now().Add(2 * time.Second)
-				return m, m.runDeepAnalysisForTargets(repos, target)
+				return m, m.runDeepAnalysisForTargets(analysisID, repos, target)
 			}
 			m.AddOutput("info", "Tip: deep-analyze is most useful on a single repo. Highlight a repo and press 'd', or run 'set target repo:owner/repo'.")
 		}
 		m.activityLog.Add(IconScan, fmt.Sprintf("Starting deep analysis of %s", targetSpec))
 		m.flashMessage = "Deep-analyzing " + target
 		m.flashUntil = time.Now().Add(2 * time.Second)
-		return m, m.runDeepAnalysisForTarget(target, targetType)
+		return m, m.runDeepAnalysisForTarget(analysisID, target, targetType)
 	}
 
 	m.AddOutput("info", fmt.Sprintf("Starting poutine analysis via Kitchen (%s)...", m.config.KitchenURL))
@@ -101,30 +145,33 @@ func (m Model) handleAnalyzeForTarget(target, targetType string, deep, selection
 	m.flashMessage = "Analyzing " + target
 	m.flashUntil = time.Now().Add(2 * time.Second)
 
-	return m, m.runAnalysisForTarget(target, targetType)
+	return m, m.runAnalysisForTarget(analysisID, target, targetType)
 }
 
-func (m Model) runDeepAnalysisForTarget(target, targetType string) tea.Cmd {
+func (m Model) runDeepAnalysisForTarget(analysisID, target, targetType string) tea.Cmd {
 	token := ""
 	if m.tokenInfo != nil {
 		token = m.tokenInfo.Value
 	}
 
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), analysisRequestTimeout(targetType, true))
 		defer cancel()
 
 		client := counter.NewClient(m.config.KitchenURL, m.config.AuthToken, m.config.SessionID)
-		result, err := client.DeepAnalyze(ctx, token, target, targetType)
+		result, err := client.DeepAnalyzeWithID(ctx, token, target, targetType, analysisID)
 		if err != nil {
-			return AnalysisErrorMsg{Err: err}
+			if isRecoverableDroppedAnalysisError(err) {
+				return AnalysisResponseDroppedMsg{AnalysisID: analysisID, Deep: true, Err: err}
+			}
+			return AnalysisErrorMsg{AnalysisID: analysisID, Err: err}
 		}
 
-		return AnalysisCompletedMsg{Result: result, Deep: true}
+		return AnalysisCompletedMsg{AnalysisID: analysisID, Result: result, Deep: true}
 	}
 }
 
-func (m Model) runDeepAnalysisForTargets(repos []string, owner string) tea.Cmd {
+func (m Model) runDeepAnalysisForTargets(analysisID string, repos []string, owner string) tea.Cmd {
 	token := ""
 	if m.tokenInfo != nil {
 		token = m.tokenInfo.Value
@@ -166,7 +213,7 @@ func (m Model) runDeepAnalysisForTargets(repos []string, owner string) tea.Cmd {
 		}
 
 		result.Duration = time.Since(started)
-		return AnalysisCompletedMsg{Result: result, Deep: true}
+		return AnalysisCompletedMsg{AnalysisID: analysisID, Result: result, Deep: true}
 	}
 }
 
@@ -241,27 +288,126 @@ func (m Model) runPivotAnalysis() tea.Cmd {
 }
 
 func (m Model) runAnalysis() tea.Cmd {
-	return m.runAnalysisForTarget(m.target, m.targetType)
+	return m.runAnalysisForTarget(newAnalysisID(), m.target, m.targetType)
 }
 
-func (m Model) runAnalysisForTarget(target, targetType string) tea.Cmd {
+func (m Model) runAnalysisForTarget(analysisID, target, targetType string) tea.Cmd {
 	token := ""
 	if m.tokenInfo != nil {
 		token = m.tokenInfo.Value
 	}
 
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), analysisRequestTimeout(targetType, false))
 		defer cancel()
 
 		client := counter.NewClient(m.config.KitchenURL, m.config.AuthToken, m.config.SessionID)
-		result, err := client.Analyze(ctx, token, target, targetType)
+		result, err := client.AnalyzeWithID(ctx, token, target, targetType, analysisID)
 		if err != nil {
-			return AnalysisErrorMsg{Err: err}
+			if isRecoverableDroppedAnalysisError(err) {
+				return AnalysisResponseDroppedMsg{AnalysisID: analysisID, Err: err}
+			}
+			return AnalysisErrorMsg{AnalysisID: analysisID, Err: err}
 		}
 
-		return AnalysisCompletedMsg{Result: result}
+		return AnalysisCompletedMsg{AnalysisID: analysisID, Result: result}
 	}
+}
+
+func (m *Model) beginAnalysisProgress(analysisID, target, targetType string, deep bool) {
+	now := time.Now()
+	reposTotal := 0
+	if targetType == "repo" {
+		reposTotal = 1
+	}
+	m.activeAnalysisID = analysisID
+	m.analysisResultPoll = nil
+	m.analysisProgress = &counter.AnalysisProgressPayload{
+		AnalysisID: analysisID,
+		Target:     target,
+		TargetType: targetType,
+		Deep:       deep,
+		Phase:      analysisPhaseWorkflow,
+		Message:    "Analyzing workflows",
+		ReposTotal: reposTotal,
+		StartedAt:  now,
+		UpdatedAt:  now,
+	}
+}
+
+func (m *Model) clearAnalysisProgress() {
+	m.analysisProgress = nil
+	m.analysisResultPoll = nil
+	m.activeAnalysisID = ""
+}
+
+func (m *Model) applyAnalysisProgress(progress counter.AnalysisProgressPayload) {
+	if m.activeAnalysisID != "" && progress.AnalysisID != "" && progress.AnalysisID != m.activeAnalysisID {
+		return
+	}
+	previousPhase := ""
+	previousStart := time.Time{}
+	if m.analysisProgress != nil {
+		previousPhase = m.analysisProgress.Phase
+		previousStart = m.analysisProgress.StartedAt
+	}
+	if progress.StartedAt.IsZero() {
+		if !previousStart.IsZero() {
+			progress.StartedAt = previousStart
+		} else {
+			progress.StartedAt = time.Now()
+		}
+	}
+	if progress.UpdatedAt.IsZero() {
+		progress.UpdatedAt = time.Now()
+	}
+	if progress.Target == "" && m.analysisProgress != nil {
+		progress.AnalysisID = m.analysisProgress.AnalysisID
+		progress.Target = m.analysisProgress.Target
+		progress.TargetType = m.analysisProgress.TargetType
+		progress.Deep = m.analysisProgress.Deep
+	}
+	m.analysisProgress = &progress
+	if m.setupWizard != nil && m.setupWizard.Step == 7 && m.setupWizard.AnalysisRunning && m.setupWizard.AnalysisStart.IsZero() {
+		m.setupWizard.AnalysisStart = progress.StartedAt
+	}
+	if progress.Phase == previousPhase {
+		return
+	}
+	switch progress.Phase {
+	case analysisPhaseSecret:
+		if progress.ReposTotal > 0 {
+			m.activityLog.Add(IconScan, fmt.Sprintf("Secret scan running for %d repos", progress.ReposTotal))
+		} else {
+			m.activityLog.Add(IconScan, "Secret scan running")
+		}
+	case analysisPhaseImport:
+		m.activityLog.Add(IconScan, "Importing analysis results")
+	}
+}
+
+func (m *Model) startAnalysisResultPoll(analysisID string, deep, setup bool, originalErr error) tea.Cmd {
+	m.analysisResultPoll = &analysisResultPollState{
+		AnalysisID:  analysisID,
+		Deep:        deep,
+		Setup:       setup,
+		OriginalErr: originalErr,
+	}
+	return m.pollAnalysisResultCmd(analysisID)
+}
+
+func (m Model) pollAnalysisResultCmd(analysisID string) tea.Cmd {
+	return tea.Tick(analysisResultPollInterval, func(time.Time) tea.Msg {
+		client := counter.NewClient(m.config.KitchenURL, m.config.AuthToken, m.config.SessionID)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		result, err := client.FetchAnalysisResult(ctx, analysisID)
+		if err != nil {
+			return AnalysisResultStatusErrorMsg{AnalysisID: analysisID, Err: err}
+		}
+		return AnalysisResultStatusFetchedMsg{AnalysisID: analysisID, Response: result}
+	})
 }
 
 func (m *Model) handleGraphCommand() {
@@ -302,6 +448,7 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 	result := msg.Result
 
 	m.analysisComplete = true
+	m.clearAnalysisProgress()
 
 	m.AddOutput("info", "")
 	if result.Success && len(result.Errors) == 0 {

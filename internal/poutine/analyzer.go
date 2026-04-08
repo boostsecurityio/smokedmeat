@@ -159,10 +159,84 @@ type Finding struct {
 	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
+type AnalysisObserver interface {
+	OnAnalysisStarted(description string)
+	OnDiscoveryCompleted(org string, totalCount int)
+	OnRepoStarted(repo string)
+	OnRepoCompleted(repo string)
+	OnRepoError(repo string, err error)
+	OnRepoSkipped(repo string, reason string)
+	OnStepCompleted(description string)
+	OnFinalizeStarted(totalPackages int)
+	OnFinalizeCompleted()
+}
+
+type observerAdapter struct {
+	observer AnalysisObserver
+}
+
+func (o observerAdapter) OnAnalysisStarted(description string) {
+	if o.observer != nil {
+		o.observer.OnAnalysisStarted(description)
+	}
+}
+
+func (o observerAdapter) OnDiscoveryCompleted(org string, totalCount int) {
+	if o.observer != nil {
+		o.observer.OnDiscoveryCompleted(org, totalCount)
+	}
+}
+
+func (o observerAdapter) OnRepoStarted(repo string) {
+	if o.observer != nil {
+		o.observer.OnRepoStarted(repo)
+	}
+}
+
+func (o observerAdapter) OnRepoCompleted(repo string, _ *models.PackageInsights) {
+	if o.observer != nil {
+		o.observer.OnRepoCompleted(repo)
+	}
+}
+
+func (o observerAdapter) OnRepoError(repo string, err error) {
+	if o.observer != nil {
+		o.observer.OnRepoError(repo, err)
+	}
+}
+
+func (o observerAdapter) OnRepoSkipped(repo, reason string) {
+	if o.observer != nil {
+		o.observer.OnRepoSkipped(repo, reason)
+	}
+}
+
+func (o observerAdapter) OnStepCompleted(description string) {
+	if o.observer != nil {
+		o.observer.OnStepCompleted(description)
+	}
+}
+
+func (o observerAdapter) OnFinalizeStarted(totalPackages int) {
+	if o.observer != nil {
+		o.observer.OnFinalizeStarted(totalPackages)
+	}
+}
+
+func (o observerAdapter) OnFinalizeCompleted() {
+	if o.observer != nil {
+		o.observer.OnFinalizeCompleted()
+	}
+}
+
 // AnalyzeRemote performs analysis on a remote GitHub target using the GitHub API.
 // This is used by Kitchen for pre-agent reconnaissance.
 // The token is used ephemerally and NOT persisted.
 func AnalyzeRemote(ctx context.Context, token, target, targetType string) (*AnalysisResult, error) {
+	return AnalyzeRemoteWithObserver(ctx, token, target, targetType, nil)
+}
+
+func AnalyzeRemoteWithObserver(ctx context.Context, token, target, targetType string, observer AnalysisObserver) (*AnalysisResult, error) {
 	start := time.Now()
 	result := &AnalysisResult{
 		Target:     target,
@@ -201,6 +275,9 @@ func AnalyzeRemote(ctx context.Context, token, target, targetType string) (*Anal
 
 	// Create analyzer with no-op formatter
 	analyzer := analyze.NewAnalyzer(scmClient, gitClient, &NoopFormatter{}, config, opaClient)
+	if observer != nil {
+		analyzer.Observer = observerAdapter{observer: observer}
+	}
 
 	// Run analysis based on target type
 	var packages []*models.PackageInsights

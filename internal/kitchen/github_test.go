@@ -1214,6 +1214,63 @@ func TestListAccessibleReposWithInfo(t *testing.T) {
 	assert.False(t, repos[1].CanPush)
 }
 
+func TestViewerPermissionCanPush(t *testing.T) {
+	tests := []struct {
+		name       string
+		permission string
+		want       bool
+	}{
+		{name: "admin", permission: "ADMIN", want: true},
+		{name: "maintain", permission: "MAINTAIN", want: true},
+		{name: "write", permission: "WRITE", want: true},
+		{name: "read", permission: "READ", want: false},
+		{name: "triage", permission: "TRIAGE", want: false},
+		{name: "empty", permission: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, viewerPermissionCanPush(tt.permission))
+		})
+	}
+}
+
+func TestListOwnerReposWithInfoGraphQL(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /graphql", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Variables map[string]interface{} `json:"variables"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Variables["cursor"] {
+		case nil:
+			fmt.Fprint(w, `{"data":{"repositoryOwner":{"repositories":{"pageInfo":{"hasNextPage":true,"endCursor":"cursor-2"},"nodes":[{"nameWithOwner":"acme/api","isPrivate":true,"viewerPermission":"WRITE"},{"nameWithOwner":"acme/web","isPrivate":false,"viewerPermission":"READ"}]}}}}`)
+		case "cursor-2":
+			fmt.Fprint(w, `{"data":{"repositoryOwner":{"repositories":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[{"nameWithOwner":"acme/ops","isPrivate":true,"viewerPermission":"ADMIN"}]}}}}`)
+		default:
+			t.Fatalf("unexpected cursor: %#v", req.Variables["cursor"])
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	ghClient := &gitHubClient{
+		client:     github.NewClient(nil),
+		token:      "test",
+		graphqlURL: srv.URL + "/graphql",
+	}
+
+	repos, err := ghClient.listOwnerReposWithInfoGraphQL(context.Background(), "acme")
+	require.NoError(t, err)
+	require.Len(t, repos, 3)
+	assert.Equal(t, "acme/api", repos[0].FullName)
+	assert.True(t, repos[0].IsPrivate)
+	assert.True(t, repos[0].CanPush)
+	assert.False(t, repos[1].CanPush)
+	assert.True(t, repos[2].CanPush)
+}
+
 func TestGetAuthenticatedUser(t *testing.T) {
 	_, ghClient := newMockGitHubAPI(t)
 

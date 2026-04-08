@@ -43,6 +43,12 @@ type OperatorMessage struct {
 	// For "express_data" type
 	ExpressData *ExpressDataPayload `json:"express_data,omitempty"`
 
+	// For "analysis_progress" type
+	AnalysisProgress *AnalysisProgressPayload `json:"analysis_progress,omitempty"`
+
+	// For "analysis_metadata_sync" type
+	AnalysisMetadataSync *AnalysisMetadataSyncPayload `json:"analysis_metadata_sync,omitempty"`
+
 	// For "error" type
 	Error string `json:"error,omitempty"`
 }
@@ -66,6 +72,34 @@ type HistoryPayload struct {
 	Outcome     string `json:"outcome,omitempty"`
 	ErrorDetail string `json:"error_detail,omitempty"`
 	AgentID     string `json:"agent_id,omitempty"`
+}
+
+type AnalysisProgressPayload struct {
+	AnalysisID     string    `json:"analysis_id,omitempty"`
+	SessionID      string    `json:"session_id,omitempty"`
+	Target         string    `json:"target,omitempty"`
+	TargetType     string    `json:"target_type,omitempty"`
+	Deep           bool      `json:"deep,omitempty"`
+	Phase          string    `json:"phase"`
+	Message        string    `json:"message,omitempty"`
+	CurrentRepo    string    `json:"current_repo,omitempty"`
+	ReposCompleted int       `json:"repos_completed,omitempty"`
+	ReposTotal     int       `json:"repos_total,omitempty"`
+	SecretFindings int       `json:"secret_findings,omitempty"`
+	StartedAt      time.Time `json:"started_at,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at,omitempty"`
+}
+
+type AnalysisMetadataSyncPayload struct {
+	AnalysisID string    `json:"analysis_id,omitempty"`
+	SessionID  string    `json:"session_id,omitempty"`
+	Target     string    `json:"target,omitempty"`
+	TargetType string    `json:"target_type,omitempty"`
+	Status     string    `json:"status"`
+	Message    string    `json:"message,omitempty"`
+	ReposTotal int       `json:"repos_total,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at,omitempty"`
 }
 
 // BeaconPayload represents agent beacon data sent to operators.
@@ -264,6 +298,22 @@ func (h *OperatorHub) Broadcast(msg OperatorMessage) {
 	}
 }
 
+func (h *OperatorHub) broadcastToSession(sessionID string, msg OperatorMessage) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for op := range h.operators {
+		if sessionID != "" && op.sessionID != sessionID {
+			continue
+		}
+		select {
+		case op.send <- msg:
+		default:
+			slog.Warn("operator send buffer full, dropping message", "session_id", op.sessionID)
+		}
+	}
+}
+
 // BroadcastBeacon sends a beacon to all operators.
 func (h *OperatorHub) BroadcastBeacon(beacon BeaconPayload) {
 	h.Broadcast(OperatorMessage{
@@ -301,6 +351,20 @@ func (h *OperatorHub) BroadcastExpressData(data ExpressDataPayload) {
 	h.Broadcast(OperatorMessage{
 		Type:        "express_data",
 		ExpressData: &data,
+	})
+}
+
+func (h *OperatorHub) BroadcastAnalysisProgress(progress AnalysisProgressPayload) {
+	h.broadcastToSession(progress.SessionID, OperatorMessage{
+		Type:             "analysis_progress",
+		AnalysisProgress: &progress,
+	})
+}
+
+func (h *OperatorHub) BroadcastAnalysisMetadataSync(payload AnalysisMetadataSyncPayload) {
+	h.broadcastToSession(payload.SessionID, OperatorMessage{
+		Type:                 "analysis_metadata_sync",
+		AnalysisMetadataSync: &payload,
 	})
 }
 

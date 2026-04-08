@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,7 +25,7 @@ func TestNewClient(t *testing.T) {
 
 	assert.Equal(t, "http://kitchen.example.com", client.KitchenURL)
 	assert.NotNil(t, client.HTTPClient)
-	assert.Equal(t, 15*time.Minute, client.HTTPClient.Timeout)
+	assert.Equal(t, defaultAnalyzeHTTPTimeout, client.HTTPClient.Timeout)
 }
 
 func TestNewClient_EmptyURL(t *testing.T) {
@@ -300,6 +299,47 @@ func TestNewClient_SessionID_Sent(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "sess-abc123", receivedReq.SessionID, "NewClient must send session_id — Kitchen needs it for recordAnalyzedRepoVisibility")
+}
+
+func TestClient_AnalyzeWithID_SendsAnalysisID(t *testing.T) {
+	var receivedReq AnalyzeRequest
+
+	mockClient := newMockHTTPClient(func(req *http.Request) (*http.Response, error) {
+		json.NewDecoder(req.Body).Decode(&receivedReq)
+		resultJSON, _ := json.Marshal(poutine.AnalysisResult{Success: true})
+		return jsonResponse(http.StatusOK, string(resultJSON)), nil
+	})
+
+	client := NewClient("http://test.local", "auth-token", "sess-abc123")
+	client.HTTPClient = mockClient
+	_, err := client.AnalyzeWithID(context.Background(), "ghp_test", "whooli", "org", "analysis_123")
+
+	require.NoError(t, err)
+	assert.Equal(t, "analysis_123", receivedReq.AnalysisID)
+}
+
+func TestClient_FetchAnalysisResult_SendsSessionID(t *testing.T) {
+	var receivedPath string
+	var receivedQuery string
+
+	mockClient := newMockHTTPClient(func(req *http.Request) (*http.Response, error) {
+		receivedPath = req.URL.Path
+		receivedQuery = req.URL.RawQuery
+		payload, _ := json.Marshal(AnalyzeResultStatusResponse{
+			AnalysisID: "analysis_123",
+			Status:     "pending",
+		})
+		return jsonResponse(http.StatusOK, string(payload)), nil
+	})
+
+	client := NewClient("http://test.local", "auth-token", "sess-abc123")
+	client.HTTPClient = mockClient
+	result, err := client.FetchAnalysisResult(context.Background(), "analysis_123")
+
+	require.NoError(t, err)
+	assert.Equal(t, "/analyze/result/analysis_123", receivedPath)
+	assert.Equal(t, "session_id=sess-abc123", receivedQuery)
+	assert.Equal(t, "pending", result.Status)
 }
 
 func TestClient_Analyze_SpecialCharactersInTarget(t *testing.T) {

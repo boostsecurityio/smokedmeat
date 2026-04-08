@@ -4,7 +4,7 @@
         build-release-embed-brisket \
         test test-verbose test-race lint lint-fix tidy pinact \
         build-brisket build-brisket-all clean \
-        e2e-up e2e-down e2e-purge e2e-counter e2e-capture e2e-keys e2e-kitchen-rebuild \
+        e2e-up e2e-down e2e-purge e2e-counter e2e-capture e2e-keys e2e-kitchen-rebuild analyze-perf \
         e2e-smoke e2e-goat
 
 .DEFAULT_GOAL := help
@@ -74,6 +74,7 @@ help-more:
 	@echo "  e2e-capture           Capture tmux pane with ANSI codes"
 	@echo "  e2e-keys KEYS='...'   Send keystrokes to tmux"
 	@echo "  e2e-kitchen-rebuild   Rebuild Kitchen only (tunnel stays)"
+	@echo "  analyze-perf          Profile real-org analysis timings with .claude/e2e/.env"
 	@echo "  e2e-smoke             Run the fast public exploit smoke path"
 	@echo "  e2e-goat              Run the full GOAT chain to the cloud flag"
 	@echo ""
@@ -1073,6 +1074,32 @@ e2e-kitchen-rebuild:
 	@AUTH_TOKEN=$$(grep '^AUTH_TOKEN=' $(E2E_ENV) | cut -d= -f2) \
 	$(E2E_COMPOSE) up -d --build kitchen
 	@echo "Kitchen rebuilt. Restart Counter with: make e2e-counter"
+
+analyze-perf:
+	@mkdir -p .claude/e2e
+	@if [ ! -f $(E2E_ENV) ]; then \
+		echo "ERROR: $(E2E_ENV) not found"; \
+		exit 1; \
+	fi
+	@TARGET_VALUE="$(TARGET)"; \
+	if [ -z "$$TARGET_VALUE" ]; then \
+		TARGET_VALUE=$$(grep '^SM_ANALYZE_PERF_TARGET=' $(E2E_ENV) | cut -d= -f2-); \
+	fi; \
+	if [ -z "$$TARGET_VALUE" ]; then \
+		echo "ERROR: set TARGET=org-or-repo or add SM_ANALYZE_PERF_TARGET to $(E2E_ENV)"; \
+		exit 1; \
+	fi; \
+	TARGET_TYPE_VALUE="$(TARGET_TYPE)"; \
+	if [ -z "$$TARGET_TYPE_VALUE" ]; then \
+		TARGET_TYPE_VALUE=$$(grep '^SM_ANALYZE_PERF_TARGET_TYPE=' $(E2E_ENV) | cut -d= -f2-); \
+	fi; \
+	if [ -z "$$TARGET_TYPE_VALUE" ]; then \
+		TARGET_TYPE_VALUE=org; \
+	fi; \
+	SM_ANALYZE_PERF_TARGET="$$TARGET_VALUE" \
+	SM_ANALYZE_PERF_TARGET_TYPE="$$TARGET_TYPE_VALUE" \
+	env GOCACHE=/tmp/smokedmeat-go-cache GOMODCACHE=/tmp/smokedmeat-go-mod-cache \
+	go test -v -tags=analysisperf ./internal/kitchen -run TestAnalyzePerformanceProfile -timeout 90m
 
 e2e-smoke:
 	@echo "Running quick exploit smoke test..."

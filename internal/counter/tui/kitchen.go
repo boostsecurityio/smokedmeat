@@ -37,6 +37,8 @@ func (m *Model) startKitchenConsumers() tea.Cmd {
 	m.coleslawCh = make(chan *models.Coleslaw, 10)
 	m.historyCh = make(chan counter.HistoryPayload, 10)
 	m.expressDataCh = make(chan counter.ExpressDataPayload, 10)
+	m.analysisProgressCh = make(chan counter.AnalysisProgressPayload, 20)
+	m.analysisMetadataCh = make(chan counter.AnalysisMetadataSyncPayload, 8)
 	m.authExpiredCh = make(chan struct{}, 1)
 	m.reconnectingCh = make(chan int, 10)
 	m.reconnectedCh = make(chan struct{}, 1)
@@ -67,6 +69,20 @@ func (m *Model) startKitchenConsumers() tea.Cmd {
 	m.kitchenClient.SetExpressDataCallback(func(data counter.ExpressDataPayload) {
 		select {
 		case m.expressDataCh <- data:
+		default:
+		}
+	})
+
+	m.kitchenClient.SetAnalysisProgressCallback(func(progress counter.AnalysisProgressPayload) {
+		select {
+		case m.analysisProgressCh <- progress:
+		default:
+		}
+	})
+
+	m.kitchenClient.SetAnalysisMetadataSyncCallback(func(sync counter.AnalysisMetadataSyncPayload) {
+		select {
+		case m.analysisMetadataCh <- sync:
 		default:
 		}
 	})
@@ -105,6 +121,8 @@ func (m *Model) startKitchenConsumers() tea.Cmd {
 		m.listenForColeslaw(),
 		m.listenForHistory(),
 		m.listenForExpressData(),
+		m.listenForAnalysisProgress(),
+		m.listenForAnalysisMetadataSync(),
 		m.listenForAuthExpired(),
 		m.listenForReconnecting(),
 		m.listenForReconnected(),
@@ -160,6 +178,32 @@ func (m *Model) listenForExpressData() tea.Cmd {
 			return nil
 		}
 		return ExpressDataMsg{Data: data}
+	}
+}
+
+func (m *Model) listenForAnalysisProgress() tea.Cmd {
+	return func() tea.Msg {
+		if m.analysisProgressCh == nil {
+			return nil
+		}
+		progress, ok := <-m.analysisProgressCh
+		if !ok {
+			return nil
+		}
+		return AnalysisProgressMsg{Progress: progress}
+	}
+}
+
+func (m *Model) listenForAnalysisMetadataSync() tea.Cmd {
+	return func() tea.Msg {
+		if m.analysisMetadataCh == nil {
+			return nil
+		}
+		sync, ok := <-m.analysisMetadataCh
+		if !ok {
+			return nil
+		}
+		return AnalysisMetadataSyncMsg{Sync: sync}
 	}
 }
 

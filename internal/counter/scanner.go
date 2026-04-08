@@ -11,10 +11,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/boostsecurityio/smokedmeat/internal/poutine"
 )
+
+const defaultAnalyzeHTTPTimeout = 2 * time.Hour
 
 // Client is a thin client for interacting with Kitchen's analysis endpoints.
 // Counter delegates all heavy lifting (poutine analysis) to Kitchen.
@@ -33,7 +36,7 @@ func NewClient(kitchenURL, authToken, sessionID string) *Client {
 		AuthToken:  authToken,
 		SessionID:  sessionID,
 		HTTPClient: &http.Client{
-			Timeout: 15 * time.Minute,
+			Timeout: defaultAnalyzeHTTPTimeout,
 		},
 	}
 }
@@ -56,20 +59,78 @@ type AnalyzeRequest struct {
 
 	// SessionID identifies the operator session (for known entity lookups).
 	SessionID string `json:"session_id,omitempty"`
+
+	AnalysisID string `json:"analysis_id,omitempty"`
+}
+
+type AnalyzeResultStatusResponse struct {
+	AnalysisID string                  `json:"analysis_id"`
+	Status     string                  `json:"status"`
+	Result     *poutine.AnalysisResult `json:"result,omitempty"`
+	Error      string                  `json:"error,omitempty"`
 }
 
 // Analyze performs a poutine analysis by delegating to Kitchen.
 // The token is sent to Kitchen for ephemeral use - it is never stored.
 func (c *Client) Analyze(ctx context.Context, token, target, targetType string) (*poutine.AnalysisResult, error) {
-	return c.analyze(ctx, token, target, targetType, false)
+	return c.analyze(ctx, token, target, targetType, false, "")
+}
+
+func (c *Client) AnalyzeWithID(ctx context.Context, token, target, targetType, analysisID string) (*poutine.AnalysisResult, error) {
+	return c.analyze(ctx, token, target, targetType, false, analysisID)
 }
 
 // DeepAnalyze performs poutine analysis plus gitleaks secret scanning.
 func (c *Client) DeepAnalyze(ctx context.Context, token, target, targetType string) (*poutine.AnalysisResult, error) {
-	return c.analyze(ctx, token, target, targetType, true)
+	return c.analyze(ctx, token, target, targetType, true, "")
 }
 
-func (c *Client) analyze(ctx context.Context, token, target, targetType string, deep bool) (*poutine.AnalysisResult, error) {
+func (c *Client) DeepAnalyzeWithID(ctx context.Context, token, target, targetType, analysisID string) (*poutine.AnalysisResult, error) {
+	return c.analyze(ctx, token, target, targetType, true, analysisID)
+}
+
+func (c *Client) FetchAnalysisResult(ctx context.Context, analysisID string) (*AnalyzeResultStatusResponse, error) {
+	if c.KitchenURL == "" {
+		return nil, fmt.Errorf("kitchen URL not configured")
+	}
+
+	endpoint := fmt.Sprintf("%s/analyze/result/%s", c.KitchenURL, url.PathEscape(analysisID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	if c.SessionID != "" {
+		q := req.URL.Query()
+		q.Set("session_id", c.SessionID)
+		req.URL.RawQuery = q.Encode()
+	}
+	if c.AuthToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.AuthToken)
+	}
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch analysis result from Kitchen: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("kitchen returned error: %s - %s", resp.Status, string(body))
+	}
+
+	var result AnalyzeResultStatusResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (c *Client) analyze(ctx context.Context, token, target, targetType string, deep bool, analysisID string) (*poutine.AnalysisResult, error) {
 	if c.KitchenURL == "" {
 		return nil, fmt.Errorf("kitchen URL not configured")
 	}
@@ -80,6 +141,7 @@ func (c *Client) analyze(ctx context.Context, token, target, targetType string, 
 		TargetType: targetType,
 		Deep:       deep,
 		SessionID:  c.SessionID,
+		AnalysisID: analysisID,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -87,8 +149,8 @@ func (c *Client) analyze(ctx context.Context, token, target, targetType string, 
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/analyze", c.KitchenURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonData))
+	endpoint := fmt.Sprintf("%s/analyze", c.KitchenURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

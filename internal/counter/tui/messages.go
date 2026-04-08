@@ -63,23 +63,59 @@ type OrderFailedMsg struct {
 
 // AnalysisStartedMsg indicates a poutine analysis has started
 type AnalysisStartedMsg struct {
+	AnalysisID string
 	Target     string
 	TargetType string
 }
 
+type AnalysisProgressMsg struct {
+	Progress counter.AnalysisProgressPayload
+}
+
+type AnalysisMetadataSyncMsg struct {
+	Sync counter.AnalysisMetadataSyncPayload
+}
+
 // AnalysisCompletedMsg indicates a poutine analysis completed
 type AnalysisCompletedMsg struct {
-	Result *poutine.AnalysisResult
-	Deep   bool
+	AnalysisID string
+	Result     *poutine.AnalysisResult
+	Deep       bool
 }
 
 // AnalysisErrorMsg indicates an analysis error occurred
 type AnalysisErrorMsg struct {
-	Err error
+	AnalysisID string
+	Err        error
+}
+
+type AnalysisResponseDroppedMsg struct {
+	AnalysisID string
+	Deep       bool
+	Setup      bool
+	Err        error
+}
+
+type AnalysisResultStatusFetchedMsg struct {
+	AnalysisID string
+	Response   *counter.AnalyzeResultStatusResponse
+}
+
+type AnalysisResultStatusErrorMsg struct {
+	AnalysisID string
+	Err        error
 }
 
 type PurgePreviewMsg struct {
 	Response counter.PurgeResponse
+}
+
+type KnownEntitiesFetchedMsg struct {
+	Entities []counter.KnownEntityPayload
+}
+
+type KnownEntitiesFetchErrorMsg struct {
+	Err error
 }
 
 type PurgeCompletedMsg struct {
@@ -255,11 +291,13 @@ type SetupTokenInfoMsg struct {
 type SetupTokenInfoErrorMsg struct{}
 
 type SetupAnalysisCompletedMsg struct {
-	Result *poutine.AnalysisResult
+	AnalysisID string
+	Result     *poutine.AnalysisResult
 }
 
 type SetupAnalysisErrorMsg struct {
-	Err error
+	AnalysisID string
+	Err        error
 }
 
 // Connection resilience messages

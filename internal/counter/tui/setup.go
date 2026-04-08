@@ -434,6 +434,7 @@ func (m Model) startSetupAnalysis(resetAttempt bool) (tea.Model, tea.Cmd) {
 	sw.AnalysisRetryPending = false
 	sw.AnalysisRunning = true
 	sw.AnalysisStart = time.Now()
+	m.beginAnalysisProgress(newAnalysisID(), m.target, m.targetType, false)
 	return m, tea.Batch(m.runSetupAnalysis(), timerTickCmd())
 }
 
@@ -632,14 +633,21 @@ func (m Model) runSetupAnalysis() tea.Cmd {
 	targetType := m.targetType
 
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), analysisRequestTimeout(targetType, false))
 		defer cancel()
 
 		client := counter.NewClient(kitchenURL, authToken, sessionID)
-		result, err := client.Analyze(ctx, token, target, targetType)
-		if err != nil {
-			return SetupAnalysisErrorMsg{Err: err}
+		analysisID := ""
+		if m.analysisProgress != nil {
+			analysisID = m.analysisProgress.AnalysisID
 		}
-		return SetupAnalysisCompletedMsg{Result: result}
+		result, err := client.AnalyzeWithID(ctx, token, target, targetType, analysisID)
+		if err != nil {
+			if isRecoverableDroppedAnalysisError(err) {
+				return AnalysisResponseDroppedMsg{AnalysisID: analysisID, Setup: true, Err: err}
+			}
+			return SetupAnalysisErrorMsg{AnalysisID: analysisID, Err: err}
+		}
+		return SetupAnalysisCompletedMsg{AnalysisID: analysisID, Result: result}
 	}
 }

@@ -4,13 +4,16 @@
 package kitchen
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-github/v59/github"
 	"github.com/stretchr/testify/assert"
@@ -108,6 +111,331 @@ func TestAnalyzeRequest_Structure(t *testing.T) {
 	assert.Equal(t, "ghp_test", req.Token)
 	assert.Equal(t, "acme/repo", req.Target)
 	assert.Equal(t, "repo", req.TargetType)
+}
+
+func TestHandler_GetAnalyzeResult_ReturnsStatuses(t *testing.T) {
+	mock := &mockPublisher{}
+	h, mux := newTestHandler(mock, nil)
+
+	reqInfo := AnalyzeRequest{
+		AnalysisID: "analysis_123",
+		SessionID:  "sess-1",
+		Target:     "acme",
+		TargetType: "org",
+	}
+
+	h.recordAnalysisPending(reqInfo)
+
+	req := httptest.NewRequest(http.MethodGet, "/analyze/result/analysis_123?session_id=sess-1", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var pending AnalyzeResultStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &pending))
+	assert.Equal(t, "analysis_123", pending.AnalysisID)
+	assert.Equal(t, analysisStatusPending, pending.Status)
+
+	h.recordAnalysisCompleted(reqInfo, &poutine.AnalysisResult{Success: true, ReposAnalyzed: 3})
+
+	req = httptest.NewRequest(http.MethodGet, "/analyze/result/analysis_123?session_id=sess-1", nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var completed AnalyzeResultStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &completed))
+	assert.Equal(t, analysisStatusCompleted, completed.Status)
+	require.NotNil(t, completed.Result)
+	assert.Equal(t, 3, completed.Result.ReposAnalyzed)
+
+	h.recordAnalysisFailure(reqInfo, "boom")
+
+	req = httptest.NewRequest(http.MethodGet, "/analyze/result/analysis_123?session_id=sess-1", nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var failed AnalyzeResultStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &failed))
+	assert.Equal(t, analysisStatusFailed, failed.Status)
+	assert.Equal(t, "boom", failed.Error)
+}
+
+func TestHandler_GetAnalyzeResult_HidesOtherSessions(t *testing.T) {
+	mock := &mockPublisher{}
+	h, mux := newTestHandler(mock, nil)
+
+	h.recordAnalysisPending(AnalyzeRequest{
+		AnalysisID: "analysis_123",
+		SessionID:  "sess-1",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/analyze/result/analysis_123?session_id=sess-2", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var status AnalyzeResultStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &status))
+	assert.Equal(t, analysisStatusUnknown, status.Status)
+}
+
+func TestHandler_BroadcastAnalysisProgress_TargetsSession(t *testing.T) {
+	h := NewHandlerWithPublisher(&mockPublisher{}, nil)
+	hub := NewOperatorHub(nil, nil, nil)
+	target := &OperatorConn{sessionID: "sess-1", send: make(chan OperatorMessage, 1), hub: hub}
+	other := &OperatorConn{sessionID: "sess-2", send: make(chan OperatorMessage, 1), hub: hub}
+	hub.operators[target] = true
+	hub.operators[other] = true
+	h.operators = hub
+
+	startedAt := time.Now().Add(-2 * time.Second).UTC()
+	h.broadcastAnalysisProgress(AnalyzeRequest{
+		SessionID:  "sess-1",
+		Target:     "acme",
+		TargetType: "org",
+		Deep:       true,
+	}, startedAt, analysisPhaseSecret, "Scanning repositories for secrets", "acme/api", 1, 3, 2)
+
+	select {
+	case msg := <-target.send:
+		require.NotNil(t, msg.AnalysisProgress)
+		assert.Equal(t, "analysis_progress", msg.Type)
+		assert.Equal(t, "sess-1", msg.AnalysisProgress.SessionID)
+		assert.Equal(t, "acme", msg.AnalysisProgress.Target)
+		assert.Equal(t, "org", msg.AnalysisProgress.TargetType)
+		assert.True(t, msg.AnalysisProgress.Deep)
+		assert.Equal(t, analysisPhaseSecret, msg.AnalysisProgress.Phase)
+		assert.Equal(t, "Scanning repositories for secrets", msg.AnalysisProgress.Message)
+		assert.Equal(t, "acme/api", msg.AnalysisProgress.CurrentRepo)
+		assert.Equal(t, 1, msg.AnalysisProgress.ReposCompleted)
+		assert.Equal(t, 3, msg.AnalysisProgress.ReposTotal)
+		assert.Equal(t, 2, msg.AnalysisProgress.SecretFindings)
+		assert.Equal(t, startedAt, msg.AnalysisProgress.StartedAt)
+		assert.False(t, msg.AnalysisProgress.UpdatedAt.IsZero())
+	case <-time.After(time.Second):
+		t.Fatal("expected targeted operator session to receive analysis progress")
+	}
+
+	select {
+	case msg := <-other.send:
+		t.Fatalf("unexpected analysis progress for other session: %#v", msg)
+	default:
+	}
+}
+
+func TestHandler_BroadcastAnalysisMetadataSync_TargetsSession(t *testing.T) {
+	h := NewHandlerWithPublisher(&mockPublisher{}, nil)
+	hub := NewOperatorHub(nil, nil, nil)
+	target := &OperatorConn{sessionID: "sess-1", send: make(chan OperatorMessage, 1), hub: hub}
+	other := &OperatorConn{sessionID: "sess-2", send: make(chan OperatorMessage, 1), hub: hub}
+	hub.operators[target] = true
+	hub.operators[other] = true
+	h.operators = hub
+
+	h.broadcastAnalysisMetadataSync(AnalyzeRequest{
+		AnalysisID: "analysis_123",
+		SessionID:  "sess-1",
+		Target:     "acme",
+		TargetType: "org",
+	}, analysisMetadataDone, "Repository access updated", 12, nil)
+
+	select {
+	case msg := <-target.send:
+		require.NotNil(t, msg.AnalysisMetadataSync)
+		assert.Equal(t, "analysis_metadata_sync", msg.Type)
+		assert.Equal(t, "analysis_123", msg.AnalysisMetadataSync.AnalysisID)
+		assert.Equal(t, "sess-1", msg.AnalysisMetadataSync.SessionID)
+		assert.Equal(t, "acme", msg.AnalysisMetadataSync.Target)
+		assert.Equal(t, "org", msg.AnalysisMetadataSync.TargetType)
+		assert.Equal(t, analysisMetadataDone, msg.AnalysisMetadataSync.Status)
+		assert.Equal(t, "Repository access updated", msg.AnalysisMetadataSync.Message)
+		assert.Equal(t, 12, msg.AnalysisMetadataSync.ReposTotal)
+		assert.False(t, msg.AnalysisMetadataSync.UpdatedAt.IsZero())
+	case <-time.After(time.Second):
+		t.Fatal("expected analysis metadata sync message")
+	}
+
+	select {
+	case <-other.send:
+		t.Fatal("unexpected metadata sync message for non-target session")
+	default:
+	}
+}
+
+func TestAnalysisProgressObserver_TracksOrgProgress(t *testing.T) {
+	h := NewHandlerWithPublisher(&mockPublisher{}, nil)
+	hub := NewOperatorHub(nil, nil, nil)
+	target := &OperatorConn{sessionID: "sess-1", send: make(chan OperatorMessage, 8), hub: hub}
+	hub.operators[target] = true
+	h.operators = hub
+
+	startedAt := time.Now().Add(-2 * time.Second).UTC()
+	observer := newAnalysisProgressObserver(h, AnalyzeRequest{
+		SessionID:  "sess-1",
+		Target:     "acme",
+		TargetType: "org",
+	}, startedAt)
+
+	observer.OnAnalysisStarted("Discovering repositories")
+	msg := requireAnalysisProgressMessage(t, target.send)
+	assert.Equal(t, "Discovering repositories", msg.Message)
+	assert.Equal(t, 0, msg.ReposCompleted)
+	assert.Equal(t, 0, msg.ReposTotal)
+	assert.Empty(t, msg.CurrentRepo)
+
+	observer.OnDiscoveryCompleted("acme", 3)
+	msg = requireAnalysisProgressMessage(t, target.send)
+	assert.Equal(t, "Analyzing workflows", msg.Message)
+	assert.Equal(t, 0, msg.ReposCompleted)
+	assert.Equal(t, 3, msg.ReposTotal)
+
+	observer.OnRepoStarted("acme/api")
+	msg = requireAnalysisProgressMessage(t, target.send)
+	assert.Equal(t, "acme/api", msg.CurrentRepo)
+	assert.Equal(t, 0, msg.ReposCompleted)
+	assert.Equal(t, 3, msg.ReposTotal)
+
+	observer.OnRepoCompleted("acme/api")
+	msg = requireAnalysisProgressMessage(t, target.send)
+	assert.Equal(t, "acme/api", msg.CurrentRepo)
+	assert.Equal(t, 1, msg.ReposCompleted)
+	assert.Equal(t, 3, msg.ReposTotal)
+
+	observer.OnRepoSkipped("acme/docs", "fork")
+	msg = requireAnalysisProgressMessage(t, target.send)
+	assert.Equal(t, "acme/docs", msg.CurrentRepo)
+	assert.Equal(t, 2, msg.ReposCompleted)
+	assert.Equal(t, 3, msg.ReposTotal)
+
+	observer.OnRepoError("acme/web", errors.New("boom"))
+	msg = requireAnalysisProgressMessage(t, target.send)
+	assert.Equal(t, "acme/web", msg.CurrentRepo)
+	assert.Equal(t, 3, msg.ReposCompleted)
+	assert.Equal(t, 3, msg.ReposTotal)
+
+	observer.OnFinalizeStarted(1)
+	msg = requireAnalysisProgressMessage(t, target.send)
+	assert.Equal(t, "Finalizing analysis results", msg.Message)
+	assert.Equal(t, 3, msg.ReposCompleted)
+	assert.Equal(t, 3, msg.ReposTotal)
+	assert.Empty(t, msg.CurrentRepo)
+}
+
+func TestAnalysisProgressObserver_TracksRepoSteps(t *testing.T) {
+	h := NewHandlerWithPublisher(&mockPublisher{}, nil)
+	hub := NewOperatorHub(nil, nil, nil)
+	target := &OperatorConn{sessionID: "sess-1", send: make(chan OperatorMessage, 8), hub: hub}
+	hub.operators[target] = true
+	h.operators = hub
+
+	startedAt := time.Now().Add(-2 * time.Second).UTC()
+	observer := newAnalysisProgressObserver(h, AnalyzeRequest{
+		SessionID:  "sess-1",
+		Target:     "acme/api",
+		TargetType: "repo",
+	}, startedAt)
+
+	observer.OnAnalysisStarted("Cloning repository")
+	msg := requireAnalysisProgressMessage(t, target.send)
+	assert.Equal(t, "Cloning repository", msg.Message)
+	assert.Equal(t, "acme/api", msg.CurrentRepo)
+	assert.Equal(t, 0, msg.ReposCompleted)
+	assert.Equal(t, 1, msg.ReposTotal)
+
+	observer.OnStepCompleted("Generated package insights")
+	msg = requireAnalysisProgressMessage(t, target.send)
+	assert.Equal(t, "Generated package insights", msg.Message)
+	assert.Equal(t, "acme/api", msg.CurrentRepo)
+	assert.Equal(t, 0, msg.ReposCompleted)
+	assert.Equal(t, 1, msg.ReposTotal)
+
+	observer.OnRepoCompleted("acme/api")
+	msg = requireAnalysisProgressMessage(t, target.send)
+	assert.Equal(t, "Analyzing workflows", msg.Message)
+	assert.Equal(t, "acme/api", msg.CurrentRepo)
+	assert.Equal(t, 1, msg.ReposCompleted)
+	assert.Equal(t, 1, msg.ReposTotal)
+}
+
+func TestHandleAnalyze_DefersAnalysisMetadataSync(t *testing.T) {
+	origAnalyze := analyzeRemoteWithObserverFunc
+	analyzeRemoteWithObserverFunc = func(_ context.Context, _, _, _ string, _ poutine.AnalysisObserver) (*poutine.AnalysisResult, error) {
+		return &poutine.AnalysisResult{
+			Success:       true,
+			Target:        "acme/api",
+			TargetType:    "repo",
+			ReposAnalyzed: 1,
+			AnalyzedRepos: []string{"acme/api"},
+			Findings: []poutine.Finding{
+				{ID: "V001", Repository: "acme/api", RuleID: "injection"},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { analyzeRemoteWithObserverFunc = origAnalyze })
+
+	var repoInfoCalls int
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/acme/api", func(w http.ResponseWriter, r *http.Request) {
+		repoInfoCalls++
+		time.Sleep(400 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"full_name":"acme/api","private":true,"permissions":{"push":true}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	origNew := newGitHubClientFunc
+	newGitHubClientFunc = func(_ string) *gitHubClient {
+		baseURL, _ := url.Parse(srv.URL + "/")
+		c := github.NewClient(nil)
+		c.BaseURL = baseURL
+		return &gitHubClient{client: c, token: "test"}
+	}
+	t.Cleanup(func() { newGitHubClientFunc = origNew })
+
+	h := NewHandlerWithPublisher(&mockPublisher{}, nil)
+	h.database = newTestDB(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/analyze", strings.NewReader(`{"token":"ghp_test","target":"acme/api","target_type":"repo","session_id":"sess-1","analysis_id":"analysis_123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	started := time.Now()
+	h.handleAnalyze(rec, req)
+	elapsed := time.Since(started)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Less(t, elapsed, 250*time.Millisecond)
+
+	entityRepo := db.NewKnownEntityRepository(h.database)
+	require.Eventually(t, func() bool {
+		entities, err := entityRepo.ListRepos("sess-1")
+		if err != nil || len(entities) != 1 {
+			return false
+		}
+		return entities[0].Name == "acme/api" && entities[0].IsPrivate
+	}, 2*time.Second, 25*time.Millisecond)
+
+	repos := h.Pantry().GetAssetsByType(pantry.AssetRepository)
+	require.Len(t, repos, 1)
+	assert.Equal(t, "api", repos[0].Name)
+	assert.Equal(t, true, repos[0].Properties["private"])
+	assert.Equal(t, 1, repoInfoCalls)
+}
+
+func requireAnalysisProgressMessage(t *testing.T, ch <-chan OperatorMessage) AnalysisProgressPayload {
+	t.Helper()
+
+	select {
+	case msg := <-ch:
+		require.NotNil(t, msg.AnalysisProgress)
+		return *msg.AnalysisProgress
+	case <-time.After(time.Second):
+		t.Fatal("expected analysis progress message")
+		return AnalysisProgressPayload{}
+	}
 }
 
 func TestSanitizeError_TruncatesLongMessages(t *testing.T) {
@@ -483,7 +811,12 @@ func TestRecordAnalyzedRepoVisibility(t *testing.T) {
 		AnalyzedRepos: []string{"acme/api", "acme/web"},
 	}
 
-	h.recordAnalyzedRepoVisibility(t.Context(), "test-token", "sess1", result)
+	h.recordAnalyzedRepoVisibility(t.Context(), AnalyzeRequest{
+		Token:      "test-token",
+		SessionID:  "sess1",
+		Target:     "acme/api",
+		TargetType: "repo",
+	}, result)
 
 	entityRepo := db.NewKnownEntityRepository(database)
 	entities, err := entityRepo.ListRepos("sess1")
@@ -522,7 +855,7 @@ func TestHandleAnalyze_EmptySessionID_SkipsRepoVisibility(t *testing.T) {
 	// The guard in handleAnalyze: `if req.SessionID != "" && h.database != nil`
 	// When SessionID is empty, this block is skipped entirely.
 	if req.SessionID != "" && h.database != nil {
-		h.recordAnalyzedRepoVisibility(t.Context(), req.Token, req.SessionID, result)
+		h.recordAnalyzedRepoVisibility(t.Context(), req, result)
 		h.importPrivateReposToPantry(req.SessionID)
 	}
 
@@ -580,7 +913,7 @@ func TestHandleAnalyze_WithSessionID_RecordsRepoVisibility(t *testing.T) {
 
 	// Same guard as handleAnalyze
 	if req.SessionID != "" && h.database != nil {
-		h.recordAnalyzedRepoVisibility(t.Context(), req.Token, req.SessionID, result)
+		h.recordAnalyzedRepoVisibility(t.Context(), req, result)
 		h.importPrivateReposToPantry(req.SessionID)
 	}
 
@@ -602,6 +935,67 @@ func TestHandleAnalyze_WithSessionID_RecordsRepoVisibility(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "private-repo should exist in pantry")
+}
+
+func TestRecordAnalyzedRepoVisibility_OrgTargetPrefersGraphQL(t *testing.T) {
+	var graphqlCalls int
+	var listReposCalls int
+	var repoGetCalls int
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /graphql", func(w http.ResponseWriter, r *http.Request) {
+		graphqlCalls++
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":{"repositoryOwner":{"repositories":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[{"nameWithOwner":"acme/api","isPrivate":true,"viewerPermission":"WRITE"},{"nameWithOwner":"acme/web","isPrivate":false,"viewerPermission":"READ"},{"nameWithOwner":"acme/extra","isPrivate":true,"viewerPermission":"ADMIN"}]}}}}`))
+	})
+	mux.HandleFunc("GET /user/repos", func(w http.ResponseWriter, r *http.Request) {
+		listReposCalls++
+		http.Error(w, "unexpected fallback", http.StatusInternalServerError)
+	})
+	mux.HandleFunc("GET /repos/acme/api", func(w http.ResponseWriter, r *http.Request) {
+		repoGetCalls++
+		http.Error(w, "unexpected per-repo fallback", http.StatusInternalServerError)
+	})
+	mux.HandleFunc("GET /repos/acme/web", func(w http.ResponseWriter, r *http.Request) {
+		repoGetCalls++
+		http.Error(w, "unexpected per-repo fallback", http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	origNew := newGitHubClientFunc
+	newGitHubClientFunc = func(_ string) *gitHubClient {
+		baseURL, _ := url.Parse(srv.URL + "/")
+		c := github.NewClient(nil)
+		c.BaseURL = baseURL
+		return &gitHubClient{client: c, token: "test", graphqlURL: srv.URL + "/graphql"}
+	}
+	t.Cleanup(func() { newGitHubClientFunc = origNew })
+
+	database := newTestDB(t)
+	h := NewHandlerWithPublisher(&mockPublisher{}, nil)
+	h.database = database
+
+	result := &poutine.AnalysisResult{
+		AnalyzedRepos: []string{"acme/api", "acme/web"},
+	}
+
+	h.recordAnalyzedRepoVisibility(t.Context(), AnalyzeRequest{
+		Token:      "test-token",
+		SessionID:  "sess1",
+		Target:     "acme",
+		TargetType: "org",
+	}, result)
+
+	assert.Equal(t, 1, graphqlCalls)
+	assert.Zero(t, listReposCalls)
+	assert.Zero(t, repoGetCalls)
+
+	entityRepo := db.NewKnownEntityRepository(database)
+	entities, err := entityRepo.ListRepos("sess1")
+	require.NoError(t, err)
+	require.Len(t, entities, 2)
+	assert.True(t, entities[0].IsPrivate || entities[1].IsPrivate)
 }
 
 func TestImportAnalysisToPantry_SetsExploitSupportMetadata(t *testing.T) {

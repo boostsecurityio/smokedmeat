@@ -55,6 +55,8 @@ type KitchenAPI interface {
 	SetEventCallback(onEvent func(KitchenEvent))
 	SetHistoryCallback(onHistory func(HistoryPayload))
 	SetExpressDataCallback(onExpressData func(ExpressDataPayload))
+	SetAnalysisProgressCallback(onAnalysisProgress func(AnalysisProgressPayload))
+	SetAnalysisMetadataSyncCallback(onAnalysisMetadataSync func(AnalysisMetadataSyncPayload))
 	SetAuthExpiredCallback(onAuthExpired func())
 	SetReconnectCallbacks(onReconnecting func(attempt int), onReconnected func())
 }
@@ -78,16 +80,24 @@ type KitchenClient struct {
 	reconnectDelay time.Duration
 
 	// Callbacks
-	onBeacon       func(beacon Beacon)
-	onColeslaw     func(coleslaw *models.Coleslaw)
-	onError        func(err error)
-	onEvent        func(event KitchenEvent)
-	onHistory      func(history HistoryPayload)
-	onExpressData  func(data ExpressDataPayload)
-	onAuthExpired  func()
-	onReconnecting func(attempt int)
-	onReconnected  func()
+	onBeacon           func(beacon Beacon)
+	onColeslaw         func(coleslaw *models.Coleslaw)
+	onError            func(err error)
+	onEvent            func(event KitchenEvent)
+	onHistory          func(history HistoryPayload)
+	onExpressData      func(data ExpressDataPayload)
+	onAnalysisProgress func(progress AnalysisProgressPayload)
+	onAnalysisMetadata func(sync AnalysisMetadataSyncPayload)
+	onAuthExpired      func()
+	onReconnecting     func(attempt int)
+	onReconnected      func()
 }
+
+const (
+	AnalysisMetadataSyncStatusStarted   = "started"
+	AnalysisMetadataSyncStatusCompleted = "completed"
+	AnalysisMetadataSyncStatusFailed    = "failed"
+)
 
 // KitchenEvent represents system events from the Kitchen.
 type KitchenEvent struct {
@@ -121,6 +131,12 @@ type OperatorMessage struct {
 	// For "express_data" type (incoming broadcast)
 	ExpressData *ExpressDataPayload `json:"express_data,omitempty"`
 
+	// For "analysis_progress" type (incoming broadcast)
+	AnalysisProgress *AnalysisProgressPayload `json:"analysis_progress,omitempty"`
+
+	// For "analysis_metadata_sync" type (incoming broadcast)
+	AnalysisMetadataSync *AnalysisMetadataSyncPayload `json:"analysis_metadata_sync,omitempty"`
+
 	// For "error" type (incoming)
 	Error string `json:"error,omitempty"`
 }
@@ -141,6 +157,34 @@ type HistoryPayload struct {
 	Outcome     string    `json:"outcome,omitempty"`
 	ErrorDetail string    `json:"error_detail,omitempty"`
 	AgentID     string    `json:"agent_id,omitempty"`
+}
+
+type AnalysisProgressPayload struct {
+	AnalysisID     string    `json:"analysis_id,omitempty"`
+	SessionID      string    `json:"session_id,omitempty"`
+	Target         string    `json:"target,omitempty"`
+	TargetType     string    `json:"target_type,omitempty"`
+	Deep           bool      `json:"deep,omitempty"`
+	Phase          string    `json:"phase"`
+	Message        string    `json:"message,omitempty"`
+	CurrentRepo    string    `json:"current_repo,omitempty"`
+	ReposCompleted int       `json:"repos_completed,omitempty"`
+	ReposTotal     int       `json:"repos_total,omitempty"`
+	SecretFindings int       `json:"secret_findings,omitempty"`
+	StartedAt      time.Time `json:"started_at,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at,omitempty"`
+}
+
+type AnalysisMetadataSyncPayload struct {
+	AnalysisID string    `json:"analysis_id,omitempty"`
+	SessionID  string    `json:"session_id,omitempty"`
+	Target     string    `json:"target,omitempty"`
+	TargetType string    `json:"target_type,omitempty"`
+	Status     string    `json:"status"`
+	Message    string    `json:"message,omitempty"`
+	ReposTotal int       `json:"repos_total,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at,omitempty"`
 }
 
 type CallbackPayload struct {
@@ -258,6 +302,18 @@ func (k *KitchenClient) SetExpressDataCallback(onExpressData func(ExpressDataPay
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.onExpressData = onExpressData
+}
+
+func (k *KitchenClient) SetAnalysisProgressCallback(onAnalysisProgress func(AnalysisProgressPayload)) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.onAnalysisProgress = onAnalysisProgress
+}
+
+func (k *KitchenClient) SetAnalysisMetadataSyncCallback(onAnalysisMetadataSync func(AnalysisMetadataSyncPayload)) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.onAnalysisMetadata = onAnalysisMetadataSync
 }
 
 // SetAuthExpiredCallback sets the callback for when authentication expires.
@@ -424,6 +480,16 @@ func (k *KitchenClient) handleMessage(msg OperatorMessage) {
 	case "express_data":
 		if msg.ExpressData != nil && k.onExpressData != nil {
 			k.onExpressData(*msg.ExpressData)
+		}
+
+	case "analysis_progress":
+		if msg.AnalysisProgress != nil && k.onAnalysisProgress != nil {
+			k.onAnalysisProgress(*msg.AnalysisProgress)
+		}
+
+	case "analysis_metadata_sync":
+		if msg.AnalysisMetadataSync != nil && k.onAnalysisMetadata != nil {
+			k.onAnalysisMetadata(*msg.AnalysisMetadataSync)
 		}
 
 	case "pong":

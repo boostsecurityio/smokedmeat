@@ -18,7 +18,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ecr v1.55.3
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.2
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.7
-	github.com/boostsecurityio/poutine v1.1.2
+	github.com/boostsecurityio/poutine v1.1.3
 	github.com/charmbracelet/colorprofile v0.4.2
 	github.com/charmbracelet/ultraviolet v0.0.0-20260205113103-524a6607adb8
 	github.com/coder/websocket v1.8.14
