@@ -321,6 +321,7 @@ func (m *Model) beginAnalysisProgress(analysisID, target, targetType string, dee
 		reposTotal = 1
 	}
 	m.activeAnalysisID = analysisID
+	m.lastAnalysisID = ""
 	m.analysisResultPoll = nil
 	m.analysisProgress = &counter.AnalysisProgressPayload{
 		AnalysisID: analysisID,
@@ -336,12 +337,18 @@ func (m *Model) beginAnalysisProgress(analysisID, target, targetType string, dee
 }
 
 func (m *Model) clearAnalysisProgress() {
+	if m.activeAnalysisID != "" {
+		m.lastAnalysisID = m.activeAnalysisID
+	}
 	m.analysisProgress = nil
 	m.analysisResultPoll = nil
 	m.activeAnalysisID = ""
 }
 
 func (m *Model) applyAnalysisProgress(progress counter.AnalysisProgressPayload) {
+	if m.activeAnalysisID == "" && progress.AnalysisID != "" && progress.AnalysisID == m.lastAnalysisID {
+		return
+	}
 	if m.activeAnalysisID != "" && progress.AnalysisID != "" && progress.AnalysisID != m.activeAnalysisID {
 		return
 	}

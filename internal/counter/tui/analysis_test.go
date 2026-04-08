@@ -145,6 +145,25 @@ func TestModel_Update_AnalysisResponseDropped_StartsRecoveryPoll(t *testing.T) {
 	assert.NotNil(t, cmd)
 }
 
+func TestModel_Update_AnalysisProgress_IgnoresLateProgressAfterCompletion(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.beginAnalysisProgress("analysis_123", "acme", "org", false)
+	m.clearAnalysisProgress()
+
+	result, _ := m.Update(AnalysisProgressMsg{
+		Progress: counter.AnalysisProgressPayload{
+			AnalysisID:  "analysis_123",
+			Phase:       analysisPhaseImport,
+			Message:     "Persisting attack graph",
+			CurrentRepo: "acme/repo",
+		},
+	})
+
+	model := result.(Model)
+	assert.Nil(t, model.analysisProgress)
+	assert.Equal(t, "analysis_123", model.lastAnalysisID)
+}
+
 func TestModel_Update_AnalysisCompleted(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.target = "acme"

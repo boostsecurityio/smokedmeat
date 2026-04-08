@@ -191,6 +191,7 @@ type Model struct {
 	analysisComplete bool            // True after analysis has run (even with no findings)
 	analysisProgress *counter.AnalysisProgressPayload
 	activeAnalysisID string
+	lastAnalysisID   string
 	lightRye         *rye.LightRye // Payload generator
 
 	// Token acquisition state
