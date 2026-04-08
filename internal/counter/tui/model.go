@@ -350,7 +350,7 @@ func NewModel(config Config) Model {
 		phase:                 initialPhase,
 		phaseStart:            time.Now(),
 		view:                  initialView,
-		wizard:                &WizardState{Step: 1},
+		wizard:                &WizardState{Step: 1, CallbackBudget: 1},
 		activityLog:           NewActivityLog(),
 		opHistory:             NewOperationHistory(),
 		callbacks:             []counter.CallbackPayload{},

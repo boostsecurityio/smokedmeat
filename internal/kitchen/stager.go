@@ -30,6 +30,7 @@ type RegisteredStager struct {
 	Metadata      map[string]string
 	DwellTime     time.Duration
 	Persistent    bool
+	MaxCallbacks  int
 	DefaultMode   string
 	NextMode      string
 	CallbackCount int
@@ -65,6 +66,7 @@ type StagerStore struct {
 	stagers  map[string]*RegisteredStager
 	mu       sync.RWMutex
 	stopChan chan struct{}
+	stopOnce sync.Once
 }
 
 // NewStagerStore creates a new stager store.
@@ -91,8 +93,13 @@ func (s *StagerStore) Register(stager *RegisteredStager) error {
 	if stager.ExpiresAt.IsZero() && s.config.DefaultTTL > 0 && !stager.Persistent {
 		stager.ExpiresAt = stager.CreatedAt.Add(s.config.DefaultTTL)
 	}
-	if stager.Persistent && stager.DefaultMode == "" {
-		stager.DefaultMode = CallbackModeExpress
+	if stager.Persistent {
+		if stager.DefaultMode == "" {
+			stager.DefaultMode = CallbackModeExpress
+		}
+		stager.MaxCallbacks = 0
+	} else if stager.MaxCallbacks <= 0 {
+		stager.MaxCallbacks = 1
 	}
 
 	s.stagers[stager.ID] = stager
@@ -142,7 +149,17 @@ func (s *StagerStore) MarkCalledBack(id, remoteIP string) bool {
 
 func (s *StagerStore) ResolveCallback(id, remoteIP, agentID string) (*RegisteredStager, CallbackInvocation, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	deleteHook := s.config.DeleteHook
+	var deleted []string
+	defer func() {
+		s.mu.Unlock()
+		if deleteHook == nil {
+			return
+		}
+		for _, id := range deleted {
+			deleteHook(id)
+		}
+	}()
 
 	stager, exists := s.stagers[id]
 	if !exists {
@@ -180,8 +197,9 @@ func (s *StagerStore) ResolveCallback(id, remoteIP, agentID string) (*Registered
 	stager.LastAgentID = agentID
 
 	snapshot := cloneRegisteredStager(stager)
-	if !stager.Persistent {
+	if !stager.Persistent && stager.CallbackCount >= stager.MaxCallbacks {
 		delete(s.stagers, id)
+		deleted = append(deleted, id)
 	}
 
 	invocation := CallbackInvocation{Mode: mode}
@@ -313,7 +331,9 @@ func (s *StagerStore) StartCleanup() {
 
 // StopCleanup stops the cleanup goroutine.
 func (s *StagerStore) StopCleanup() {
-	close(s.stopChan)
+	s.stopOnce.Do(func() {
+		close(s.stopChan)
+	})
 }
 
 // cleanup removes expired stagers.

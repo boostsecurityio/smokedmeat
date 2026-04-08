@@ -22,6 +22,40 @@ func prependGateTriggers(payload string, vuln *Vulnerability) string {
 	return prefix + " " + payload
 }
 
+func cycleWizardCallbackBudget(current int) int {
+	budgets := []int{1, 2, 3, 5}
+	if current <= 0 {
+		return budgets[0]
+	}
+	for i, budget := range budgets {
+		if budget == current {
+			return budgets[(i+1)%len(budgets)]
+		}
+	}
+	return budgets[0]
+}
+
+func (m *Model) cycleWizardCallbackBudget() {
+	if m.wizard == nil || m.wizard.Step != 3 || m.wizard.CachePoisonEnabled {
+		return
+	}
+	m.wizard.CallbackBudget = cycleWizardCallbackBudget(m.wizard.CallbackBudget)
+}
+
+func wizardDeploymentModeLabel(w *WizardState) string {
+	if w == nil {
+		return "express"
+	}
+	parts := []string{"express"}
+	if w.DwellTime > 0 {
+		parts[0] = fmt.Sprintf("dwell %s", w.DwellTime)
+	}
+	if w.CallbackBudget > 1 {
+		parts = append(parts, fmt.Sprintf("%d callbacks", w.CallbackBudget))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func (m *Model) cycleCommentTarget() {
 	if m.wizard == nil {
 		return
@@ -100,6 +134,9 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.wizard.DwellTime = dwellPresets[(currentIdx+1)%len(dwellPresets)]
+			return m, nil
+		case "b":
+			m.cycleWizardCallbackBudget()
 			return m, nil
 		case "t":
 			m.cycleCommentTarget()
@@ -228,6 +265,10 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			m.wizard.DwellTime = dwellPresets[(currentIdx+1)%len(dwellPresets)]
 		}
+		return m, nil
+
+	case "b":
+		m.cycleWizardCallbackBudget()
 		return m, nil
 
 	case "f":
@@ -361,10 +402,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 		m.wizard.Payload = payload
 
 		dwellTime := m.wizard.DwellTime
-		dwellInfo := "express"
-		if dwellTime > 0 {
-			dwellInfo = fmt.Sprintf("dwell %s", dwellTime)
-		}
+		dwellInfo := wizardDeploymentModeLabel(m.wizard)
 		m.AddOutput("info", fmt.Sprintf("Creating PR for %s (%s)...", vuln.ID, dwellInfo))
 		m.activityLog.Add(IconInfo, "Deploying payload via Auto PR")
 		draft := m.wizard.Draft
@@ -395,10 +433,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 		m.wizard.Payload = payload
 
 		dwellTime := m.wizard.DwellTime
-		dwellInfo := "express"
-		if dwellTime > 0 {
-			dwellInfo = fmt.Sprintf("dwell %s", dwellTime)
-		}
+		dwellInfo := wizardDeploymentModeLabel(m.wizard)
 		m.AddOutput("info", fmt.Sprintf("Creating Issue for %s (%s)...", vuln.ID, dwellInfo))
 		m.activityLog.Add(IconInfo, "Deploying payload via Issue")
 		autoClose := m.wizard.AutoClose
@@ -448,10 +483,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 		m.wizard.Payload = payload
 
 		dwellTime := m.wizard.DwellTime
-		dwellInfo := "express"
-		if dwellTime > 0 {
-			dwellInfo = fmt.Sprintf("dwell %s", dwellTime)
-		}
+		dwellInfo := wizardDeploymentModeLabel(m.wizard)
 		switch m.wizard.CommentTarget {
 		case CommentTargetPullRequest:
 			if issueNum > 0 {
@@ -528,10 +560,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 			m.activityLog.Add(IconSuccess, "Payload copied to clipboard")
 		}
 
-		dwellInfo := "express"
-		if m.wizard.DwellTime > 0 {
-			dwellInfo = fmt.Sprintf("dwell %s", m.wizard.DwellTime)
-		}
+		dwellInfo := wizardDeploymentModeLabel(m.wizard)
 
 		m.AddOutput("info", "")
 		m.AddOutput("output", payload)
@@ -566,10 +595,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 			m.activityLog.Add(IconSuccess, "Payload copied to clipboard")
 		}
 
-		dwellInfo := "express"
-		if m.wizard.DwellTime > 0 {
-			dwellInfo = fmt.Sprintf("dwell %s", m.wizard.DwellTime)
-		}
+		dwellInfo := wizardDeploymentModeLabel(m.wizard)
 
 		m.AddOutput("info", "")
 		m.AddOutput("info", fmt.Sprintf("Target: %s", vuln.Repository))
@@ -611,10 +637,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 		}
 
 		dwellTime := m.wizard.DwellTime
-		dwellInfo := "express"
-		if dwellTime > 0 {
-			dwellInfo = fmt.Sprintf("dwell %s", dwellTime)
-		}
+		dwellInfo := wizardDeploymentModeLabel(m.wizard)
 
 		m.AddOutput("info", fmt.Sprintf("Triggering workflow_dispatch with %s (%s)...", dispatchToken.Name, dwellInfo))
 		m.activityLog.Add(IconInfo, "Triggering workflow_dispatch pivot")

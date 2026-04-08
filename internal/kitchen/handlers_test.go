@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/boostsecurityio/smokedmeat/internal/kitchen/db"
 	"github.com/boostsecurityio/smokedmeat/internal/models"
 )
 
@@ -72,6 +73,72 @@ func TestHandler_Health_ReturnsOK(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestHandler_RegisterRoutes_RegistersPurge(t *testing.T) {
+	mock := &mockPublisher{}
+	_, mux := newTestHandler(mock, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/purge", strings.NewReader(`{"session_id":"","scope_type":"repo","scope_value":"acme/api","dry_run":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "session_id is required")
+}
+
+func TestShouldAutoCloseStager(t *testing.T) {
+	tests := []struct {
+		name   string
+		stager *RegisteredStager
+		want   bool
+	}{
+		{
+			name: "nil stager",
+			want: false,
+		},
+		{
+			name: "persistent stager never auto closes",
+			stager: &RegisteredStager{
+				Persistent:    true,
+				MaxCallbacks:  0,
+				CallbackCount: 1,
+			},
+			want: false,
+		},
+		{
+			name: "fanout before final callback",
+			stager: &RegisteredStager{
+				MaxCallbacks:  3,
+				CallbackCount: 2,
+			},
+			want: false,
+		},
+		{
+			name: "fanout on final callback",
+			stager: &RegisteredStager{
+				MaxCallbacks:  3,
+				CallbackCount: 3,
+			},
+			want: true,
+		},
+		{
+			name: "default one shot closes on first callback",
+			stager: &RegisteredStager{
+				MaxCallbacks:  1,
+				CallbackCount: 1,
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, shouldAutoCloseStager(tt.stager))
+		})
+	}
 }
 
 // =============================================================================
@@ -259,6 +326,51 @@ func TestHandler_Beacon_ColeslawPublishFailureReturns500(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestHandler_Stager_FanoutPersistsUntilBudgetExhausted(t *testing.T) {
+	mock := &mockPublisher{}
+	h, mux := newTestHandler(mock, nil)
+	database := newTestDB(t)
+	h.SetDatabase(database)
+
+	err := h.registerStager(&RegisteredStager{
+		ID:           "fanout-cb",
+		ResponseType: "bash",
+		SessionID:    "sess-1",
+		CreatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(time.Hour),
+		MaxCallbacks: 3,
+	})
+	require.NoError(t, err)
+
+	repo := db.NewStagerRepository(database)
+	rows, err := repo.List()
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+
+	for i := 1; i <= 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/r/fanout-cb", nil)
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		rows, err = repo.List()
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, i, rows[0].CallbackCount)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/r/fanout-cb", nil)
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	rows, err = repo.List()
+	require.NoError(t, err)
+	assert.Empty(t, rows)
 }
 
 func TestHandler_Beacon_ResponseFormat(t *testing.T) {

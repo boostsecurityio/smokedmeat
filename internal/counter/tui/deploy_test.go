@@ -180,13 +180,14 @@ func TestRegisterStagerWithMeta_Success(t *testing.T) {
 	m := newModelWithMockClient(mock)
 	m.config.SessionID = "sess-1"
 	meta := map[string]string{"repository": "acme/api", "workflow": "ci.yml", "job": "build"}
-	err := m.registerStagerWithMeta("stg-abc", 0, meta)
+	err := m.registerStagerWithMeta("stg-abc", 0, 1, meta)
 
 	require.NoError(t, err)
 	assert.Equal(t, "stg-abc", mock.lastRegisterCallbackID)
 	assert.Equal(t, "bash", mock.lastRegisterCallbackReq.ResponseType)
 	assert.Equal(t, "sess-1", mock.lastRegisterCallbackReq.SessionID)
 	assert.Equal(t, "", mock.lastRegisterCallbackReq.DwellTime)
+	assert.Equal(t, 1, mock.lastRegisterCallbackReq.MaxCallbacks)
 	assert.Equal(t, "acme/api", mock.lastRegisterCallbackReq.Metadata["repository"])
 }
 
@@ -196,10 +197,11 @@ func TestRegisterStagerWithMeta_WithDwell(t *testing.T) {
 	}
 	m := newModelWithMockClient(mock)
 	m.config.SessionID = "sess-1"
-	err := m.registerStagerWithMeta("stg-dwell", 30*time.Second, nil)
+	err := m.registerStagerWithMeta("stg-dwell", 30*time.Second, 3, nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, "30s", mock.lastRegisterCallbackReq.DwellTime)
+	assert.Equal(t, 3, mock.lastRegisterCallbackReq.MaxCallbacks)
 }
 
 func TestRegisterStagerWithMeta_ServerError(t *testing.T) {
@@ -208,7 +210,7 @@ func TestRegisterStagerWithMeta_ServerError(t *testing.T) {
 	}
 	m := newModelWithMockClient(mock)
 	m.config.SessionID = "sess-1"
-	err := m.registerStagerWithMeta("stg-err", 0, nil)
+	err := m.registerStagerWithMeta("stg-err", 0, 1, nil)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected status: 500")
@@ -228,6 +230,7 @@ func TestRegisterStagerWithMeta_PersistentMode(t *testing.T) {
 	require.NotNil(t, callback)
 	assert.Equal(t, "stg-auth", mock.lastRegisterCallbackID)
 	assert.True(t, mock.lastRegisterCallbackReq.Persistent)
+	assert.Equal(t, 0, mock.lastRegisterCallbackReq.MaxCallbacks)
 	assert.Equal(t, "express", mock.lastRegisterCallbackReq.DefaultMode)
 	assert.Equal(t, "payload", mock.lastRegisterCallbackReq.Payload)
 	assert.Equal(t, "acme/api", mock.lastRegisterCallbackReq.Metadata["repository"])

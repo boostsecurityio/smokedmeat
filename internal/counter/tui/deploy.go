@@ -192,11 +192,11 @@ func parseDeploymentError(err error) string {
 }
 
 func (m *Model) registerStager(stagerID string) error {
-	_, err := m.registerCallbackWithPayloadAndMeta(stagerID, "", 0, nil, false, "")
+	_, err := m.registerCallbackWithPayloadAndMeta(stagerID, "", 0, 1, nil, false, "")
 	return err
 }
 
-func (m *Model) registerStagerForVuln(stagerID string, dwellTime time.Duration, vuln *Vulnerability) error {
+func (m *Model) registerStagerForVuln(stagerID string, dwellTime time.Duration, maxCallbacks int, vuln *Vulnerability) error {
 	var meta map[string]string
 	if vuln != nil {
 		meta = map[string]string{
@@ -205,20 +205,20 @@ func (m *Model) registerStagerForVuln(stagerID string, dwellTime time.Duration, 
 			"job":        vuln.Job,
 		}
 	}
-	_, err := m.registerCallbackWithPayloadAndMeta(stagerID, "", dwellTime, meta, false, "")
+	_, err := m.registerCallbackWithPayloadAndMeta(stagerID, "", dwellTime, maxCallbacks, meta, false, "")
 	return err
 }
 
-func (m *Model) registerStagerWithMeta(stagerID string, dwellTime time.Duration, metadata map[string]string) error {
-	_, err := m.registerCallbackWithPayloadAndMeta(stagerID, "", dwellTime, metadata, false, "")
+func (m *Model) registerStagerWithMeta(stagerID string, dwellTime time.Duration, maxCallbacks int, metadata map[string]string) error {
+	_, err := m.registerCallbackWithPayloadAndMeta(stagerID, "", dwellTime, maxCallbacks, metadata, false, "")
 	return err
 }
 
 func (m *Model) registerPersistentCallback(stagerID, payload string, dwellTime time.Duration, metadata map[string]string) (*counter.CallbackPayload, error) {
-	return m.registerCallbackWithPayloadAndMeta(stagerID, payload, dwellTime, metadata, true, "express")
+	return m.registerCallbackWithPayloadAndMeta(stagerID, payload, dwellTime, 0, metadata, true, "express")
 }
 
-func (m *Model) registerCallbackWithPayloadAndMeta(stagerID, payload string, dwellTime time.Duration, metadata map[string]string, persistent bool, defaultMode string) (*counter.CallbackPayload, error) {
+func (m *Model) registerCallbackWithPayloadAndMeta(stagerID, payload string, dwellTime time.Duration, maxCallbacks int, metadata map[string]string, persistent bool, defaultMode string) (*counter.CallbackPayload, error) {
 	if m.kitchenClient == nil {
 		return nil, fmt.Errorf("not connected to kitchen")
 	}
@@ -234,6 +234,7 @@ func (m *Model) registerCallbackWithPayloadAndMeta(stagerID, payload string, dwe
 		SessionID:    m.config.SessionID,
 		Metadata:     metadata,
 		Persistent:   persistent,
+		MaxCallbacks: maxCallbacks,
 		DefaultMode:  defaultMode,
 		DwellTime:    dwell,
 	})

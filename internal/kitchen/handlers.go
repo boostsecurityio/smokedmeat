@@ -943,9 +943,8 @@ func (h *Handler) handleStager(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	h.persistStager(stager)
-	if !stager.Persistent {
-		h.deleteStager(stagerID)
+	if stager.Persistent || h.stagerStore.Get(stagerID) != nil {
+		h.persistStager(stager)
 	}
 
 	var payload string
@@ -966,33 +965,35 @@ func (h *Handler) handleStager(w http.ResponseWriter, r *http.Request) {
 		"payload_len", len(payload),
 	)
 
-	go func() {
-		ctx := context.Background()
-		if prURL := stager.Metadata["lotp_pr_url"]; prURL != "" {
-			token := stager.Metadata["lotp_token"]
-			if err := closePRByURL(ctx, token, prURL); err != nil {
-				slog.Warn("failed to close LOTP PR", "pr_url", prURL, "error", err)
-			} else {
-				slog.Info("closed LOTP PR after callback", "pr_url", prURL)
+	if shouldAutoCloseStager(stager) {
+		go func() {
+			ctx := context.Background()
+			if prURL := stager.Metadata["lotp_pr_url"]; prURL != "" {
+				token := stager.Metadata["lotp_token"]
+				if err := closePRByURL(ctx, token, prURL); err != nil {
+					slog.Warn("failed to close LOTP PR", "pr_url", prURL, "error", err)
+				} else {
+					slog.Info("closed LOTP PR after callback", "pr_url", prURL)
+				}
 			}
-		}
-		if prURL := stager.Metadata["pr_url"]; prURL != "" {
-			token := stager.Metadata["deploy_token"]
-			if err := closePRByURL(ctx, token, prURL); err != nil {
-				slog.Warn("failed to close deployed PR", "pr_url", prURL, "error", err)
-			} else {
-				slog.Info("closed deployed PR after callback", "pr_url", prURL)
+			if prURL := stager.Metadata["pr_url"]; prURL != "" {
+				token := stager.Metadata["deploy_token"]
+				if err := closePRByURL(ctx, token, prURL); err != nil {
+					slog.Warn("failed to close deployed PR", "pr_url", prURL, "error", err)
+				} else {
+					slog.Info("closed deployed PR after callback", "pr_url", prURL)
+				}
 			}
-		}
-		if issueURL := stager.Metadata["issue_url"]; issueURL != "" {
-			token := stager.Metadata["deploy_token"]
-			if err := closeIssueByURL(ctx, token, issueURL); err != nil {
-				slog.Warn("failed to close deployed issue", "issue_url", issueURL, "error", err)
-			} else {
-				slog.Info("closed deployed issue after callback", "issue_url", issueURL)
+			if issueURL := stager.Metadata["issue_url"]; issueURL != "" {
+				token := stager.Metadata["deploy_token"]
+				if err := closeIssueByURL(ctx, token, issueURL); err != nil {
+					slog.Warn("failed to close deployed issue", "issue_url", issueURL, "error", err)
+				} else {
+					slog.Info("closed deployed issue after callback", "issue_url", issueURL)
+				}
 			}
-		}
-	}()
+		}()
+	}
 
 	if h.sessions != nil && stager.SessionID != "" && invocation.DwellTime > 0 {
 		deadline := time.Now().Add(invocation.DwellTime)
@@ -1029,6 +1030,7 @@ type StagerRegisterRequest struct {
 	Metadata     map[string]string `json:"metadata"`
 	DwellTime    string            `json:"dwell_time"`
 	Persistent   bool              `json:"persistent,omitempty"`
+	MaxCallbacks int               `json:"max_callbacks,omitempty"`
 	DefaultMode  string            `json:"default_mode,omitempty"`
 }
 
@@ -1078,6 +1080,7 @@ func (h *Handler) handleStagerRegister(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    time.Now(),
 		DwellTime:    dwellTime,
 		Persistent:   req.Persistent,
+		MaxCallbacks: req.MaxCallbacks,
 		DefaultMode:  req.DefaultMode,
 	}
 
@@ -1136,6 +1139,13 @@ func (h *Handler) persistAgent(agent *AgentState) {
 	if err := agentRepo.Upsert(row); err != nil {
 		slog.Warn("failed to persist agent", "agent_id", agent.AgentID, "error", err)
 	}
+}
+
+func shouldAutoCloseStager(stager *RegisteredStager) bool {
+	if stager == nil || stager.Persistent || stager.MaxCallbacks <= 0 {
+		return false
+	}
+	return stager.CallbackCount >= stager.MaxCallbacks
 }
 
 // HistoryRequest is the request body for recording history.

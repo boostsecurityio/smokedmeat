@@ -25,6 +25,7 @@ type StagerRow struct {
 	Metadata      map[string]string `json:"metadata,omitempty"`
 	DwellTime     time.Duration     `json:"dwell_time"`
 	Persistent    bool              `json:"persistent"`
+	MaxCallbacks  int               `json:"max_callbacks,omitempty"`
 	DefaultMode   string            `json:"default_mode,omitempty"`
 	NextMode      string            `json:"next_mode,omitempty"`
 	CallbackCount int               `json:"callback_count"`

@@ -17,6 +17,7 @@ type RegisterCallbackRequest struct {
 	Metadata     map[string]string `json:"metadata"`
 	DwellTime    string            `json:"dwell_time"`
 	Persistent   bool              `json:"persistent,omitempty"`
+	MaxCallbacks int               `json:"max_callbacks,omitempty"`
 	DefaultMode  string            `json:"default_mode,omitempty"`
 }
 
