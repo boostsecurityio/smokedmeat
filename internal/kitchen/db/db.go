@@ -5,15 +5,22 @@
 package db
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+	"time"
 
 	bolt "go.etcd.io/bbolt"
+
+	"github.com/boostsecurityio/smokedmeat/internal/buildinfo"
 )
 
 // Bucket names
 var (
+	BucketMeta          = []byte("meta")
 	BucketOrders        = []byte("orders")
 	BucketAgents        = []byte("agents")
 	BucketSessions      = []byte("sessions")
@@ -25,10 +32,59 @@ var (
 	BucketLoot          = []byte("loot")
 )
 
+var schemaKey = []byte("schema")
+
+const (
+	currentSchemaMajor = 1
+	currentSchemaMinor = 0
+)
+
 // DB wraps a BBolt database connection for Kitchen persistence.
 type DB struct {
 	bolt *bolt.DB
 	path string
+}
+
+type schemaMetadata struct {
+	Major        int       `json:"major"`
+	Minor        int       `json:"minor"`
+	CreatedBy    string    `json:"created_by,omitempty"`
+	LastOpenedBy string    `json:"last_opened_by,omitempty"`
+	CreatedAt    time.Time `json:"created_at,omitempty"`
+	LastOpenedAt time.Time `json:"last_opened_at,omitempty"`
+}
+
+type schemaVersionError struct {
+	Path         string
+	StoredMajor  int
+	StoredMinor  int
+	CurrentMajor int
+	CurrentMinor int
+}
+
+type unversionedSchemaError struct {
+	Path           string
+	UnknownBuckets []string
+}
+
+func (e *schemaVersionError) Error() string {
+	return fmt.Sprintf(
+		"kitchen DB schema %d.%d is incompatible with this binary schema %d.%d - purge the Kitchen volume with make quickstart-purge or make dev-quickstart-purge, or remove %s manually",
+		e.StoredMajor,
+		e.StoredMinor,
+		e.CurrentMajor,
+		e.CurrentMinor,
+		e.Path,
+	)
+}
+
+func (e *unversionedSchemaError) Error() string {
+	return fmt.Sprintf(
+		"kitchen DB at %s has no schema metadata and unknown top-level buckets [%s] - purge the Kitchen volume with make quickstart-purge or make dev-quickstart-purge, or remove %s manually",
+		e.Path,
+		strings.Join(e.UnknownBuckets, ", "),
+		e.Path,
+	)
 }
 
 // Config holds database configuration.
@@ -61,9 +117,9 @@ func Open(config Config) (*DB, error) {
 		path: config.Path,
 	}
 
-	if err := db.createBuckets(); err != nil {
+	if err := db.initialize(); err != nil {
 		boltDB.Close()
-		return nil, fmt.Errorf("failed to create buckets: %w", err)
+		return nil, err
 	}
 
 	return db, nil
@@ -77,27 +133,144 @@ func (db *DB) Close() error {
 	return nil
 }
 
-// createBuckets creates all required buckets.
-func (db *DB) createBuckets() error {
+func (db *DB) initialize() error {
 	return db.bolt.Update(func(tx *bolt.Tx) error {
-		buckets := [][]byte{
-			BucketOrders,
-			BucketAgents,
-			BucketSessions,
-			BucketStagers,
-			BucketMetrics,
-			BucketPantry,
-			BucketHistory,
-			BucketKnownEntities,
-			BucketLoot,
+		metaBucket := tx.Bucket(BucketMeta)
+		existing, err := readSchemaMetadata(metaBucket)
+		if err != nil {
+			return err
 		}
-
-		for _, bucket := range buckets {
-			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
-				return fmt.Errorf("failed to create bucket %s: %w", bucket, err)
+		if existing != nil && existing.Major != currentSchemaMajor {
+			return &schemaVersionError{
+				Path:         db.path,
+				StoredMajor:  existing.Major,
+				StoredMinor:  existing.Minor,
+				CurrentMajor: currentSchemaMajor,
+				CurrentMinor: currentSchemaMinor,
+			}
+		}
+		if existing == nil {
+			validateErr := validateUnversionedLayout(tx, db.path)
+			if validateErr != nil {
+				return validateErr
 			}
 		}
 
-		return nil
+		metaBucket, err = tx.CreateBucketIfNotExists(BucketMeta)
+		if err != nil {
+			return fmt.Errorf("failed to create bucket %s: %w", BucketMeta, err)
+		}
+
+		if err := createBuckets(tx); err != nil {
+			return err
+		}
+
+		return writeSchemaMetadata(metaBucket, existing)
 	})
+}
+
+func createBuckets(tx *bolt.Tx) error {
+	for _, bucket := range requiredBuckets() {
+		if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
+			return fmt.Errorf("failed to create bucket %s: %w", bucket, err)
+		}
+	}
+	return nil
+}
+
+func requiredBuckets() [][]byte {
+	return [][]byte{
+		BucketOrders,
+		BucketAgents,
+		BucketSessions,
+		BucketStagers,
+		BucketMetrics,
+		BucketPantry,
+		BucketHistory,
+		BucketKnownEntities,
+		BucketLoot,
+	}
+}
+
+func validateUnversionedLayout(tx *bolt.Tx, path string) error {
+	allowed := make(map[string]struct{}, len(requiredBuckets())+1)
+	allowed[string(BucketMeta)] = struct{}{}
+	for _, bucket := range requiredBuckets() {
+		allowed[string(bucket)] = struct{}{}
+	}
+
+	var unknown []string
+	if err := tx.ForEach(func(name []byte, _ *bolt.Bucket) error {
+		if _, ok := allowed[string(name)]; ok {
+			return nil
+		}
+		unknown = append(unknown, string(name))
+		return nil
+	}); err != nil {
+		return fmt.Errorf("failed to inspect top-level buckets: %w", err)
+	}
+
+	if len(unknown) == 0 {
+		return nil
+	}
+
+	sort.Strings(unknown)
+	return &unversionedSchemaError{
+		Path:           path,
+		UnknownBuckets: unknown,
+	}
+}
+
+func readSchemaMetadata(metaBucket *bolt.Bucket) (*schemaMetadata, error) {
+	if metaBucket == nil {
+		return nil, nil
+	}
+
+	data := metaBucket.Get(schemaKey)
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	var metadata schemaMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return nil, fmt.Errorf("failed to decode schema metadata: %w", err)
+	}
+
+	return &metadata, nil
+}
+
+func writeSchemaMetadata(metaBucket *bolt.Bucket, existing *schemaMetadata) error {
+	now := time.Now().UTC()
+	version := buildinfo.Version
+	if version == "" {
+		version = "dev"
+	}
+
+	metadata := schemaMetadata{
+		Major:        currentSchemaMajor,
+		Minor:        currentSchemaMinor,
+		CreatedBy:    version,
+		LastOpenedBy: version,
+		CreatedAt:    now,
+		LastOpenedAt: now,
+	}
+
+	if existing != nil {
+		if existing.Minor > metadata.Minor {
+			metadata.Minor = existing.Minor
+		}
+		if !existing.CreatedAt.IsZero() {
+			metadata.CreatedAt = existing.CreatedAt
+		}
+		if existing.CreatedBy != "" {
+			metadata.CreatedBy = existing.CreatedBy
+		}
+	}
+
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to encode schema metadata: %w", err)
+	}
+
+	return metaBucket.Put(schemaKey, data)
 }

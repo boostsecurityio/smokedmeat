@@ -94,6 +94,48 @@ make pinact                # Pin GitHub Actions (run after workflow changes)
 | Kitchen code | `make e2e-kitchen-rebuild` or `make dev-quickstart` |
 | Corrupted state | `make dev-quickstart-purge && make dev-quickstart` |
 
+## CRITICAL: Kitchen DB Schema Versioning
+
+Kitchen persistence in `internal/kitchen/db/` must use an explicit schema version stored in DB metadata. Treat the DB schema version as separate from the app release version.
+
+- Start the public `v0.1.x` line at schema `1.0`.
+- Patch and minor app releases within the same schema major must be able to open existing quickstart and dev-quickstart Kitchen volumes.
+- If a DB file predates schema metadata but already has the known buckets for the current line, treat it as legacy-current and backfill the schema metadata on open.
+- On schema major mismatch, fail fast during Kitchen startup with a clear error telling the operator to purge the Kitchen volume with `make quickstart-purge` or `make dev-quickstart-purge`.
+
+### When To Bump Schema Minor
+
+Bump schema minor for additive, backward-compatible on-disk changes that old code can safely ignore or new code can default:
+
+- adding a new bucket that does not change meaning of existing buckets
+- adding optional JSON fields to persisted rows or Pantry assets
+- adding new Pantry asset properties or relationships that older code can ignore
+- adding metadata keys, timestamps, or derived caches that can be rebuilt
+
+### When Not To Bump Schema Version
+
+Do not bump schema version for changes that do not alter the persisted on-disk contract:
+
+- Counter-only rendering, layout, or tree placement changes
+- in-memory Pantry logic changes when persisted JSON shape and meaning stay the same
+- test-only, docs-only, or logging-only changes
+- internal refactors that keep the same buckets, keys, JSON fields, and semantics
+
+### When To Bump Schema Major
+
+Bump schema major for changes where an existing DB might be read incorrectly, written incorrectly, or require migration/purge:
+
+- renaming, deleting, or repurposing a bucket
+- changing key layout or record identity rules inside a bucket
+- making previously optional fields required for correct behavior
+- changing the semantic meaning of persisted values
+- changing Pantry serialization in a way older data cannot be interpreted safely
+- any change that would require a one-off migrator or operator purge to stay correct
+
+### Rule Of Thumb
+
+If older binaries can still safely read the DB, and newer binaries can safely read older DBs with sane defaults, keep the same schema major. If either direction is unsafe, bump schema major.
+
 ## Architecture
 
 | Component | Location | Purpose |

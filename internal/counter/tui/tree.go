@@ -338,41 +338,37 @@ func BuildTreeFromPantry(p *pantry.Pantry) *TreeNode {
 		}
 	}
 
+	cloudNodes := make(map[string]*TreeNode)
+	for _, cloud := range clouds {
+		node := assetToTreeNode(cloud, 1)
+		cloudNodes[cloud.ID] = node
+
+		parent, attached := findParentNode(cloud.ID, childMap, jobNodes, workflowNodes)
+		if attached {
+			node.Parent = parent
+			node.Depth = parent.Depth + 1
+			parent.Children = append(parent.Children, node)
+			continue
+		}
+
+		node.Parent = root
+		root.Children = append(root.Children, node)
+	}
+
 	for _, token := range tokens {
 		node := assetToTreeNode(token, 4)
 		node.State = TreeStateEphemeral
 
-		attached := false
-		for parentID, children := range childMap {
-			for _, childID := range children {
-				if childID == token.ID {
-					if jobNode, exists := jobNodes[parentID]; exists {
-						node.Parent = jobNode
-						jobNode.Children = append(jobNode.Children, node)
-						attached = true
-						break
-					}
-					if wfNode, exists := workflowNodes[parentID]; exists {
-						node.Parent = wfNode
-						wfNode.Children = append(wfNode.Children, node)
-						attached = true
-						break
-					}
-				}
+		parent, attached := findParentNode(token.ID, childMap, jobNodes, workflowNodes, cloudNodes)
+		if attached {
+			node.Parent = parent
+			if parent.Type == TreeNodeCloud {
+				node.Depth = parent.Depth + 1
 			}
-			if attached {
-				break
-			}
+			parent.Children = append(parent.Children, node)
+			continue
 		}
 
-		if !attached {
-			node.Parent = root
-			root.Children = append(root.Children, node)
-		}
-	}
-
-	for _, cloud := range clouds {
-		node := assetToTreeNode(cloud, 1)
 		node.Parent = root
 		root.Children = append(root.Children, node)
 	}
@@ -637,6 +633,29 @@ func treeRepoCount(p *pantry.Pantry) int {
 		return 0
 	}
 	return len(p.GetAssetsByType(pantry.AssetRepository))
+}
+
+func findParentNode(childID string, childMap map[string][]string, parentGroups ...map[string]*TreeNode) (*TreeNode, bool) {
+	for parentID, children := range childMap {
+		if !treeChildAttached(children, childID) {
+			continue
+		}
+		for _, group := range parentGroups {
+			if parent, exists := group[parentID]; exists {
+				return parent, true
+			}
+		}
+	}
+	return nil, false
+}
+
+func treeChildAttached(children []string, childID string) bool {
+	for _, id := range children {
+		if id == childID {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) ReflattenTree() {
