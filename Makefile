@@ -5,6 +5,7 @@
         test test-verbose test-race lint lint-fix tidy pinact \
         build-brisket build-brisket-all clean \
         e2e-up e2e-down e2e-purge e2e-counter e2e-capture e2e-keys e2e-kitchen-rebuild analyze-perf \
+        worktree-sync-main worktree-add worktree-list worktree-remove worktree-prune \
         e2e-smoke e2e-goat
 
 .DEFAULT_GOAL := help
@@ -60,6 +61,13 @@ help:
 
 help-more:
 	@echo "SmokedMeat - Advanced Commands"
+	@echo ""
+	@echo "Worktrees:"
+	@echo "  worktree-sync-main             Fast-forward the main worktree from origin/main"
+	@echo "  worktree-add NAME=foo          Create ../smokedmeat-wt/foo on feat/foo from origin/main"
+	@echo "  worktree-list                  Show all registered worktrees"
+	@echo "  worktree-remove NAME=foo       Remove ../smokedmeat-wt/foo and delete feat/foo if merged"
+	@echo "  worktree-prune                 Drop stale worktree metadata"
 	@echo ""
 	@echo "Testing (additional):"
 	@echo "  test-verbose     Run tests with verbose output"
@@ -206,6 +214,9 @@ SEMVER_TAG_PATTERN := ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9
 RELEASE_VERSION ?= dev
 RELEASE_COMMIT ?= none
 RELEASE_DATE ?= unknown
+WORKTREE_ROOT ?= ../smokedmeat-wt
+WORKTREE_BRANCH_PREFIX ?= feat
+WORKTREE_BASE ?= origin/main
 KITCHEN_AGENTS_DIR := internal/kitchen/agents
 RELEASE_ARTIFACTS_DIR := bin/release
 RELEASE_BRISKET_BINARY := $(RELEASE_ARTIFACTS_DIR)/brisket-linux-amd64
@@ -321,6 +332,89 @@ define ensure_quickstart_auth_token
 		printf "\033[1;34m[auth]\033[0m Generated quickstart auth token in \033[36m%s\033[0m\n" "$(QUICKSTART_AUTH_TOKEN_FILE)"; \
 	fi
 endef
+
+worktree-sync-main:
+	@set -e; \
+	MAIN_WORKTREE=$$(git worktree list --porcelain | awk '/^worktree / { path=substr($$0, 10) } /^branch refs\/heads\/main$$/ { print path; exit }'); \
+	if [ -z "$$MAIN_WORKTREE" ]; then \
+		echo "ERROR: Could not find a worktree with branch main checked out."; \
+		exit 1; \
+	fi; \
+	if [ -n "$$(git -C "$$MAIN_WORKTREE" status --porcelain)" ]; then \
+		echo "ERROR: main worktree has uncommitted changes: $$MAIN_WORKTREE"; \
+		exit 1; \
+	fi; \
+	echo "Refreshing $$MAIN_WORKTREE on main"; \
+	git -C "$$MAIN_WORKTREE" fetch origin; \
+	git -C "$$MAIN_WORKTREE" switch main; \
+	git -C "$$MAIN_WORKTREE" pull --ff-only
+
+worktree-add:
+	@set -e; \
+	NAME_VALUE="$(NAME)"; \
+	BRANCH_NAME="$(BRANCH)"; \
+	BASE_REF="$(if $(strip $(BASE)),$(BASE),$(WORKTREE_BASE))"; \
+	ROOT_DIR="$(if $(strip $(ROOT)),$(ROOT),$(WORKTREE_ROOT))"; \
+	DEST_PATH="$(DEST)"; \
+	if [ -z "$$NAME_VALUE" ] && [ -z "$$BRANCH_NAME" ]; then \
+		echo "ERROR: Set NAME=<feature> or BRANCH=<branch>."; \
+		exit 1; \
+	fi; \
+	if [ -z "$$BRANCH_NAME" ]; then \
+		BRANCH_NAME="$(WORKTREE_BRANCH_PREFIX)/$$NAME_VALUE"; \
+	fi; \
+	if [ -z "$$NAME_VALUE" ]; then \
+		NAME_VALUE=$${BRANCH_NAME##*/}; \
+	fi; \
+	if [ -z "$$DEST_PATH" ]; then \
+		DEST_PATH="$$ROOT_DIR/$$NAME_VALUE"; \
+	fi; \
+	if git show-ref --verify --quiet "refs/heads/$$BRANCH_NAME"; then \
+		echo "ERROR: Branch already exists locally: $$BRANCH_NAME"; \
+		exit 1; \
+	fi; \
+	if [ -e "$$DEST_PATH" ]; then \
+		echo "ERROR: Path already exists: $$DEST_PATH"; \
+		exit 1; \
+	fi; \
+	mkdir -p "$$(dirname "$$DEST_PATH")"; \
+	$(MAKE) --no-print-directory worktree-sync-main; \
+	git worktree add -b "$$BRANCH_NAME" "$$DEST_PATH" "$$BASE_REF"; \
+	echo "Created $$DEST_PATH on $$BRANCH_NAME from $$BASE_REF"
+
+worktree-list:
+	@git worktree list
+
+worktree-remove:
+	@set -e; \
+	NAME_VALUE="$(NAME)"; \
+	BRANCH_NAME="$(BRANCH)"; \
+	if [ -z "$$NAME_VALUE" ] && [ -z "$$BRANCH_NAME" ]; then \
+		echo "ERROR: Set NAME=<feature> or BRANCH=<branch>."; \
+		exit 1; \
+	fi; \
+	if [ -z "$$BRANCH_NAME" ]; then \
+		BRANCH_NAME="$(WORKTREE_BRANCH_PREFIX)/$$NAME_VALUE"; \
+	fi; \
+	WORKTREE_PATH=$$(git worktree list --porcelain | awk -v branch_ref="refs/heads/$$BRANCH_NAME" '/^worktree / { path=substr($$0, 10) } /^branch / { if ($$2 == branch_ref) print path }' | head -n 1); \
+	if [ -z "$$WORKTREE_PATH" ]; then \
+		echo "ERROR: No worktree found for $$BRANCH_NAME"; \
+		exit 1; \
+	fi; \
+	if [ "$$(git rev-parse --abbrev-ref HEAD)" = "$$BRANCH_NAME" ]; then \
+		echo "ERROR: Cannot remove the current worktree."; \
+		exit 1; \
+	fi; \
+	git worktree remove "$$WORKTREE_PATH"; \
+	if git branch -d "$$BRANCH_NAME"; then \
+		echo "Removed $$WORKTREE_PATH and deleted $$BRANCH_NAME"; \
+	else \
+		echo "Removed $$WORKTREE_PATH"; \
+		echo "Kept $$BRANCH_NAME because git branch -d refused to delete it."; \
+	fi
+
+worktree-prune:
+	@git worktree prune
 
 define warm_quickstart_release_image
 	@IMAGE_REF="$(1)"; \
