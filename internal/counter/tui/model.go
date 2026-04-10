@@ -217,10 +217,13 @@ type Model struct {
 	pendingCachePoison *CachePoisonWaitingState
 
 	// Attack tree state
-	treeRoot     *TreeNode
-	treeNodes    []*TreeNode // Flattened for navigation
-	treeCursor   int
-	treeFiltered bool // When true, show only Top 5 workflows
+	treeRoot             *TreeNode
+	treeNodes            []*TreeNode // Flattened for navigation
+	treeCursor           int
+	treeFiltered         bool // When true, hide nodes with no vuln-bearing path
+	treeRepoCount        int
+	treeVisibleRepoCount int
+	treeFilterFallback   bool
 
 	// Active agent state
 	activeAgent          *AgentState

@@ -11,8 +11,21 @@ import (
 )
 
 func (m *Model) RenderAttackTree(width, height int) string {
+	banner := ""
+	contentHeight := height
+	if height >= 2 {
+		banner = m.renderTreeFilterBanner(width)
+		if banner != "" {
+			contentHeight--
+		}
+	}
+
 	if m.treeRoot == nil || len(m.treeNodes) == 0 {
-		return m.renderEmptyTree(width, height)
+		content := m.renderEmptyTree(width, contentHeight)
+		if banner == "" {
+			return content
+		}
+		return content + "\n" + banner
 	}
 
 	menuMap := m.buildMenuNumberMap()
@@ -38,15 +51,15 @@ func (m *Model) RenderAttackTree(width, height int) string {
 	totalLines := len(lines)
 
 	start := 0
-	if len(lines) > height {
+	if len(lines) > contentHeight {
 		cursorLine := m.findCursorLine(lines)
-		if cursorLine >= height-2 {
-			start = cursorLine - height + 3
+		if cursorLine >= contentHeight-2 {
+			start = cursorLine - contentHeight + 3
 		}
-		end := start + height
+		end := start + contentHeight
 		if end > len(lines) {
 			end = len(lines)
-			start = end - height
+			start = end - contentHeight
 			if start < 0 {
 				start = 0
 			}
@@ -54,8 +67,8 @@ func (m *Model) RenderAttackTree(width, height int) string {
 		lines = lines[start:end]
 	}
 
-	if len(lines) > height {
-		lines = lines[:height]
+	if len(lines) > contentHeight {
+		lines = lines[:contentHeight]
 	}
 
 	visibleSelected := make(map[int]bool)
@@ -65,8 +78,57 @@ func (m *Model) RenderAttackTree(width, height int) string {
 		}
 	}
 
-	scroll := ScrollInfo{TotalLines: totalLines, ViewportSize: height, ScrollOffset: start}
-	return strings.Join(applyScrollIndicator(lines, height, focused, visibleSelected, scroll), "\n")
+	scroll := ScrollInfo{TotalLines: totalLines, ViewportSize: contentHeight, ScrollOffset: start}
+	content := strings.Join(applyScrollIndicator(lines, contentHeight, focused, visibleSelected, scroll), "\n")
+	content = renderStringPadded(content, width, contentHeight)
+	if banner == "" {
+		return content
+	}
+	return content + "\n" + banner
+}
+
+func (m *Model) renderTreeFilterBanner(width int) string {
+	if width <= 0 {
+		return ""
+	}
+
+	text := " FILTERED TREE  OFF - showing the full tree. Press f to show only repos with vulnerabilities"
+	switch {
+	case m.treeFiltered && m.treeFilterFallback:
+		text = fmt.Sprintf(
+			" FILTERED TREE  ON - no repos linked to vulnerabilities yet. Showing all %d %s. Press f for the full tree",
+			m.treeRepoCount,
+			treeRepoWord(m.treeRepoCount),
+		)
+	case m.treeFiltered && m.treeRepoCount > 0:
+		text = fmt.Sprintf(
+			" FILTERED TREE  ON - showing %d of %d %s linked to vulnerabilities. Press f for the full tree",
+			m.treeVisibleRepoCount,
+			m.treeRepoCount,
+			treeRepoWord(m.treeRepoCount),
+		)
+	case m.treeFiltered:
+		text = " FILTERED TREE  ON - showing repos linked to vulnerabilities. Press f for the full tree"
+	case m.treeRepoCount > 0:
+		text = fmt.Sprintf(
+			" FILTERED TREE  OFF - showing all %d %s. Press f to show only repos with vulnerabilities",
+			m.treeRepoCount,
+			treeRepoWord(m.treeRepoCount),
+		)
+	}
+
+	style := treeFilterBannerOffStyle
+	if m.treeFiltered {
+		style = treeFilterBannerOnStyle
+	}
+	return style.Render(padRight(truncateVisual(text, width), width))
+}
+
+func treeRepoWord(count int) string {
+	if count == 1 {
+		return "repo"
+	}
+	return "repos"
 }
 
 func (m *Model) buildMenuNumberMap() map[string]int {

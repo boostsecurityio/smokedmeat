@@ -30,6 +30,7 @@ First public release. GitHub Actions is the supported CI platform for v0.1.0. Ot
 - Polished setup wizard token flow with clearer guidance
 - Tightened command input feedback across all TUI phases
 - Reproducible release builds for Brisket implant binaries
+- Clarified Counter tree filtering with an explicit ON/OFF footer banner and a findings-pane `f:filter` status hint
 - Removed internal planning docs that are not meant to ship in the public repo
 
 ### Fixed

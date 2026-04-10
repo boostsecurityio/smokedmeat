@@ -9,8 +9,13 @@ import (
 )
 
 type graphData struct {
-	Nodes []GraphNode `json:"nodes"`
-	Links []GraphEdge `json:"links"`
+	Mode              string      `json:"mode"`
+	LargeGraph        bool        `json:"large_graph"`
+	TotalNodes        int         `json:"total_nodes"`
+	TotalEdges        int         `json:"total_edges"`
+	FilterDescription string      `json:"filter_description,omitempty"`
+	Nodes             []GraphNode `json:"nodes"`
+	Links             []GraphEdge `json:"links"`
 }
 
 func (h *Handler) handleGraph(w http.ResponseWriter, _ *http.Request) {
@@ -19,22 +24,17 @@ func (h *Handler) handleGraph(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte(graphCytoscapeHTML))
 }
 
-func (h *Handler) handleGraphData(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) handleGraphData(w http.ResponseWriter, r *http.Request) {
 	p := h.Pantry()
-	assets := p.AllAssets()
-	edges := p.AllRelationships()
-
+	snapshot := buildGraphSnapshot(p, p.Version(), r.URL.Query().Get("mode"))
 	data := graphData{
-		Nodes: make([]GraphNode, 0, len(assets)),
-		Links: make([]GraphEdge, 0, len(edges)),
-	}
-
-	for _, asset := range assets {
-		data.Nodes = append(data.Nodes, AssetToGraphNode(asset))
-	}
-
-	for _, edge := range edges {
-		data.Links = append(data.Links, EdgeToGraphEdge(edge))
+		Mode:              snapshot.Mode,
+		LargeGraph:        snapshot.LargeGraph,
+		TotalNodes:        snapshot.TotalNodes,
+		TotalEdges:        snapshot.TotalEdges,
+		FilterDescription: snapshot.FilterDescription,
+		Nodes:             snapshot.Nodes,
+		Links:             snapshot.Edges,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

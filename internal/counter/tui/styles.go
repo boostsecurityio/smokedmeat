@@ -75,18 +75,20 @@ var (
 
 // Attack tree styles — set by ApplyTheme()
 var (
-	treeOrgStyle         lipgloss.Style
-	treeRepoStyle        lipgloss.Style
-	treePrivateRepoStyle lipgloss.Style
-	treeWorkflowStyle    lipgloss.Style
-	treeJobStyle         lipgloss.Style
-	treeSecretStyle      lipgloss.Style
-	treeVulnStyle        lipgloss.Style
-	treeCloudStyle       lipgloss.Style
-	treeAgentStyle       lipgloss.Style
-	treeEphemeralStyle   lipgloss.Style
-	treeSelectedStyle    lipgloss.Style
-	focusIndicatorStyle  lipgloss.Style
+	treeOrgStyle             lipgloss.Style
+	treeRepoStyle            lipgloss.Style
+	treePrivateRepoStyle     lipgloss.Style
+	treeWorkflowStyle        lipgloss.Style
+	treeJobStyle             lipgloss.Style
+	treeSecretStyle          lipgloss.Style
+	treeVulnStyle            lipgloss.Style
+	treeCloudStyle           lipgloss.Style
+	treeAgentStyle           lipgloss.Style
+	treeEphemeralStyle       lipgloss.Style
+	treeSelectedStyle        lipgloss.Style
+	treeFilterBannerOnStyle  lipgloss.Style
+	treeFilterBannerOffStyle lipgloss.Style
+	focusIndicatorStyle      lipgloss.Style
 )
 
 func init() {

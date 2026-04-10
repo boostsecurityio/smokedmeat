@@ -41,6 +41,7 @@ type GraphClient struct {
 	send    chan GraphMessage
 	hub     *GraphHub
 	version int64
+	mode    string
 }
 
 // NewGraphHub creates a new graph hub.
@@ -65,13 +66,14 @@ func (h *GraphHub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		conn: conn,
 		send: make(chan GraphMessage, graphSendBuffer),
 		hub:  h,
+		mode: normalizeGraphMode(r.URL.Query().Get("mode")),
 	}
 
 	h.register(client)
 	defer h.unregister(client)
 
 	// Send initial snapshot
-	snapshot := h.buildSnapshot()
+	snapshot := h.buildSnapshot(client.mode)
 	client.version = snapshot.Version
 	client.send <- GraphMessage{Type: "snapshot", Data: snapshot}
 
@@ -99,25 +101,8 @@ func (h *GraphHub) unregister(client *GraphClient) {
 	slog.Debug("graph client disconnected", "total", len(h.clients))
 }
 
-func (h *GraphHub) buildSnapshot() GraphSnapshot {
-	assets := h.pantry.AllAssets()
-	edges := h.pantry.AllRelationships()
-
-	nodes := make([]GraphNode, 0, len(assets))
-	for _, asset := range assets {
-		nodes = append(nodes, AssetToGraphNode(asset))
-	}
-
-	graphEdges := make([]GraphEdge, 0, len(edges))
-	for _, edge := range edges {
-		graphEdges = append(graphEdges, EdgeToGraphEdge(edge))
-	}
-
-	return GraphSnapshot{
-		Version: h.pantry.Version(),
-		Nodes:   nodes,
-		Edges:   graphEdges,
-	}
+func (h *GraphHub) buildSnapshot(mode string) GraphSnapshot {
+	return buildGraphSnapshot(h.pantry, h.pantry.Version(), mode)
 }
 
 // broadcast sends a message to all connected clients.
@@ -253,7 +238,8 @@ func (c *GraphClient) readPump(ctx context.Context) {
 		case "ping":
 			c.send <- GraphMessage{Type: "pong"}
 		case "snapshot_request":
-			snapshot := c.hub.buildSnapshot()
+			c.mode = graphModeFromData(msg.Data, c.mode)
+			snapshot := c.hub.buildSnapshot(c.mode)
 			c.version = snapshot.Version
 			c.send <- GraphMessage{Type: "snapshot", Data: snapshot}
 		}

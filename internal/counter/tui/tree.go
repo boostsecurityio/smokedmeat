@@ -520,6 +520,10 @@ func flattenRecursive(node *TreeNode, result *[]*TreeNode) {
 }
 
 func (m *Model) RebuildTree() {
+	m.treeRepoCount = treeRepoCount(m.pantry)
+	m.treeVisibleRepoCount = m.treeRepoCount
+	m.treeFilterFallback = false
+
 	if m.treeFiltered {
 		m.treeRoot = m.buildFilteredTree()
 	} else {
@@ -607,260 +611,32 @@ func (m *Model) expandParentsOfMenuVulns(node *TreeNode, menuVulns []Vulnerabili
 	return hasVuln
 }
 
-func (m *Model) getTop5WorkflowPaths() map[string]bool {
-	paths := make(map[string]bool)
-	for i, suggestion := range m.suggestions {
-		if i >= 5 {
-			break
-		}
-		if suggestion.VulnIndex >= 0 && suggestion.VulnIndex < len(m.vulnerabilities) {
-			wfPath := m.vulnerabilities[suggestion.VulnIndex].Workflow
-			if wfPath != "" {
-				paths[wfPath] = true
-			}
-		}
-	}
-	return paths
-}
-
 func (m *Model) buildFilteredTree() *TreeNode {
 	if m.pantry == nil || m.pantry.Size() == 0 {
+		m.treeVisibleRepoCount = 0
 		return nil
 	}
 
-	filterPaths := m.getTop5WorkflowPaths()
-	if len(filterPaths) == 0 {
+	filteredPantry := m.pantry.VulnBearingSubgraph()
+	if filteredPantry.Size() == 0 {
+		m.treeVisibleRepoCount = m.treeRepoCount
+		m.treeFilterFallback = true
 		return BuildTreeFromPantry(m.pantry)
 	}
 
-	root := &TreeNode{
-		ID:       "root",
-		Label:    "Top 5 Attack Paths",
-		Type:     TreeNodeOrg,
-		State:    TreeStateNew,
-		Expanded: true,
-		Depth:    -1,
+	m.treeVisibleRepoCount = treeRepoCount(filteredPantry)
+	root := BuildTreeFromPantry(filteredPantry)
+	if root != nil {
+		root.Label = "Relevant Attack Graph"
 	}
-
-	repos := m.pantry.GetAssetsByType(pantry.AssetRepository)
-	workflows := m.pantry.GetAssetsByType(pantry.AssetWorkflow)
-	jobs := m.pantry.GetAssetsByType(pantry.AssetJob)
-	secrets := m.pantry.GetAssetsByType(pantry.AssetSecret)
-	vulns := m.pantry.GetAssetsByType(pantry.AssetVulnerability)
-	tokens := m.pantry.GetAssetsByType(pantry.AssetToken)
-
-	edges := m.pantry.AllRelationships()
-	childMap := make(map[string][]string)
-	for _, e := range edges {
-		childMap[e.From] = append(childMap[e.From], e.To)
-	}
-
-	includedWorkflows := make(map[string]bool)
-	includedRepos := make(map[string]bool)
-	workflowToRepo := make(map[string]string)
-
-	for _, wf := range workflows {
-		path, _ := wf.GetProperty("path")
-		pathStr, _ := path.(string)
-		if !filterPaths[pathStr] {
-			continue
-		}
-		includedWorkflows[wf.ID] = true
-
-		for _, repo := range repos {
-			if strings.HasPrefix(wf.ID, repo.ID+":workflow:") {
-				includedRepos[repo.ID] = true
-				workflowToRepo[wf.ID] = repo.ID
-				break
-			}
-		}
-	}
-
-	for _, repo := range repos {
-		if m.isRepoPrivate(repo.ID, repo.Properties) {
-			includedRepos[repo.ID] = true
-		}
-	}
-
-	orgNodes := make(map[string]*TreeNode)
-	repoNodes := make(map[string]*TreeNode)
-
-	for _, repo := range repos {
-		if !includedRepos[repo.ID] {
-			continue
-		}
-
-		orgName := ""
-		if org, ok := repo.Properties["org"].(string); ok {
-			orgName = org
-		}
-
-		var orgNode *TreeNode
-		if orgName != "" {
-			if existing, ok := orgNodes[orgName]; ok {
-				orgNode = existing
-			} else {
-				orgNode = &TreeNode{
-					ID:       "github:org:" + orgName,
-					Label:    orgName,
-					Type:     TreeNodeOrg,
-					State:    TreeStateNew,
-					Expanded: true,
-					Depth:    0,
-					Parent:   root,
-				}
-				orgNodes[orgName] = orgNode
-				root.Children = append(root.Children, orgNode)
-			}
-		}
-
-		node := assetToTreeNode(repo, 1)
-		node.Expanded = true
-		repoNodes[repo.ID] = node
-
-		if orgNode != nil {
-			node.Parent = orgNode
-			orgNode.Children = append(orgNode.Children, node)
-		} else {
-			node.Parent = root
-			node.Depth = 0
-			root.Children = append(root.Children, node)
-		}
-	}
-
-	workflowNodes := make(map[string]*TreeNode)
-	for _, wf := range workflows {
-		if !includedWorkflows[wf.ID] {
-			continue
-		}
-
-		node := assetToTreeNode(wf, 2)
-		node.Expanded = true
-		workflowNodes[wf.ID] = node
-
-		if repoID, ok := workflowToRepo[wf.ID]; ok {
-			if repoNode, exists := repoNodes[repoID]; exists {
-				node.Parent = repoNode
-				repoNode.Children = append(repoNode.Children, node)
-			}
-		}
-	}
-
-	includedJobs := make(map[string]bool)
-	jobNodes := make(map[string]*TreeNode)
-	for _, job := range jobs {
-		for wfID, children := range childMap {
-			if !includedWorkflows[wfID] {
-				continue
-			}
-			for _, childID := range children {
-				if childID == job.ID {
-					if wfNode, exists := workflowNodes[wfID]; exists {
-						node := assetToTreeNode(job, 3)
-						node.Expanded = false // Collapsed by default
-						node.Parent = wfNode
-						wfNode.Children = append(wfNode.Children, node)
-						jobNodes[job.ID] = node
-						includedJobs[job.ID] = true
-						break
-					}
-				}
-			}
-			if includedJobs[job.ID] {
-				break
-			}
-		}
-	}
-
-	unknownJobNodes := make(map[string]*TreeNode)
-	for _, vuln := range vulns {
-		attached := false
-		for parentID, children := range childMap {
-			for _, childID := range children {
-				if childID == vuln.ID {
-					if jobNode, exists := jobNodes[parentID]; exists && includedJobs[parentID] {
-						node := assetToTreeNode(vuln, 4)
-						node.Expanded = true
-						node.Parent = jobNode
-						jobNode.Children = append(jobNode.Children, node)
-						attached = true
-						break
-					}
-					if wfNode, exists := workflowNodes[parentID]; exists && includedWorkflows[parentID] {
-						unknownJob, exists := unknownJobNodes[parentID]
-						if !exists {
-							unknownJob = &TreeNode{
-								ID:       "unknown-job-" + parentID,
-								Label:    "(unknown job)",
-								Type:     TreeNodeJob,
-								Depth:    3,
-								Expanded: false,
-								Parent:   wfNode,
-							}
-							wfNode.Children = append(wfNode.Children, unknownJob)
-							unknownJobNodes[parentID] = unknownJob
-						}
-						node := assetToTreeNode(vuln, 4)
-						node.Expanded = true
-						node.Parent = unknownJob
-						unknownJob.Children = append(unknownJob.Children, node)
-						attached = true
-						break
-					}
-				}
-			}
-			if attached {
-				break
-			}
-		}
-	}
-
-	for _, secret := range secrets {
-		attached := false
-		for parentID, children := range childMap {
-			for _, childID := range children {
-				if childID == secret.ID {
-					if jobNode, exists := jobNodes[parentID]; exists && includedJobs[parentID] {
-						node := assetToTreeNode(secret, 4)
-						if secret.Name == "GITHUB_TOKEN" || secret.Name == "ACTIONS_RUNTIME_TOKEN" {
-							node.State = TreeStateEphemeral
-						}
-						node.Parent = jobNode
-						jobNode.Children = append(jobNode.Children, node)
-						attached = true
-						break
-					}
-				}
-			}
-			if attached {
-				break
-			}
-		}
-	}
-
-	for _, token := range tokens {
-		attached := false
-		for parentID, children := range childMap {
-			for _, childID := range children {
-				if childID == token.ID {
-					if jobNode, exists := jobNodes[parentID]; exists && includedJobs[parentID] {
-						node := assetToTreeNode(token, 4)
-						node.State = TreeStateEphemeral
-						node.Parent = jobNode
-						jobNode.Children = append(jobNode.Children, node)
-						attached = true
-						break
-					}
-				}
-			}
-			if attached {
-				break
-			}
-		}
-	}
-
-	sortChildren(root)
 	return root
+}
+
+func treeRepoCount(p *pantry.Pantry) int {
+	if p == nil {
+		return 0
+	}
+	return len(p.GetAssetsByType(pantry.AssetRepository))
 }
 
 func (m *Model) ReflattenTree() {

@@ -494,3 +494,66 @@ func TestBuildFilteredTree_CreatesOrgFromRepoProperty(t *testing.T) {
 	assert.Equal(t, TreeNodeOrg, orgNode.Type, "First child should be org")
 	assert.Equal(t, "whooli", orgNode.Label, "Org label should be org name")
 }
+
+func TestBuildFilteredTree_HidesIrrelevantRepoAndWorkflow(t *testing.T) {
+	m := NewModel(Config{})
+	m.pantry = pantry.New()
+
+	org := pantry.NewOrganization("acme", "github")
+	repo := pantry.NewRepository("acme", "api", "github")
+	repoOther := pantry.NewRepository("acme", "docs", "github")
+	workflow := pantry.NewWorkflow(repo.ID, ".github/workflows/deploy.yml")
+	workflowSibling := pantry.NewWorkflow(repo.ID, ".github/workflows/test.yml")
+	workflowOther := pantry.NewWorkflow(repoOther.ID, ".github/workflows/lint.yml")
+	job := pantry.NewJob(workflow.ID, "deploy")
+	secret := pantry.NewSecret("AWS_KEY", job.ID, "github")
+	token := pantry.NewToken("github_token", job.ID, []string{"contents:write"})
+	cloud := pantry.NewCloud("aws", "oidc_trust", "arn:aws:iam::123456789012:role/deploy")
+	vuln := pantry.NewVulnerability("injection", "pkg:github/acme/api", ".github/workflows/deploy.yml", 12)
+
+	for _, asset := range []pantry.Asset{org, repo, repoOther, workflow, workflowSibling, workflowOther, job, secret, token, cloud, vuln} {
+		require.NoError(t, m.pantry.AddAsset(asset))
+	}
+
+	require.NoError(t, m.pantry.AddRelationship(org.ID, repo.ID, pantry.Contains()))
+	require.NoError(t, m.pantry.AddRelationship(org.ID, repoOther.ID, pantry.Contains()))
+	require.NoError(t, m.pantry.AddRelationship(repo.ID, workflow.ID, pantry.Contains()))
+	require.NoError(t, m.pantry.AddRelationship(repo.ID, workflowSibling.ID, pantry.Contains()))
+	require.NoError(t, m.pantry.AddRelationship(repoOther.ID, workflowOther.ID, pantry.Contains()))
+	require.NoError(t, m.pantry.AddRelationship(workflow.ID, job.ID, pantry.Contains()))
+	require.NoError(t, m.pantry.AddRelationship(workflow.ID, vuln.ID, pantry.VulnerableTo("injection", "critical")))
+	require.NoError(t, m.pantry.AddRelationship(job.ID, secret.ID, pantry.Exposes("deploy", "")))
+	require.NoError(t, m.pantry.AddRelationship(job.ID, token.ID, pantry.Exposes("deploy", "")))
+	require.NoError(t, m.pantry.AddRelationship(job.ID, cloud.ID, pantry.Exposes("deploy", "")))
+
+	m.treeFiltered = true
+	m.RebuildTree()
+
+	require.NotNil(t, m.treeRoot)
+	assert.True(t, treeHasNodeID(m.treeRoot, org.ID))
+	assert.True(t, treeHasNodeID(m.treeRoot, repo.ID))
+	assert.True(t, treeHasNodeID(m.treeRoot, workflow.ID))
+	assert.True(t, treeHasNodeID(m.treeRoot, job.ID))
+	assert.True(t, treeHasNodeID(m.treeRoot, secret.ID))
+	assert.True(t, treeHasNodeID(m.treeRoot, token.ID))
+	assert.True(t, treeHasNodeID(m.treeRoot, cloud.ID))
+	assert.True(t, treeHasNodeID(m.treeRoot, vuln.ID))
+	assert.False(t, treeHasNodeID(m.treeRoot, workflowSibling.ID))
+	assert.False(t, treeHasNodeID(m.treeRoot, repoOther.ID))
+	assert.False(t, treeHasNodeID(m.treeRoot, workflowOther.ID))
+}
+
+func treeHasNodeID(root *TreeNode, nodeID string) bool {
+	if root == nil {
+		return false
+	}
+	if root.ID == nodeID {
+		return true
+	}
+	for _, child := range root.Children {
+		if treeHasNodeID(child, nodeID) {
+			return true
+		}
+	}
+	return false
+}

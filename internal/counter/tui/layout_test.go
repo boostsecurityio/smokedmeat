@@ -325,6 +325,21 @@ func TestRenderWaitingView_ShowsWriterCacheStatus(t *testing.T) {
 	assert.Contains(t, out, "Writer cache: armed")
 }
 
+func TestRenderNewStatusBar_ShowsFilterHintWhenFindingsPaneFocused(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 120
+	m.view = ViewFindings
+	m.phase = PhaseRecon
+	m.paneFocus = PaneFocusFindings
+	m.focus = FocusSessions
+	m.treeNodes = []*TreeNode{{ID: "repo:acme/api", Type: TreeNodeRepo, Label: "acme/api"}}
+
+	out := stripANSI(m.renderNewStatusBar())
+
+	assert.Contains(t, out, "hjkl:nav")
+	assert.Contains(t, out, "f:filter")
+}
+
 func TestRenderAnalysisProgressLine_StabilizesRepoProgressPosition(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.width = 120

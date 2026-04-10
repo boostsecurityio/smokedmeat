@@ -14,6 +14,15 @@ import (
 	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 )
 
+const (
+	graphModeAuto     = "auto"
+	graphModeFiltered = "filtered"
+	graphModeFull     = "full"
+
+	graphLargeNodeThreshold = 1000
+	graphLargeEdgeThreshold = 1200
+)
+
 // GraphMessage is the envelope for all graph WebSocket messages.
 type GraphMessage struct {
 	Type string `json:"type"` // "snapshot", "delta", "ping", "pong"
@@ -22,9 +31,14 @@ type GraphMessage struct {
 
 // GraphSnapshot is the initial full graph state sent on connect.
 type GraphSnapshot struct {
-	Version int64       `json:"version"`
-	Nodes   []GraphNode `json:"nodes"`
-	Edges   []GraphEdge `json:"edges"`
+	Version           int64       `json:"version"`
+	Mode              string      `json:"mode"`
+	LargeGraph        bool        `json:"large_graph"`
+	TotalNodes        int         `json:"total_nodes"`
+	TotalEdges        int         `json:"total_edges"`
+	FilterDescription string      `json:"filter_description,omitempty"`
+	Nodes             []GraphNode `json:"nodes"`
+	Edges             []GraphEdge `json:"edges"`
 }
 
 // GraphDelta contains incremental changes to the graph.
@@ -69,6 +83,124 @@ type GraphEdge struct {
 	Target string `json:"target"`
 	Type   string `json:"type"`
 	Label  string `json:"label,omitempty"`
+}
+
+type graphSelection struct {
+	mode              string
+	largeGraph        bool
+	totalNodes        int
+	totalEdges        int
+	filterDescription string
+	nodes             []GraphNode
+	edges             []GraphEdge
+}
+
+func normalizeGraphMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case graphModeFiltered:
+		return graphModeFiltered
+	case graphModeFull:
+		return graphModeFull
+	default:
+		return graphModeAuto
+	}
+}
+
+func graphModeFromData(data any, fallback string) string {
+	switch typed := data.(type) {
+	case string:
+		return normalizeGraphMode(typed)
+	case map[string]any:
+		if mode, ok := typed["mode"].(string); ok {
+			return normalizeGraphMode(mode)
+		}
+	}
+	return normalizeGraphMode(fallback)
+}
+
+func buildGraphSelection(p *pantry.Pantry, requestedMode string) graphSelection {
+	mode := normalizeGraphMode(requestedMode)
+	if p == nil {
+		return graphSelection{mode: graphModeFull}
+	}
+
+	totalNodes := p.Size()
+	totalEdges := p.EdgeCount()
+	largeGraph := totalNodes >= graphLargeNodeThreshold || totalEdges >= graphLargeEdgeThreshold
+
+	resolvedMode := graphModeFull
+	switch mode {
+	case graphModeFiltered:
+		resolvedMode = graphModeFiltered
+	case graphModeAuto:
+		if largeGraph {
+			resolvedMode = graphModeFiltered
+		}
+	}
+
+	source := p
+	filterDescription := ""
+	if resolvedMode == graphModeFiltered {
+		filtered := p.VulnBearingSubgraph()
+		if filtered.Size() > 0 {
+			source = filtered
+		} else {
+			resolvedMode = graphModeFull
+			switch mode {
+			case graphModeFiltered:
+				filterDescription = "No vuln-bearing paths found. Showing full graph."
+			case graphModeAuto:
+				if largeGraph {
+					filterDescription = "Large graph detected. Showing full graph because no vuln-bearing paths are available."
+				}
+			}
+		}
+	}
+
+	if filterDescription == "" && resolvedMode == graphModeFiltered {
+		if mode == graphModeAuto && largeGraph {
+			filterDescription = "Large graph detected. Showing vuln-bearing paths only."
+		} else {
+			filterDescription = "Showing vuln-bearing paths only."
+		}
+	}
+
+	assets := source.AllAssets()
+	relationships := source.AllRelationships()
+
+	nodes := make([]GraphNode, 0, len(assets))
+	for _, asset := range assets {
+		nodes = append(nodes, AssetToGraphNode(asset))
+	}
+
+	edges := make([]GraphEdge, 0, len(relationships))
+	for _, edge := range relationships {
+		edges = append(edges, EdgeToGraphEdge(edge))
+	}
+
+	return graphSelection{
+		mode:              resolvedMode,
+		largeGraph:        largeGraph,
+		totalNodes:        totalNodes,
+		totalEdges:        totalEdges,
+		filterDescription: filterDescription,
+		nodes:             nodes,
+		edges:             edges,
+	}
+}
+
+func buildGraphSnapshot(p *pantry.Pantry, version int64, requestedMode string) GraphSnapshot {
+	selection := buildGraphSelection(p, requestedMode)
+	return GraphSnapshot{
+		Version:           version,
+		Mode:              selection.mode,
+		LargeGraph:        selection.largeGraph,
+		TotalNodes:        selection.totalNodes,
+		TotalEdges:        selection.totalEdges,
+		FilterDescription: selection.filterDescription,
+		Nodes:             selection.nodes,
+		Edges:             selection.edges,
+	}
 }
 
 // AssetToGraphNode converts a pantry Asset to a GraphNode.

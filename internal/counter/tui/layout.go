@@ -858,6 +858,7 @@ func (m *Model) contextStatusHints() string {
 	switch m.paneFocus {
 	case PaneFocusFindings:
 		hints += navHint
+		hints += helpKeyStyle.Render("f") + helpDescStyle.Render(":filter ")
 		if scopeType, _ := m.selectedDeepAnalyzeScope(); scopeType != "" {
 			hints += helpKeyStyle.Render("d") + helpDescStyle.Render(":deep ")
 		}

@@ -62,7 +62,7 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
             margin-right: 8px;
             border-radius: 2px;
         }
-        .layout-btn {
+        .layout-btn, .mode-btn {
             background: #2a2a4e;
             border: 1px solid #444;
             color: #eee;
@@ -73,8 +73,28 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
             font-size: 11px;
             transition: all 0.2s;
         }
-        .layout-btn:hover { background: #3a3a5e; }
-        .layout-btn.active { background: #e94560; border-color: #e94560; }
+        .layout-btn:hover, .mode-btn:hover { background: #3a3a5e; }
+        .layout-btn.active, .mode-btn.active { background: #e94560; border-color: #e94560; }
+        .button-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        .scope-text {
+            line-height: 1.4;
+        }
+        #filter-status {
+            color: #fff;
+            margin-bottom: 6px;
+        }
+        #filter-description {
+            color: #bbb;
+            margin-top: 8px;
+        }
+        #layout-warning {
+            color: #ffd700;
+            margin-top: 8px;
+        }
 
         #stats {
             position: absolute;
@@ -144,6 +164,16 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
             <button class="layout-btn" data-layout="cose">Force</button>
         </div>
         <div class="control-section">
+            <h4>Scope</h4>
+            <div id="filter-status" class="scope-text">Loading graph...</div>
+            <div class="button-row">
+                <button class="mode-btn" data-mode="filtered">Vuln Paths</button>
+                <button class="mode-btn" data-mode="full">Full Graph</button>
+            </div>
+            <div id="filter-description" class="scope-text"></div>
+            <div id="layout-warning" class="scope-text"></div>
+        </div>
+        <div class="control-section">
             <h4>Types</h4>
             <div class="legend-item" data-type="organization"><div class="legend-color" style="background: #ff7f50;"></div>Organization</div>
             <div class="legend-item" data-type="repository"><div class="legend-color" style="background: #4a9eff;"></div>Repository</div>
@@ -191,6 +221,10 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
         let ws;
         let graphVersion = 0;
         let reconnectAttempts = 0;
+        let requestedGraphMode = readGraphMode();
+        let resolvedGraphMode = 'full';
+        let graphMeta = { totalNodes: 0, totalEdges: 0, largeGraph: false, filterDescription: '' };
+        let filteredRefreshTimer = null;
 
         function initCytoscape() {
             cy = cytoscape({
@@ -298,9 +332,12 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
             const token = currentUrl.searchParams.get('token');
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             let wsUrl = wsProtocol + '//' + window.location.host + '/graph/ws';
+            const wsParams = new URLSearchParams();
             if (token) {
-                wsUrl += '?token=' + encodeURIComponent(token);
+                wsParams.set('token', token);
             }
+            wsParams.set('mode', requestedGraphMode);
+            wsUrl += '?' + wsParams.toString();
 
             updateConnectionStatus('connecting');
             ws = new WebSocket(wsUrl);
@@ -346,6 +383,14 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
 
         function handleSnapshot(data) {
             graphVersion = data.version;
+            resolvedGraphMode = data.mode || 'full';
+            graphMeta = {
+                totalNodes: data.total_nodes || 0,
+                totalEdges: data.total_edges || 0,
+                largeGraph: !!data.large_graph,
+                filterDescription: data.filter_description || ''
+            };
+            updateScopeControls();
             cy.elements().remove();
 
             const elements = [];
@@ -381,6 +426,11 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
         }
 
         function handleDelta(data) {
+            if (resolvedGraphMode !== 'full' || prefersFilteredSnapshots()) {
+                scheduleFilteredRefresh();
+                return;
+            }
+
             graphVersion = data.version;
 
             (data.added_nodes || []).forEach(node => {
@@ -432,7 +482,7 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
                 cy.getElementById(ref.source + '-' + ref.target).remove();
             });
 
-            if ((data.added_nodes || []).length > 2) {
+            if (!graphMeta.largeGraph && (data.added_nodes || []).length > 2) {
                 runLayout();
             }
             updateStats();
@@ -440,7 +490,7 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
 
         function runLayout() {
             const activeLayout = document.querySelector('.layout-btn.active').dataset.layout;
-            cy.layout(layouts[activeLayout]).run();
+            cy.layout(layoutConfig(activeLayout)).run();
         }
 
         function highlightConnected(node) {
@@ -480,7 +530,12 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
         function updateStats() {
             const nodes = cy.nodes().length;
             const edges = cy.edges().length;
-            document.getElementById('stats').textContent = nodes + ' nodes, ' + edges + ' edges (v' + graphVersion + ')';
+            if (resolvedGraphMode === 'filtered') {
+                document.getElementById('stats').textContent =
+                    'Filtered: ' + nodes + '/' + graphMeta.totalNodes + ' nodes, ' + edges + '/' + graphMeta.totalEdges + ' edges (v' + graphVersion + ')';
+                return;
+            }
+            document.getElementById('stats').textContent = 'Full: ' + nodes + ' nodes, ' + edges + ' edges (v' + graphVersion + ')';
         }
 
         function updateConnectionStatus(status) {
@@ -499,6 +554,109 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
             return label.substring(0, maxLen - 1) + '...';
         }
 
+        function readGraphMode() {
+            const currentUrl = new URL(window.location.href);
+            const mode = currentUrl.searchParams.get('mode');
+            if (mode === 'filtered' || mode === 'full') {
+                return mode;
+            }
+            return 'auto';
+        }
+
+        function updateGraphURLMode(mode) {
+            const currentUrl = new URL(window.location.href);
+            if (mode === 'auto') {
+                currentUrl.searchParams.delete('mode');
+            } else {
+                currentUrl.searchParams.set('mode', mode);
+            }
+            window.history.replaceState({}, '', currentUrl.toString());
+        }
+
+        function requestSnapshot(mode) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                return;
+            }
+            ws.send(JSON.stringify({
+                type: 'snapshot_request',
+                data: { mode: mode }
+            }));
+        }
+
+        function scheduleFilteredRefresh() {
+            if (filteredRefreshTimer) {
+                return;
+            }
+            filteredRefreshTimer = window.setTimeout(function() {
+                filteredRefreshTimer = null;
+                requestSnapshot(requestedGraphMode);
+            }, 250);
+        }
+
+        function prefersFilteredSnapshots() {
+            return requestedGraphMode === 'filtered' || (requestedGraphMode === 'auto' && graphMeta.largeGraph);
+        }
+
+        function setGraphMode(mode) {
+            if (mode !== 'filtered' && mode !== 'full') {
+                return;
+            }
+            if (mode === 'full' && graphMeta.largeGraph) {
+                const proceed = window.confirm('This graph is large. Full mode may be slow and harder to explore. Continue?');
+                if (!proceed) {
+                    return;
+                }
+            }
+            requestedGraphMode = mode;
+            updateGraphURLMode(mode);
+            requestSnapshot(mode);
+        }
+
+        function updateScopeControls() {
+            const status = document.getElementById('filter-status');
+            const description = document.getElementById('filter-description');
+            const warning = document.getElementById('layout-warning');
+
+            let statusText = resolvedGraphMode === 'filtered' ? 'Filtered graph' : 'Full graph';
+            if (requestedGraphMode === 'auto' && graphMeta.largeGraph) {
+                statusText += ' (auto)';
+            }
+            status.textContent = statusText;
+            description.textContent = graphMeta.filterDescription || (resolvedGraphMode === 'filtered' ? 'Showing vuln-bearing paths only.' : 'Showing the full graph.');
+
+            if (graphMeta.largeGraph) {
+                if (resolvedGraphMode === 'filtered') {
+                    warning.textContent = 'Large graph detected. Filtered mode keeps the first view smaller and safer.';
+                } else {
+                    warning.textContent = 'Full mode on a large graph may be slow. Force layout is the riskiest option.';
+                }
+            } else {
+                warning.textContent = '';
+            }
+
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === resolvedGraphMode);
+            });
+        }
+
+        function layoutConfig(name) {
+            const config = Object.assign({}, layouts[name]);
+            if (!graphMeta.largeGraph) {
+                return config;
+            }
+            config.animate = false;
+            if (name === 'dagre') {
+                config.nodeSep = 25;
+                config.rankSep = 50;
+            }
+            if (name === 'cose') {
+                config.numIter = 250;
+                config.nodeRepulsion = 4000;
+                config.idealEdgeLength = 70;
+            }
+            return config;
+        }
+
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
@@ -507,9 +665,21 @@ const graphCytoscapeHTML = `<!DOCTYPE html>
 
         document.querySelectorAll('.layout-btn').forEach(btn => {
             btn.addEventListener('click', function() {
+                if (graphMeta.largeGraph && this.dataset.layout === 'cose') {
+                    const proceed = window.confirm('Force layout can be slow on large graphs. Continue?');
+                    if (!proceed) {
+                        return;
+                    }
+                }
                 document.querySelectorAll('.layout-btn').forEach(b => b.classList.remove('active'));
                 this.classList.add('active');
                 runLayout();
+            });
+        });
+
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                setGraphMode(this.dataset.mode);
             });
         });
 

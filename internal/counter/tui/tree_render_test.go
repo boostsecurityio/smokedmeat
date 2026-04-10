@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 )
 
 func TestCollapsedJobSummary(t *testing.T) {
@@ -314,4 +316,59 @@ func TestRenderVulnDetails_FallsBackToPathLineMatch(t *testing.T) {
 	require.NotEmpty(t, lines)
 	assert.Contains(t, strings.Join(lines, "\n"), "Trigger:")
 	assert.Contains(t, strings.Join(lines, "\n"), "workflow_dispatch")
+}
+
+func TestRenderAttackTree_ShowsFilteredBannerWithRepoCounts(t *testing.T) {
+	m := NewModel(Config{})
+	m.pantry = pantry.New()
+
+	org := pantry.NewOrganization("acme", "github")
+	repo := pantry.NewRepository("acme", "api", "github")
+	repoOther := pantry.NewRepository("acme", "docs", "github")
+	workflow := pantry.NewWorkflow(repo.ID, ".github/workflows/deploy.yml")
+	workflowOther := pantry.NewWorkflow(repoOther.ID, ".github/workflows/lint.yml")
+	vuln := pantry.NewVulnerability("injection", "pkg:github/acme/api", ".github/workflows/deploy.yml", 12)
+
+	for _, asset := range []pantry.Asset{org, repo, repoOther, workflow, workflowOther, vuln} {
+		require.NoError(t, m.pantry.AddAsset(asset))
+	}
+
+	require.NoError(t, m.pantry.AddRelationship(org.ID, repo.ID, pantry.Contains()))
+	require.NoError(t, m.pantry.AddRelationship(org.ID, repoOther.ID, pantry.Contains()))
+	require.NoError(t, m.pantry.AddRelationship(repo.ID, workflow.ID, pantry.Contains()))
+	require.NoError(t, m.pantry.AddRelationship(repoOther.ID, workflowOther.ID, pantry.Contains()))
+	require.NoError(t, m.pantry.AddRelationship(workflow.ID, vuln.ID, pantry.VulnerableTo("injection", "critical")))
+
+	m.treeFiltered = true
+	m.RebuildTree()
+
+	rendered := m.RenderAttackTree(100, 8)
+
+	assert.Contains(t, rendered, "FILTERED TREE")
+	assert.Contains(t, rendered, "ON - showing 1 of 2 repos linked to vulnerabilities")
+	assert.Contains(t, rendered, "Press f for the full tree")
+}
+
+func TestRenderAttackTree_ShowsFilterBannerWhenFullTreeIsVisible(t *testing.T) {
+	m := NewModel(Config{})
+	m.pantry = pantry.New()
+
+	org := pantry.NewOrganization("acme", "github")
+	repo := pantry.NewRepository("acme", "api", "github")
+	workflow := pantry.NewWorkflow(repo.ID, ".github/workflows/deploy.yml")
+
+	for _, asset := range []pantry.Asset{org, repo, workflow} {
+		require.NoError(t, m.pantry.AddAsset(asset))
+	}
+
+	require.NoError(t, m.pantry.AddRelationship(org.ID, repo.ID, pantry.Contains()))
+	require.NoError(t, m.pantry.AddRelationship(repo.ID, workflow.ID, pantry.Contains()))
+
+	m.RebuildTree()
+
+	rendered := m.RenderAttackTree(100, 8)
+
+	assert.Contains(t, rendered, "FILTERED TREE")
+	assert.Contains(t, rendered, "OFF - showing all 1 repo")
+	assert.Contains(t, rendered, "Press f to show only repos with vulnerabilities")
 }

@@ -4,6 +4,7 @@
 package kitchen
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -139,6 +140,94 @@ func TestGraphCytoscapeHTML_UsesTooltipProperties(t *testing.T) {
 	assert.Contains(t, graphCytoscapeHTML, "tooltipProperties: node.tooltip_properties")
 	assert.Contains(t, graphCytoscapeHTML, "Object.entries(data.tooltipProperties)")
 	assert.False(t, strings.Contains(graphCytoscapeHTML, "String(v)"))
+}
+
+func TestBuildGraphSelection_AutoUsesFilteredModeForLargeGraph(t *testing.T) {
+	p := pantry.New()
+
+	org := pantry.NewOrganization("acme", "github")
+	repo := pantry.NewRepository("acme", "api", "github")
+	workflow := pantry.NewWorkflow(repo.ID, ".github/workflows/deploy.yml")
+	job := pantry.NewJob(workflow.ID, "deploy")
+	secret := pantry.NewSecret("AWS_KEY", job.ID, "github")
+	vuln := pantry.NewVulnerability("injection", "pkg:github/acme/api", ".github/workflows/deploy.yml", 12)
+
+	for _, asset := range []pantry.Asset{org, repo, workflow, job, secret, vuln} {
+		assert.NoError(t, p.AddAsset(asset))
+	}
+
+	assert.NoError(t, p.AddRelationship(org.ID, repo.ID, pantry.Contains()))
+	assert.NoError(t, p.AddRelationship(repo.ID, workflow.ID, pantry.Contains()))
+	assert.NoError(t, p.AddRelationship(workflow.ID, job.ID, pantry.Contains()))
+	assert.NoError(t, p.AddRelationship(workflow.ID, vuln.ID, pantry.VulnerableTo("injection", "critical")))
+	assert.NoError(t, p.AddRelationship(job.ID, secret.ID, pantry.Exposes("deploy", "")))
+
+	irrelevantRepo := ""
+	for i := 0; i <= graphLargeNodeThreshold; i++ {
+		otherRepo := pantry.NewRepository("acme", fmt.Sprintf("repo-%04d", i), "github")
+		otherWorkflow := pantry.NewWorkflow(otherRepo.ID, fmt.Sprintf(".github/workflows/%04d.yml", i))
+		assert.NoError(t, p.AddAsset(otherRepo))
+		assert.NoError(t, p.AddAsset(otherWorkflow))
+		assert.NoError(t, p.AddRelationship(org.ID, otherRepo.ID, pantry.Contains()))
+		assert.NoError(t, p.AddRelationship(otherRepo.ID, otherWorkflow.ID, pantry.Contains()))
+		if i == 0 {
+			irrelevantRepo = otherRepo.ID
+		}
+	}
+
+	selection := buildGraphSelection(p, graphModeAuto)
+
+	assert.Equal(t, graphModeFiltered, selection.mode)
+	assert.True(t, selection.largeGraph)
+	assert.Equal(t, p.Size(), selection.totalNodes)
+	assert.Equal(t, p.EdgeCount(), selection.totalEdges)
+	assert.Less(t, len(selection.nodes), selection.totalNodes)
+	assert.Contains(t, selection.filterDescription, "Large graph detected")
+
+	ids := make(map[string]struct{}, len(selection.nodes))
+	for _, node := range selection.nodes {
+		ids[node.ID] = struct{}{}
+	}
+
+	_, hasRepo := ids[repo.ID]
+	_, hasWorkflow := ids[workflow.ID]
+	_, hasJob := ids[job.ID]
+	_, hasSecret := ids[secret.ID]
+	_, hasVuln := ids[vuln.ID]
+	_, hasIrrelevantRepo := ids[irrelevantRepo]
+
+	assert.True(t, hasRepo)
+	assert.True(t, hasWorkflow)
+	assert.True(t, hasJob)
+	assert.True(t, hasSecret)
+	assert.True(t, hasVuln)
+	assert.False(t, hasIrrelevantRepo)
+}
+
+func TestBuildGraphSelection_FilteredFallsBackToFullWithoutVulnerabilities(t *testing.T) {
+	p := pantry.New()
+
+	repo := pantry.NewRepository("acme", "api", "github")
+	workflow := pantry.NewWorkflow(repo.ID, ".github/workflows/ci.yml")
+
+	assert.NoError(t, p.AddAsset(repo))
+	assert.NoError(t, p.AddAsset(workflow))
+	assert.NoError(t, p.AddRelationship(repo.ID, workflow.ID, pantry.Contains()))
+
+	selection := buildGraphSelection(p, graphModeFiltered)
+
+	assert.Equal(t, graphModeFull, selection.mode)
+	assert.Equal(t, p.Size(), len(selection.nodes))
+	assert.Equal(t, p.EdgeCount(), len(selection.edges))
+	assert.Contains(t, selection.filterDescription, "No vuln-bearing paths found")
+}
+
+func TestGraphCytoscapeHTML_ContainsGraphModeControls(t *testing.T) {
+	assert.Contains(t, graphCytoscapeHTML, "data-mode=\"filtered\"")
+	assert.Contains(t, graphCytoscapeHTML, "data-mode=\"full\"")
+	assert.Contains(t, graphCytoscapeHTML, "setGraphMode")
+	assert.Contains(t, graphCytoscapeHTML, "prefersFilteredSnapshots")
+	assert.Contains(t, graphCytoscapeHTML, "resolvedGraphMode !== 'full' || prefersFilteredSnapshots()")
 }
 
 func TestAssetToGraphNode_RepositorySSHAccessLabel(t *testing.T) {

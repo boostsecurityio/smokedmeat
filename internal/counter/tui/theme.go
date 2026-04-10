@@ -189,6 +189,14 @@ func ApplyTheme(name ThemeName) {
 		Foreground(selectionFgColor).
 		Background(blue1Color).
 		Bold(true)
+	treeFilterBannerOnStyle = lipgloss.NewStyle().
+		Foreground(bestContrastColor(successColorVal, fgColor, baseBgColor)).
+		Background(successColorVal).
+		Bold(true)
+	treeFilterBannerOffStyle = lipgloss.NewStyle().
+		Foreground(bestContrastColor(secondaryColor, fgColor, baseBgColor)).
+		Background(mutedColorVal).
+		Bold(true)
 	focusIndicatorStyle = lipgloss.NewStyle().Foreground(accentColor)
 }
 

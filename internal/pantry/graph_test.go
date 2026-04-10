@@ -187,6 +187,67 @@ func TestPantry_AllRelationships(t *testing.T) {
 	assert.True(t, foundExposes)
 }
 
+func TestPantry_VulnBearingSubgraph_HidesIrrelevantRepoAndWorkflow(t *testing.T) {
+	p := New()
+
+	org := NewOrganization("acme", "github")
+	repo := NewRepository("acme", "api", "github")
+	repoOther := NewRepository("acme", "docs", "github")
+	workflow := NewWorkflow(repo.ID, ".github/workflows/deploy.yml")
+	workflowSibling := NewWorkflow(repo.ID, ".github/workflows/test.yml")
+	workflowOther := NewWorkflow(repoOther.ID, ".github/workflows/lint.yml")
+	job := NewJob(workflow.ID, "deploy")
+	secret := NewSecret("AWS_KEY", job.ID, "github")
+	token := NewToken("github_token", job.ID, []string{"contents:write"})
+	cloud := NewCloud("aws", "oidc_trust", "arn:aws:iam::123456789012:role/deploy")
+	vuln := NewVulnerability("injection", "pkg:github/acme/api", ".github/workflows/deploy.yml", 12)
+
+	for _, asset := range []Asset{org, repo, repoOther, workflow, workflowSibling, workflowOther, job, secret, token, cloud, vuln} {
+		require.NoError(t, p.AddAsset(asset))
+	}
+
+	require.NoError(t, p.AddRelationship(org.ID, repo.ID, Contains()))
+	require.NoError(t, p.AddRelationship(org.ID, repoOther.ID, Contains()))
+	require.NoError(t, p.AddRelationship(repo.ID, workflow.ID, Contains()))
+	require.NoError(t, p.AddRelationship(repo.ID, workflowSibling.ID, Contains()))
+	require.NoError(t, p.AddRelationship(repoOther.ID, workflowOther.ID, Contains()))
+	require.NoError(t, p.AddRelationship(workflow.ID, job.ID, Contains()))
+	require.NoError(t, p.AddRelationship(workflow.ID, vuln.ID, VulnerableTo("injection", "critical")))
+	require.NoError(t, p.AddRelationship(job.ID, secret.ID, Exposes("deploy", "")))
+	require.NoError(t, p.AddRelationship(job.ID, token.ID, Exposes("deploy", "")))
+	require.NoError(t, p.AddRelationship(job.ID, cloud.ID, Exposes("deploy", "")))
+
+	filtered := p.VulnBearingSubgraph()
+
+	assert.True(t, filtered.HasAsset(org.ID))
+	assert.True(t, filtered.HasAsset(repo.ID))
+	assert.True(t, filtered.HasAsset(workflow.ID))
+	assert.True(t, filtered.HasAsset(job.ID))
+	assert.True(t, filtered.HasAsset(secret.ID))
+	assert.True(t, filtered.HasAsset(token.ID))
+	assert.True(t, filtered.HasAsset(cloud.ID))
+	assert.True(t, filtered.HasAsset(vuln.ID))
+	assert.False(t, filtered.HasAsset(workflowSibling.ID))
+	assert.False(t, filtered.HasAsset(repoOther.ID))
+	assert.False(t, filtered.HasAsset(workflowOther.ID))
+}
+
+func TestPantry_VulnBearingSubgraph_NoVulnerabilities(t *testing.T) {
+	p := New()
+
+	repo := NewRepository("acme", "api", "github")
+	workflow := NewWorkflow(repo.ID, ".github/workflows/ci.yml")
+
+	require.NoError(t, p.AddAsset(repo))
+	require.NoError(t, p.AddAsset(workflow))
+	require.NoError(t, p.AddRelationship(repo.ID, workflow.ID, Contains()))
+
+	filtered := p.VulnBearingSubgraph()
+
+	assert.Equal(t, 0, filtered.Size())
+	assert.Equal(t, 0, filtered.EdgeCount())
+}
+
 func TestPantry_GetNeighbors(t *testing.T) {
 	p := New()
 
