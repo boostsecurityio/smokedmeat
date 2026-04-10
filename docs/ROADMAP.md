@@ -2,9 +2,9 @@
 
 CI/CD Red Team Framework
 
-Last updated: 2026-04-08
+Last updated: 2026-04-10
 
-Status: `🔲` planned, `💡` idea
+Status: `✅` shipped, `🔄` in progress, `🔲` planned, `💡` idea
 Spec: `Task` = planned in `docs/tasks`, `Ref` = related reference, `Idea` = tracked only
 
 ## Product Snapshot
@@ -13,6 +13,8 @@ Spec: `Task` = planned in `docs/tasks`, `Ref` = related reference, `Idea` = trac
 - GitHub Actions exploitation is shipped across PR, issue, comment, LOTP, and `workflow_dispatch`.
 - Cloud pivots are shipped for AWS, GCP, and Azure, including durable sessions and shell/export flows.
 - SSH pivots, graph view, and the Counter UI migration are shipped.
+- Large-org tree and graph filtering is shipped: vuln-bearing path filtering in Counter and safe browser graph defaults above org size thresholds.
+- OIDC trust cloud node tree placement is fixed: `oidc_trust/...` nodes now attach under their associated workflow job.
 
 ## Release Window
 
@@ -23,20 +25,18 @@ Spec: `Task` = planned in `docs/tasks`, `Ref` = related reference, `Idea` = trac
 - Post-freeze scope: docs, tutorial, screenshots, screencast, release notes, and packaging only
 - Post-freeze tracking: [docs/tasks/release-prep-and-launch-materials.md](tasks/release-prep-and-launch-materials.md)
 
-## Before Feature Freeze
+## Shipped Pre-Freeze
 
-This is the recommended pre-freeze queue. Only items that are realistically shippable and helpful to beta testers before April 10, 2026 should stay here.
-
-| Priority | Item | Status | Scope | Spec |
-|----------|------|--------|-------|------|
-| 1 | Large-org tree and graph filtering | 🔲 | Large orgs are not practically usable today. Change the existing tree filter to hide nodes with no vuln-bearing path, and default the browser graph to a safer filtered mode above a size threshold. | Task: [docs/tasks/browser-graph-filtering-and-usability.md](tasks/browser-graph-filtering-and-usability.md) |
-| 2 | OIDC trust cloud node tree placement | 🔲 | Fix the vuln tree so `oidc_trust/...` cloud nodes attach under their associated workflow job instead of dangling at the bottom as root-level cloud leaves. | Task: [docs/tasks/oidc-trust-cloud-node-tree-placement.md](tasks/oidc-trust-cloud-node-tree-placement.md) |
+| Item | Spec |
+|------|------|
+| ✅ Large-org tree and graph filtering | [docs/tasks/browser-graph-filtering-and-usability.md](tasks/browser-graph-filtering-and-usability.md) |
+| ✅ OIDC trust cloud node tree placement | [docs/tasks/oidc-trust-cloud-node-tree-placement.md](tasks/oidc-trust-cloud-node-tree-placement.md) |
 
 ## Planned Backlog
 
 | Status | Item | Scope | Spec |
 |--------|------|-------|------|
-| 🔲 | Release prep and launch materials | Tutorial, screenshots, screencast, release notes, blog article inputs, and packaging verification. | Task: [docs/tasks/release-prep-and-launch-materials.md](tasks/release-prep-and-launch-materials.md) |
+| 🔄 | Release prep and launch materials | Blog article finishing. Screencast remaining. Tutorial, screenshots, release notes, and packaging tracked here. | Task: [docs/tasks/release-prep-and-launch-materials.md](tasks/release-prep-and-launch-materials.md) |
 | 🔲 | Counter / Kitchen boundary refactor | Audit the split, move client-neutral logic toward Kitchen, and tighten shared contracts. | Task: [docs/tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
 | 🔲 | Shared analysis progress phase constants | Move `workflow_analysis`, `secret_scan`, and `import` into one shared Kitchen ↔ Counter protocol definition so progress rendering cannot drift on string changes. | Ref: [docs/tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
 | 🔲 | Shared analysis progress payload contract | Deduplicate `AnalysisProgressPayload` across Kitchen and Counter so the WebSocket protocol shape is defined once and the client/server contract stays in lockstep. | Ref: [docs/tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
