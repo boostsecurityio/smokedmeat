@@ -1,4 +1,4 @@
-# Embedded Shell, Native Go E2E, and VHS Walkthrough Recording
+# Embedded Shell And Native Go E2E
 
 ## Why This Exists
 
@@ -30,16 +30,15 @@ This task exists to close that gap by moving the terminal boundary inside Counte
 
 ## Product Goal
 
-Replace the raw subprocess handoff for `cloud shell` and `ssh shell` with an embedded shell takeover that remains visually and operationally inside SmokedMeat.
+Replace the raw subprocess handoff for `cloud shell` and `ssh shell` with an embedded shell mode that remains visually and operationally inside SmokedMeat.
 
 The intended end state is:
 
-- `cloud shell` opens a near-full-screen takeover panel inside Counter
+- `cloud shell` opens a near-full-screen shell panel inside Counter
 - the content area is a real PTY-backed shell rendered through a terminal emulator
-- SmokedMeat still owns the outer frame, status, escape chord, and recorder
+- SmokedMeat still owns the outer frame, status, and escape chord
 - tab completion, shell editing, resize, paste, and shell exit/re-entry work as real shell behaviors
 - the primary E2E harness becomes native Go and no longer depends on tmux
-- the operator can record a walkthrough organically and export it as a VHS `.tape` for GIF generation
 
 ## Non-Goals
 
@@ -53,8 +52,9 @@ Specifically out of scope for the first slice:
 - copy mode as a large subsystem
 - a general-purpose terminal manager
 - replacing Docker isolation for the shell itself
+- making walkthrough recording a release blocker for the shell and E2E work
 
-The goal is one excellent embedded shell takeover, not a full terminal environment.
+The goal is one excellent embedded shell mode, not a full terminal environment.
 
 ## Current State
 
@@ -95,7 +95,7 @@ Benefits:
 
 ### 2. Better shell UX
 
-An embedded takeover lets SmokedMeat keep visual ownership while still presenting a real shell.
+An embedded shell mode lets SmokedMeat keep visual ownership while still presenting a real shell.
 
 Benefits:
 
@@ -104,9 +104,9 @@ Benefits:
 - shell state and Counter state can coexist naturally
 - future features such as markers, session status, and recording become straightforward
 
-### 3. Better demo workflow
+### 3. Better future demo workflow
 
-Once the full flow stays inside the app, it becomes possible to record the walkthrough as an app-level artifact rather than a terminal hack.
+Once the full flow stays inside the app, it becomes possible to add recording later as an app-level artifact rather than a terminal hack.
 
 Benefits:
 
@@ -115,12 +115,14 @@ Benefits:
 - generate GIF or video artifacts through VHS
 - keep demos aligned with the real product flow
 
+This is a useful follow-on, but not required for the core shell and E2E milestone.
+
 ## Prior Art And Direction
 
 Two external references are directly relevant:
 
-- TUIOS proves that Bubble Tea can host a rich PTY/terminal UX with recording and replay concepts
-- VHS provides a strong target format for terminal-demo rendering and GIF export
+- TUIOS proves that Bubble Tea can host a rich PTY/terminal UX
+- VHS is a possible later export target for terminal-demo rendering and GIF export
 
 This task should treat those as prior art, not as a requirement to vendor either project wholesale.
 
@@ -152,22 +154,22 @@ The shell content should be rendered through a VT emulator inside Counter.
 Counter should continue rendering the outer screen:
 
 - dimmed or frozen background
-- large shell takeover panel
+- large shell panel
 - shell status header
 - footer with exit hint and optional recording state
 
-This must not be a tiny dialog. It should look like a modal takeover that uses roughly 90-95% of the terminal.
+This must not be a tiny dialog. It should look like a large modal shell panel that uses roughly 90-95% of the terminal.
 
 ### Focus And Key Routing
 
-When the shell takeover is active:
+When the shell mode is active:
 
 - printable keys go to the shell
 - `Tab` goes to the shell for completion
 - arrows, ctrl keys, paste, and resize go to the shell
 - Counter shortcuts should not steal input
 
-One explicit app-level escape chord should remain reserved to close the takeover and return to Counter.
+One explicit app-level escape chord should remain reserved to close the shell mode and return to Counter.
 
 ### Completion And Shell Bootstrap
 
@@ -184,9 +186,9 @@ This matters for both nested and non-nested runs.
 
 If Counter ever runs from a container while launching a Dockerized shell, the session root must be daemon-visible. A process-local temp dir is not enough in that mode. The shell mount source must be a host-visible bind mount or named volume.
 
-### Recorder And VHS Export
+### Optional Recording Follow-On
 
-Add a recorder at the Counter boundary, not at the tmux boundary.
+If recording is added later, it should sit at the Counter boundary, not at the tmux boundary.
 
 The recorder should capture:
 
@@ -201,9 +203,9 @@ The recorder should capture:
 The recorder should export:
 
 - a raw SmokedMeat recording artifact for debugging and editing
-- a compiled VHS `.tape` for playback and GIF/video generation
+- a compiled VHS `.tape` for playback and GIF/video generation, if that export target is still the best fit at implementation time
 
-## Suggested UX For Recording
+## Possible Follow-On UX For Recording
 
 Keep this simple and global.
 
@@ -213,7 +215,7 @@ Suggested first-pass bindings:
 - `F9` insert chapter marker
 - `F10` insert screenshot marker
 
-These are simpler than multi-key prefix systems and can remain available even while the shell takeover owns normal typing.
+These are simpler than multi-key prefix systems and can remain available even while the shell mode owns normal typing.
 
 ## Task Breakdown
 
@@ -222,9 +224,8 @@ These are simpler than multi-key prefix systems and can remain available even wh
 Write a short ADR that says:
 
 - tmux is no longer the primary E2E driver
-- `ExecProcess` shell handoff is replaced by embedded shell takeover
+- `ExecProcess` shell handoff is replaced by embedded shell mode
 - Docker remains the shell isolation boundary
-- recording is an explicit product goal
 
 Done when:
 
@@ -241,7 +242,7 @@ Done when:
 
 ### 3. Replace Raw Shell Handoff With Embedded Takeover
 
-Move `cloud shell` and `ssh shell` from subprocess suspension to in-app terminal takeover.
+Move `cloud shell` and `ssh shell` from subprocess suspension to an in-app terminal shell mode.
 
 Done when:
 
@@ -258,3 +259,13 @@ Done when:
 - `Tab` completion works in the embedded shell
 - completion works in the normal Docker-backed operator flow
 - completion support is explicitly installed and bootstrapped
+
+### 5. Optional Recording Follow-On
+
+Once the embedded shell mode and native E2E path are stable, add recording only if it still pulls its weight.
+
+Done when:
+
+- recording no longer depends on tmux
+- the exported artifact format is simple and maintainable
+- recording remains a bonus layer, not a blocker for shell or E2E completion
