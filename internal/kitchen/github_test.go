@@ -334,6 +334,39 @@ func TestBuildPRContent_AllContexts(t *testing.T) {
 	}
 }
 
+func TestBuildLOTPPRContent_Default(t *testing.T) {
+	title, body := buildLOTPPRContent(nil)
+
+	assert.Equal(t, "chore: update build config", title)
+	assert.Contains(t, body, "Build Configuration Update")
+}
+
+func TestBuildLOTPPRContent_PrependsPullRequestTitleGate(t *testing.T) {
+	vuln := &VulnerabilityInfo{
+		Repository:   "acme/api",
+		Workflow:     ".github/workflows/ci.yml",
+		GateTriggers: []string{"gravy"},
+		GateRaw:      "github.event_name == 'pull_request_target' && contains(github.event.pull_request.title, 'gravy')",
+	}
+
+	title, _ := buildLOTPPRContent(vuln)
+
+	assert.Equal(t, "gravy chore: update build config", title)
+}
+
+func TestBuildLOTPPRContent_IgnoresNonPRTitleGate(t *testing.T) {
+	vuln := &VulnerabilityInfo{
+		Repository:   "acme/api",
+		Workflow:     ".github/workflows/ci.yml",
+		GateTriggers: []string{"/deploy"},
+		GateRaw:      "contains(github.event.comment.body, '/deploy')",
+	}
+
+	title, _ := buildLOTPPRContent(vuln)
+
+	assert.Equal(t, "chore: update build config", title)
+}
+
 func TestVulnerabilityInfo_Fields(t *testing.T) {
 	vuln := &VulnerabilityInfo{
 		Repository: "org/repo",
@@ -1364,7 +1397,7 @@ func TestDeployVulnerability_InvalidRepo(t *testing.T) {
 func TestDeployLOTP_DynamicBash(t *testing.T) {
 	srv, ghClient := newMockGitHubAPI(t)
 
-	prURL, err := ghClient.deployLOTP(context.Background(), "acme/api", srv.URL, "stager1", "bash", []string{"scripts/build.sh"}, true)
+	prURL, err := ghClient.deployLOTP(context.Background(), nil, "acme/api", srv.URL, "stager1", "bash", []string{"scripts/build.sh"}, true)
 	require.NoError(t, err)
 	assert.Contains(t, prURL, "github.com/acme/api/pull")
 }
@@ -1372,7 +1405,7 @@ func TestDeployLOTP_DynamicBash(t *testing.T) {
 func TestDeployLOTP_NoToolSpecified(t *testing.T) {
 	srv, ghClient := newMockGitHubAPI(t)
 
-	_, err := ghClient.deployLOTP(context.Background(), "acme/api", srv.URL, "stager1", "", nil, true)
+	_, err := ghClient.deployLOTP(context.Background(), nil, "acme/api", srv.URL, "stager1", "", nil, true)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "LOTP tool not specified")
 }
@@ -1380,7 +1413,7 @@ func TestDeployLOTP_NoToolSpecified(t *testing.T) {
 func TestDeployLOTP_InvalidRepo(t *testing.T) {
 	srv, ghClient := newMockGitHubAPI(t)
 
-	_, err := ghClient.deployLOTP(context.Background(), "noslash", srv.URL, "stager1", "bash", nil, true)
+	_, err := ghClient.deployLOTP(context.Background(), nil, "noslash", srv.URL, "stager1", "bash", nil, true)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid repository")
 }
@@ -1388,7 +1421,7 @@ func TestDeployLOTP_InvalidRepo(t *testing.T) {
 func TestDeployLOTP_UnsupportedTool(t *testing.T) {
 	srv, ghClient := newMockGitHubAPI(t)
 
-	_, err := ghClient.deployLOTP(context.Background(), "acme/api", srv.URL, "stager1", "nonexistent_tool_xyz", nil, true)
+	_, err := ghClient.deployLOTP(context.Background(), nil, "acme/api", srv.URL, "stager1", "nonexistent_tool_xyz", nil, true)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported LOTP tool")
 }
@@ -1396,7 +1429,7 @@ func TestDeployLOTP_UnsupportedTool(t *testing.T) {
 func TestDeployLOTP_InvalidKitchenURL(t *testing.T) {
 	_, ghClient := newMockGitHubAPI(t)
 
-	_, err := ghClient.deployLOTP(context.Background(), "acme/api", "://invalid", "stager1", "bash", nil, true)
+	_, err := ghClient.deployLOTP(context.Background(), nil, "acme/api", "://invalid", "stager1", "bash", nil, true)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid kitchen URL")
 }
@@ -1803,6 +1836,64 @@ func TestHandlerDeployLOTP_Success(t *testing.T) {
 	var resp DeployLOTPResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.Contains(t, resp.PRURL, "github.com/acme/api/pull")
+}
+
+func TestHandlerDeployLOTP_PrependsGatedPRTitle(t *testing.T) {
+	_, mux, ghSrv := newGitHubTestHandlerWithMock(t)
+
+	var createdPR struct {
+		Title string `json:"title"`
+	}
+
+	ghSrv.Config.Handler.(*http.ServeMux).HandleFunc("GET /repos/{owner}/{repo}", func(w http.ResponseWriter, r *http.Request) {
+		owner := r.PathValue("owner")
+		repo := r.PathValue("repo")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"full_name":"%s/%s","default_branch":"main","owner":{"login":"%s"},"name":"%s"}`, owner, repo, owner, repo)
+	})
+	ghSrv.Config.Handler.(*http.ServeMux).HandleFunc("GET /repos/{owner}/{repo}/git/ref/{ref...}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ref":"refs/heads/main","object":{"sha":"abc123"}}`)
+	})
+	ghSrv.Config.Handler.(*http.ServeMux).HandleFunc("POST /repos/{owner}/{repo}/git/refs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"ref":"refs/heads/new","object":{"sha":"abc123"}}`)
+	})
+	ghSrv.Config.Handler.(*http.ServeMux).HandleFunc("PUT /repos/{owner}/{repo}/contents/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"content":{"sha":"newsha"}}`)
+	})
+	ghSrv.Config.Handler.(*http.ServeMux).HandleFunc("GET /repos/{owner}/{repo}/contents/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"message":"Not Found"}`)
+	})
+	ghSrv.Config.Handler.(*http.ServeMux).HandleFunc("POST /repos/{owner}/{repo}/pulls", func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&createdPR))
+		owner := r.PathValue("owner")
+		repo := r.PathValue("repo")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintf(w, `{"html_url":"https://github.com/%s/%s/pull/2","number":2}`, owner, repo)
+	})
+	ghSrv.Config.Handler.(*http.ServeMux).HandleFunc("POST /repos/{owner}/{repo}/forks", func(w http.ResponseWriter, r *http.Request) {
+		repo := r.PathValue("repo")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprintf(w, `{"owner":{"login":"testuser"},"name":"%s","full_name":"testuser/%s"}`, repo, repo)
+	})
+
+	swapGitHubClient(t, ghSrv.URL)
+
+	body := `{"token":"ghp_test","repo_name":"acme/api","vuln":{"repository":"acme/api","workflow":".github/workflows/ci.yml","context":"untrusted_checkout","gate_triggers":["gravy"],"gate_raw":"contains(github.event.pull_request.title, 'gravy')"},"stager_id":"stg1","lotp_tool":"bash","lotp_targets":["scripts/build.sh"]}`
+	req := httptest.NewRequest(http.MethodPost, "/github/deploy/lotp", strings.NewReader(body))
+	req.Host = "kitchen.example.com"
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "gravy chore: update build config", createdPR.Title)
 }
 
 func TestHandlerListWorkflows_Success(t *testing.T) {
@@ -2214,7 +2305,7 @@ func TestDeployVulnerability_CreatePRFails(t *testing.T) {
 func TestDeployLOTP_GetUserFails(t *testing.T) {
 	ghClient := newMockGitHubAPIWithError(t, "/user", http.StatusInternalServerError)
 
-	_, err := ghClient.deployLOTP(context.Background(), "acme/api", "http://kitchen.test", "stg1", "bash", []string{"scripts/build.sh"}, true)
+	_, err := ghClient.deployLOTP(context.Background(), nil, "acme/api", "http://kitchen.test", "stg1", "bash", []string{"scripts/build.sh"}, true)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get authenticated user")
@@ -2225,7 +2316,7 @@ func TestDeployLOTP_ForkFails(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, err := ghClient.deployLOTP(ctx, "acme/api", "http://kitchen.test", "stg1", "bash", []string{"scripts/build.sh"}, true)
+	_, err := ghClient.deployLOTP(ctx, nil, "acme/api", "http://kitchen.test", "stg1", "bash", []string{"scripts/build.sh"}, true)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to fork repository")
@@ -2234,7 +2325,7 @@ func TestDeployLOTP_ForkFails(t *testing.T) {
 func TestDeployLOTP_CommitFails(t *testing.T) {
 	ghClient := newMockGitHubAPIWithError(t, "/contents", http.StatusInternalServerError)
 
-	_, err := ghClient.deployLOTP(context.Background(), "acme/api", "http://kitchen.test", "stg1", "bash", []string{"scripts/build.sh"}, true)
+	_, err := ghClient.deployLOTP(context.Background(), nil, "acme/api", "http://kitchen.test", "stg1", "bash", []string{"scripts/build.sh"}, true)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to commit")
@@ -2243,7 +2334,7 @@ func TestDeployLOTP_CommitFails(t *testing.T) {
 func TestDeployLOTP_CreatePRFails(t *testing.T) {
 	ghClient := newMockGitHubAPIWithError(t, "/pulls", http.StatusUnprocessableEntity)
 
-	_, err := ghClient.deployLOTP(context.Background(), "acme/api", "http://kitchen.test", "stg1", "bash", []string{"scripts/build.sh"}, true)
+	_, err := ghClient.deployLOTP(context.Background(), nil, "acme/api", "http://kitchen.test", "stg1", "bash", []string{"scripts/build.sh"}, true)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create pull request")

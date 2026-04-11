@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- LOTP auto-PR now honors detected pull request title gate triggers and npm payload callbacks use the exact stager URL path
+- Counter LOTP Step 3 preview boxes no longer clip against the wizard modal edge on narrower terminals
+
 ## [0.1.0] - 2026-04-15
 
 First public release. GitHub Actions is the supported CI platform for v0.1.0. Other platforms (GitLab CI, Azure DevOps, CircleCI, Jenkins, Bitbucket) are detected during recon but analysis, delivery, exploitation, and pivoting workflows are GitHub Actions only.

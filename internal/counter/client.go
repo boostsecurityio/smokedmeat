@@ -1061,11 +1061,13 @@ func (k *KitchenClient) RecordKnownEntity(ctx context.Context, entity KnownEntit
 // --- GitHub proxy types (mirrors kitchen/github.go) ---
 
 type VulnerabilityInfo struct {
-	Repository  string `json:"repository"`
-	Workflow    string `json:"workflow"`
-	Context     string `json:"context"`
-	ID          string `json:"id"`
-	IssueNumber int    `json:"issue_number,omitempty"`
+	Repository   string   `json:"repository"`
+	Workflow     string   `json:"workflow"`
+	Context      string   `json:"context"`
+	ID           string   `json:"id"`
+	IssueNumber  int      `json:"issue_number,omitempty"`
+	GateTriggers []string `json:"gate_triggers,omitempty"`
+	GateRaw      string   `json:"gate_raw,omitempty"`
 }
 
 type RepoInfo struct {
@@ -1117,13 +1119,14 @@ type DeployCommentResponse struct {
 }
 
 type DeployLOTPRequest struct {
-	Token       string   `json:"token"`
-	RepoName    string   `json:"repo_name"`
-	StagerID    string   `json:"stager_id"`
-	LOTPTool    string   `json:"lotp_tool,omitempty"`
-	LOTPAction  string   `json:"lotp_action,omitempty"`
-	LOTPTargets []string `json:"lotp_targets,omitempty"`
-	CallbackURL string   `json:"callback_url,omitempty"`
+	Token       string            `json:"token"`
+	RepoName    string            `json:"repo_name"`
+	Vuln        VulnerabilityInfo `json:"vuln,omitempty"`
+	StagerID    string            `json:"stager_id"`
+	LOTPTool    string            `json:"lotp_tool,omitempty"`
+	LOTPAction  string            `json:"lotp_action,omitempty"`
+	LOTPTargets []string          `json:"lotp_targets,omitempty"`
+	CallbackURL string            `json:"callback_url,omitempty"`
 }
 
 type DeployLOTPResponse struct {

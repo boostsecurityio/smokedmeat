@@ -51,6 +51,7 @@ type mockKitchenClient struct {
 	lastDeployCommentReq counter.DeployCommentRequest
 	deployLOTPResp       counter.DeployLOTPResponse
 	deployLOTPErr        error
+	lastDeployLOTPReq    counter.DeployLOTPRequest
 	triggerDispatchErr   error
 	fetchPreflightResp   *counter.DeployPreflightResponse
 	fetchPreflightErr    error
@@ -144,7 +145,8 @@ func (m *mockKitchenClient) DeployComment(_ context.Context, req counter.DeployC
 	return m.deployCommentResp, m.deployCommentErr
 }
 
-func (m *mockKitchenClient) DeployLOTP(_ context.Context, _ counter.DeployLOTPRequest) (counter.DeployLOTPResponse, error) {
+func (m *mockKitchenClient) DeployLOTP(_ context.Context, req counter.DeployLOTPRequest) (counter.DeployLOTPResponse, error) {
+	m.lastDeployLOTPReq = req
 	return m.deployLOTPResp, m.deployLOTPErr
 }
 

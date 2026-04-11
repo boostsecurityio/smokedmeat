@@ -116,8 +116,16 @@ func (m Model) deployLOTP(vuln *Vulnerability, stagerID string, dwellTime time.D
 		}
 
 		resp, err := m.kitchenClient.DeployLOTP(context.Background(), counter.DeployLOTPRequest{
-			Token:       m.tokenInfo.Value,
-			RepoName:    vuln.Repository,
+			Token:    m.tokenInfo.Value,
+			RepoName: vuln.Repository,
+			Vuln: counter.VulnerabilityInfo{
+				Repository:   vuln.Repository,
+				Workflow:     vuln.Workflow,
+				Context:      vuln.Context,
+				ID:           vuln.ID,
+				GateTriggers: vuln.GateTriggers,
+				GateRaw:      vuln.GateRaw,
+			},
 			StagerID:    stagerID,
 			LOTPTool:    vuln.LOTPTool,
 			LOTPAction:  vuln.LOTPAction,

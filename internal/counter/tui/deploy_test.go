@@ -397,7 +397,15 @@ func TestDeployLOTP_Success(t *testing.T) {
 	}
 	m := newModelWithMockClient(mock)
 	m.tokenInfo = &TokenInfo{Value: "ghp_test"}
-	vuln := &Vulnerability{Repository: "acme/api", LOTPTool: "bash", ID: "V001"}
+	vuln := &Vulnerability{
+		Repository:   "acme/api",
+		Workflow:     ".github/workflows/ci.yml",
+		Context:      "untrusted_checkout",
+		LOTPTool:     "bash",
+		ID:           "V001",
+		GateTriggers: []string{"gravy"},
+		GateRaw:      "contains(github.event.pull_request.title, 'gravy')",
+	}
 
 	cmd := m.deployLOTP(vuln, "stg-8", 0)
 	msg := cmd()
@@ -405,6 +413,10 @@ func TestDeployLOTP_Success(t *testing.T) {
 	success, ok := msg.(LOTPDeploymentSuccessMsg)
 	require.True(t, ok)
 	assert.Contains(t, success.PRURL, "github.com/acme/api/pull")
+	assert.Equal(t, "acme/api", mock.lastDeployLOTPReq.Vuln.Repository)
+	assert.Equal(t, ".github/workflows/ci.yml", mock.lastDeployLOTPReq.Vuln.Workflow)
+	assert.Equal(t, []string{"gravy"}, mock.lastDeployLOTPReq.Vuln.GateTriggers)
+	assert.Equal(t, "contains(github.event.pull_request.title, 'gravy')", mock.lastDeployLOTPReq.Vuln.GateRaw)
 }
 
 func TestDeployLOTP_Error(t *testing.T) {

