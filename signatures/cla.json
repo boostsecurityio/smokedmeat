@@ -1,0 +1,28 @@
+{
+  "signedContributors": [
+    {
+      "name": "Alexis-Maurer Fortin",
+      "login": "SUSTAPLE117",
+      "email": "alexis@boostsecurity.io",
+      "date": "2026-04-15"
+    },
+    {
+      "name": "François Proulx",
+      "login": "fproulx-boostsecurity",
+      "email": "francois@boostsecurity.io",
+      "date": "2026-04-15"
+    },
+    {
+      "name": "Sebastien Graveline",
+      "login": "Talgarr",
+      "email": "sebastien.graveline@boostsecurity.io",
+      "date": "2026-04-15"
+    },
+    {
+      "name": "Julien Champoux",
+      "login": "julien-boost",
+      "email": "julien@boostsecurity.io",
+      "date": "2026-04-15"
+    }
+  ]
+}

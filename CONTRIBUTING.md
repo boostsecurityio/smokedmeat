@@ -15,12 +15,13 @@ The CLA ensures that:
 3.  **Your Rights:** You retain full ownership of your code. You simply grant us permission to use it.
 
 ### How to Sign
-You do not need to use a third-party website.
-1.  Open the file `CLA_SIGNATURES.md` in your Pull Request.
-2.  Add a new line with your details: `[GitHub Username] - [Full Name]`.
-3.  By adding your name to this file, you legally agree to the terms listed below.
+When you open a pull request, the CLA Assistant bot will comment asking you to sign. Simply reply with:
 
----
+> I have read the CLA Document and I hereby sign the CLA
 
-### Contributor License Agreement Terms
-refer to [CLA.md](CLA.md) for the full text of the agreement.
+The bot will record your agreement and update the PR status check. You only need to sign once — it will be remembered for future pull requests.
+
+The full CLA text is available in [CLA.md](CLA.md). Please read it before signing.
+
+### Licensing Model
+`smokedmeat` follows an open core model. Your contributions to this repository are licensed under [AGPLv3](LICENSE). See [LICENSING.md](LICENSING.md) for full details on the open core boundary, trademarks, and commercial extensions.
