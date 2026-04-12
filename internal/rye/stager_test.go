@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
 func TestNewStager(t *testing.T) {
@@ -21,13 +23,13 @@ func TestNewStager(t *testing.T) {
 func TestStager_CallbackURL(t *testing.T) {
 	stager := NewStagerWithID("test123", "http://kitchen.example.com", PRTitle)
 
-	assert.Equal(t, "http://kitchen.example.com/r/test123", stager.CallbackURL())
+	assert.Equal(t, "http://kitchen.example.com/r/smokedmeat/test123", stager.CallbackURL())
 }
 
 func TestStager_CallbackURL_TrailingSlash(t *testing.T) {
 	stager := NewStagerWithID("test123", "http://kitchen.example.com/", PRTitle)
 
-	assert.Equal(t, "http://kitchen.example.com/r/test123", stager.CallbackURL())
+	assert.Equal(t, "http://kitchen.example.com/r/smokedmeat/test123", stager.CallbackURL())
 }
 
 func TestStager_GenerateBash_PRTitle(t *testing.T) {
@@ -37,7 +39,7 @@ func TestStager_GenerateBash_PRTitle(t *testing.T) {
 	assert.Equal(t, "pr_title", payload.Context)
 	assert.Equal(t, "curl_bash", payload.Technique)
 	assert.Contains(t, payload.Raw, "curl")
-	assert.Contains(t, payload.Raw, "http://k.io/r/abc123")
+	assert.Contains(t, payload.Raw, "http://k.io/r/smokedmeat/abc123")
 	assert.Contains(t, payload.Raw, "bash")
 }
 
@@ -65,7 +67,7 @@ func TestStager_GenerateJS_GitHubScript(t *testing.T) {
 	assert.Equal(t, "js_quote_polyglot", payload.Technique)
 	assert.Contains(t, payload.Raw, "child_process")
 	assert.Contains(t, payload.Raw, "execSync")
-	assert.Contains(t, payload.Raw, "http://k.io/r/js123")
+	assert.Contains(t, payload.Raw, "http://k.io/r/smokedmeat/js123")
 	// Should have the polyglot pattern
 	assert.Contains(t, payload.Raw, `";require`)
 	assert.Contains(t, payload.Raw, `/*'`)
@@ -80,7 +82,7 @@ func TestStager_GeneratePolyglot(t *testing.T) {
 	assert.Contains(t, payload.Raw, `";require('child_process')`)
 	assert.Contains(t, payload.Raw, `/*'`)
 	assert.Contains(t, payload.Raw, `//*/`)
-	assert.Contains(t, payload.Raw, "http://k.io/r/poly123")
+	assert.Contains(t, payload.Raw, "http://k.io/r/smokedmeat/poly123")
 }
 
 func TestStager_GenerateSingleQuoteBreak(t *testing.T) {
@@ -133,6 +135,7 @@ func TestGenerateStagerID_Unique(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		id := generateStagerID()
 		assert.NotEmpty(t, id)
+		assert.True(t, strings.HasPrefix(id, "stg_sm_"))
 		assert.False(t, ids[id], "Generated duplicate ID: %s", id)
 		ids[id] = true
 	}
@@ -145,7 +148,7 @@ func TestStagerPayload_AllFieldsPopulated(t *testing.T) {
 	assert.NotEmpty(t, payload.Raw)
 	assert.NotEmpty(t, payload.Context)
 	assert.NotEmpty(t, payload.Technique)
-	assert.NotEmpty(t, payload.KitchenPath)
+	assert.Equal(t, stagerurl.Path("full"), payload.KitchenPath)
 	assert.NotEmpty(t, payload.CallbackURL)
 	assert.NotEmpty(t, payload.Notes)
 }

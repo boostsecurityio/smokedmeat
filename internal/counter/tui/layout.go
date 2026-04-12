@@ -15,6 +15,7 @@ import (
 
 	"github.com/boostsecurityio/smokedmeat/internal/buildinfo"
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
+	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
 const (
@@ -2203,7 +2204,7 @@ func (m *Model) buildWizardStep3LOTP(width int) []string {
 	isDynamicScript := tool == "bash" || tool == "powershell" || tool == "python"
 	targets := m.wizard.SelectedVuln.LOTPTargets
 
-	callbackURL := m.config.ExternalURL() + "/r/<stager-id>"
+	callbackURL := stagerurl.Join(m.config.ExternalURL(), "<stager-id>")
 
 	boxPad := pad
 	boxPadWidth := lipgloss.Width(boxPad)

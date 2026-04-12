@@ -22,6 +22,7 @@ import (
 
 	"github.com/boostsecurityio/smokedmeat/internal/kitchen"
 	"github.com/boostsecurityio/smokedmeat/internal/models"
+	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
 // TestEndToEnd_OrderFlow tests the complete order flow:
@@ -135,7 +136,7 @@ func TestEndToEnd_StagerFlow(t *testing.T) {
 	registerData, _ := json.Marshal(registerReq)
 
 	resp, err := http.Post(
-		server.URL+"/r/"+stagerID,
+		server.URL+stagerurl.Path(stagerID),
 		"application/json",
 		bytes.NewReader(registerData),
 	)
@@ -151,7 +152,7 @@ func TestEndToEnd_StagerFlow(t *testing.T) {
 	assert.Equal(t, stagerID, registerResp["stager_id"])
 
 	// Step 2: CI runner fetches the stager
-	fetchResp, err := http.Get(server.URL + "/r/" + stagerID)
+	fetchResp, err := http.Get(server.URL + stagerurl.Path(stagerID))
 	require.NoError(t, err)
 	defer fetchResp.Body.Close()
 

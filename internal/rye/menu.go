@@ -5,6 +5,8 @@ package rye
 
 import (
 	"fmt"
+
+	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
 // LightRye is the main interface for injection payload generation.
@@ -181,7 +183,7 @@ type BuildingBlock struct {
 
 // BuildingBlocks returns components for manual assembly.
 func (lr *LightRye) BuildingBlocks() []BuildingBlock {
-	callbackURL := fmt.Sprintf("%s/r/STAGER_ID", lr.KitchenURL)
+	callbackURL := stagerurl.Join(lr.KitchenURL, "STAGER_ID")
 
 	return []BuildingBlock{
 		{

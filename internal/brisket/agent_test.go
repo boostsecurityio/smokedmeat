@@ -538,6 +538,66 @@ func TestRunOnce_FailsOnServerError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestEmitLogMarkers_IncludesExecAndUpload(t *testing.T) {
+	agent := New(Config{CallbackID: "stg_sm_test"})
+	callbackHash := markerHash("stg_sm_test")
+	agentHash := markerHash(agent.agentID)
+
+	output := captureStdout(t, func() {
+		agent.emitLogMarkers([]byte(`{"callback_id":"stg_sm_test","memdump_attempted":true,"memdump_error":"","memdump_count":3,"runner_vars":["A=1"],"runner_endpoints":[{"env_name":"ACTIONS_RESULTS_URL","value":"https://results.example"}]}`))
+	})
+
+	assert.Contains(t, output, "smokedmeat.exec.v1 callback_hash="+callbackHash+" agent_hash="+agentHash+" memdump=3 vars=1 endpoints=1")
+	assert.Contains(t, output, "smokedmeat.upload.v1 callback_hash="+callbackHash+" agent_hash="+agentHash)
+	assert.NotContains(t, output, "callback=stg_sm_test")
+	assert.NotContains(t, output, "agent="+agent.agentID)
+}
+
+func TestRunOnce_EmitsUploadMarkerOnSuccessfulSend(t *testing.T) {
+	client := newMockClient(func(req *http.Request) (*http.Response, error) {
+		return emptyResponse(http.StatusOK), nil
+	})
+
+	agent := New(Config{
+		KitchenURL:  "http://test.local",
+		HTTPTimeout: 5 * time.Second,
+		HTTPClient:  client,
+		CallbackID:  "stg_sm_test",
+	})
+	callbackHash := markerHash("stg_sm_test")
+	agentHash := markerHash(agent.agentID)
+
+	output := captureStdout(t, func() {
+		err := agent.RunOnce(context.Background())
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, output, "smokedmeat.upload.v1 callback_hash="+callbackHash+" agent_hash="+agentHash)
+	assert.NotContains(t, output, "callback=stg_sm_test")
+	assert.NotContains(t, output, "agent="+agent.agentID)
+}
+
+func TestRunOnce_DoesNotEmitMarkersWhenSendFails(t *testing.T) {
+	client := newMockClient(func(req *http.Request) (*http.Response, error) {
+		return emptyResponse(http.StatusInternalServerError), nil
+	})
+
+	agent := New(Config{
+		KitchenURL:  "http://test.local",
+		HTTPTimeout: 5 * time.Second,
+		HTTPClient:  client,
+		CallbackID:  "stg_sm_test",
+	})
+
+	output := captureStdout(t, func() {
+		err := agent.RunOnce(context.Background())
+		require.Error(t, err)
+	})
+
+	assert.NotContains(t, output, "smokedmeat.upload.v1")
+	assert.NotContains(t, output, "smokedmeat.exec.v1")
+}
+
 func TestRunOnce_ArmsCachePoisonBeforeSendingEnvironmentData(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "build-cache"), 0o755))

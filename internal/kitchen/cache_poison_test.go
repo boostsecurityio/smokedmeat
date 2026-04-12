@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
+	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
 func TestHandler_PrepareCachePoison_RegistersWriterAndVictim(t *testing.T) {
@@ -67,7 +68,8 @@ func TestHandler_PrepareCachePoison_RegistersWriterAndVictim(t *testing.T) {
 	var resp prepareCachePoisonResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	require.NotEmpty(t, resp.VictimStagerID)
-	assert.Equal(t, "https://public.example/r/"+resp.VictimStagerID, resp.VictimStagerURL)
+	assert.Equal(t, stagerurl.Join("https://public.example", resp.VictimStagerID), resp.VictimStagerURL)
+	assert.Regexp(t, regexp.MustCompile(`^stg_sm_[0-9a-f]{16}$`), resp.VictimStagerID)
 	assert.Equal(t, "writer-stg", resp.WriterCallback.ID)
 	assert.True(t, resp.WriterCallback.Persistent)
 	assert.True(t, resp.VictimCallback.Persistent)
@@ -143,6 +145,6 @@ func TestHandler_PrepareCachePoison_EncodesDeploymentConfigInKitchen(t *testing.
 	victim := h.stagerStore.Get(cfg.VictimCallbackID)
 	require.NotNil(t, victim)
 	assert.Equal(t, "Cache poison victim · .github/workflows/release.yml", victim.Metadata["callback_label"])
-	assert.Equal(t, "https://public.example/r/"+cfg.VictimCallbackID, cfg.VictimStagerURL)
+	assert.Equal(t, stagerurl.Join("https://public.example", cfg.VictimCallbackID), cfg.VictimStagerURL)
 	assert.Equal(t, "45s", victim.DwellTime.String())
 }

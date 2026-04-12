@@ -140,7 +140,7 @@ func TestRequireStagerAuth_MissingID(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	r := httptest.NewRequest("GET", "/r/", nil)
+	r := httptest.NewRequest("GET", "/r/smokedmeat/", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, r)
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
@@ -151,11 +151,11 @@ func TestRequireStagerAuth_NotFound(t *testing.T) {
 	validator := &mockStagerValidator{exists: false}
 
 	mux := http.NewServeMux()
-	mux.Handle("GET /r/{stagerID}", RequireStagerAuth(validator, audit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /r/smokedmeat/{stagerID}", RequireStagerAuth(validator, audit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})))
 
-	r := httptest.NewRequest("GET", "/r/unknown123", nil)
+	r := httptest.NewRequest("GET", "/r/smokedmeat/unknown123", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, r)
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
@@ -168,11 +168,11 @@ func TestRequireStagerAuth_Expired(t *testing.T) {
 	validator := &mockStagerValidator{exists: true, expired: true}
 
 	mux := http.NewServeMux()
-	mux.Handle("GET /r/{stagerID}", RequireStagerAuth(validator, audit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /r/smokedmeat/{stagerID}", RequireStagerAuth(validator, audit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})))
 
-	r := httptest.NewRequest("GET", "/r/stg_abc", nil)
+	r := httptest.NewRequest("GET", "/r/smokedmeat/stg_abc", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, r)
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
@@ -185,11 +185,11 @@ func TestRequireStagerAuth_Valid(t *testing.T) {
 	validator := &mockStagerValidator{exists: true, expired: false, sessionID: "s1"}
 
 	mux := http.NewServeMux()
-	mux.Handle("GET /r/{stagerID}", RequireStagerAuth(validator, audit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /r/smokedmeat/{stagerID}", RequireStagerAuth(validator, audit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})))
 
-	r := httptest.NewRequest("GET", "/r/stg_valid", nil)
+	r := httptest.NewRequest("GET", "/r/smokedmeat/stg_valid", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, r)
 	assert.Equal(t, http.StatusOK, rr.Code)

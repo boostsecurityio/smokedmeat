@@ -350,7 +350,7 @@ func TestHandler_Stager_FanoutPersistsUntilBudgetExhausted(t *testing.T) {
 	require.Len(t, rows, 1)
 
 	for i := 1; i <= 2; i++ {
-		req := httptest.NewRequest(http.MethodGet, "/r/fanout-cb", nil)
+		req := httptest.NewRequest(http.MethodGet, "/r/smokedmeat/fanout-cb", nil)
 		rec := httptest.NewRecorder()
 
 		mux.ServeHTTP(rec, req)
@@ -362,7 +362,7 @@ func TestHandler_Stager_FanoutPersistsUntilBudgetExhausted(t *testing.T) {
 		assert.Equal(t, i, rows[0].CallbackCount)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/r/fanout-cb", nil)
+	req := httptest.NewRequest(http.MethodGet, "/r/smokedmeat/fanout-cb", nil)
 	rec := httptest.NewRecorder()
 
 	mux.ServeHTTP(rec, req)
@@ -833,7 +833,7 @@ func TestHandler_StagerRegister_RejectsInvalidDefaultMode(t *testing.T) {
 			}
 			body += `}`
 
-			req := httptest.NewRequest(http.MethodPost, "/r/"+tt.id, strings.NewReader(body))
+			req := httptest.NewRequest(http.MethodPost, "/r/smokedmeat/"+tt.id, strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, req)

