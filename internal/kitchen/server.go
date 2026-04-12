@@ -271,10 +271,10 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.Handle("GET /graph/ws", opAuth(http.HandlerFunc(s.graphHub.HandleWebSocket)))
 
 	// Stager registration (require operator auth)
-	mux.Handle("POST /r/{stagerID}", opAuth(http.HandlerFunc(s.handler.handleStagerRegister)))
+	mux.Handle("POST /r/smokedmeat/{stagerID}", opAuth(http.HandlerFunc(s.handler.handleStagerRegister)))
 
 	// Stager callback (require valid stager ID)
-	mux.Handle("GET /r/{stagerID}", stagerAuth(http.HandlerFunc(s.handler.handleStager)))
+	mux.Handle("GET /r/smokedmeat/{stagerID}", stagerAuth(http.HandlerFunc(s.handler.handleStager)))
 
 	// Agent routes (require agent token)
 	mux.Handle("GET /agent/{filename}", agentAuth(http.HandlerFunc(s.handler.handleAgentDownload)))

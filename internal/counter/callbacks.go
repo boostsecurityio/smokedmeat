@@ -7,6 +7,8 @@ import (
 	"context"
 	"net/url"
 	"time"
+
+	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
 type RegisterCallbackRequest struct {
@@ -30,7 +32,7 @@ type RegisterCallbackResponse struct {
 
 func (k *KitchenClient) RegisterCallback(ctx context.Context, stagerID string, req RegisterCallbackRequest) (*RegisterCallbackResponse, error) {
 	var resp RegisterCallbackResponse
-	err := k.doPostJSON(ctx, "/r/"+url.PathEscape(stagerID), req, &resp, 10*time.Second)
+	err := k.doPostJSON(ctx, stagerurl.Path(url.PathEscape(stagerID)), req, &resp, 10*time.Second)
 	if err != nil {
 		return nil, err
 	}

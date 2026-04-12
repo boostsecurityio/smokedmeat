@@ -23,6 +23,7 @@ import (
 	"github.com/boostsecurityio/smokedmeat/internal/models"
 	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 	"github.com/boostsecurityio/smokedmeat/internal/pass"
+	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
 // Publisher defines the interface for publishing messages to NATS.
@@ -173,8 +174,8 @@ func (h *Handler) SetAuth(a *auth.Auth) {
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /b/{agentID}", h.handleBeacon)
 	mux.HandleFunc("GET /b/{agentID}", h.handlePoll)
-	mux.HandleFunc("GET /r/{stagerID}", h.handleStager)
-	mux.HandleFunc("POST /r/{stagerID}", h.handleStagerRegister)
+	mux.HandleFunc("GET /r/smokedmeat/{stagerID}", h.handleStager)
+	mux.HandleFunc("POST /r/smokedmeat/{stagerID}", h.handleStagerRegister)
 	mux.HandleFunc("GET /agent/{filename}", h.handleAgentDownload)
 	mux.HandleFunc("POST /analyze", h.handleAnalyze)
 	mux.HandleFunc("GET /analyze/result/{analysisID}", h.handleGetAnalyzeResult)
@@ -1099,7 +1100,7 @@ func (h *Handler) handleStagerRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	callbackURL := fmt.Sprintf("http://%s/r/%s", r.Host, stagerID)
+	callbackURL := stagerurl.Join(getKitchenURL(r), stagerID)
 	resp := map[string]any{
 		"status":       "registered",
 		"stager_id":    stagerID,

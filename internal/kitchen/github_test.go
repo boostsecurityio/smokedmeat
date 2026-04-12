@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"path"
 	"strconv"
 	"strings"
 	"testing"
@@ -29,6 +28,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/boostsecurityio/smokedmeat/internal/lotp"
+	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
 func TestParseRepoFullName(t *testing.T) {
@@ -392,31 +392,31 @@ func TestCallbackURLBuilding(t *testing.T) {
 			name:        "simple URL",
 			kitchenURL:  "http://kitchen.example.com",
 			stagerID:    "abc123",
-			wantURLPath: "http://kitchen.example.com/r/abc123",
+			wantURLPath: "http://kitchen.example.com/r/smokedmeat/abc123",
 		},
 		{
 			name:        "URL with port",
 			kitchenURL:  "http://localhost:8080",
 			stagerID:    "xyz789",
-			wantURLPath: "http://localhost:8080/r/xyz789",
+			wantURLPath: "http://localhost:8080/r/smokedmeat/xyz789",
 		},
 		{
 			name:        "URL with trailing slash",
 			kitchenURL:  "https://kitchen.example.com/",
 			stagerID:    "test",
-			wantURLPath: "https://kitchen.example.com/r/test",
+			wantURLPath: "https://kitchen.example.com/r/smokedmeat/test",
 		},
 		{
 			name:        "URL with existing path",
 			kitchenURL:  "http://example.com/api",
 			stagerID:    "stage1",
-			wantURLPath: "http://example.com/api/r/stage1",
+			wantURLPath: "http://example.com/api/r/smokedmeat/stage1",
 		},
 		{
 			name:        "stager with special chars",
 			kitchenURL:  "http://localhost:8080",
 			stagerID:    "stager-123",
-			wantURLPath: "http://localhost:8080/r/stager-123",
+			wantURLPath: "http://localhost:8080/r/smokedmeat/stager-123",
 		},
 	}
 
@@ -437,12 +437,11 @@ func TestCallbackURLBuilding_InvalidURL(t *testing.T) {
 }
 
 func buildCallbackURL(kitchenURL, stagerID string) (string, error) {
-	u, err := url.Parse(kitchenURL)
-	if err != nil {
-		return "", err
-	}
-	u.Path = path.Join(u.Path, "r", stagerID)
-	return u.String(), nil
+	return stagerurl.URL(kitchenURL, stagerID)
+}
+
+func TestGenerateLOTPBranchName(t *testing.T) {
+	assert.Equal(t, "smokedmeat-lotp-1704067200", generateLOTPBranchName(time.Unix(1704067200, 0)))
 }
 
 func TestDetectTokenTypePrefix(t *testing.T) {
@@ -2007,7 +2006,7 @@ func TestClosePRByURL(t *testing.T) {
 	})
 	mux.HandleFunc("GET /repos/{owner}/{repo}/pulls/{number}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"number":1,"head":{"ref":"lotp-12345"}}`)
+		fmt.Fprint(w, `{"number":1,"head":{"ref":"smokedmeat-lotp-12345"}}`)
 	})
 	mux.HandleFunc("DELETE /repos/{owner}/{repo}/git/refs/{ref...}", func(w http.ResponseWriter, r *http.Request) {
 		deletedRef = true

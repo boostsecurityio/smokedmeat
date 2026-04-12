@@ -4,15 +4,13 @@
 package kitchen
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
+	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
 type prepareCachePoisonRequest struct {
@@ -71,7 +69,7 @@ func (h *Handler) handlePrepareCachePoison(w http.ResponseWriter, r *http.Reques
 	}
 
 	victimStagerID := generateCachePoisonStagerID()
-	victimStagerURL := strings.TrimSuffix(req.ExternalURL, "/") + "/r/" + victimStagerID
+	victimStagerURL := stagerurl.Join(req.ExternalURL, victimStagerID)
 
 	cfg := cachepoison.DeploymentConfig{
 		Candidate:        req.Victim,
@@ -163,9 +161,5 @@ func buildCachePoisonWriterPayload(encodedConfig string) string {
 }
 
 func generateCachePoisonStagerID() string {
-	var buf [8]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		return fmt.Sprintf("stg%x", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(buf[:])
+	return stagerurl.GenerateID()
 }

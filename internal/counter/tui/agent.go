@@ -15,6 +15,7 @@ import (
 	"github.com/boostsecurityio/smokedmeat/internal/models"
 	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 	"github.com/boostsecurityio/smokedmeat/internal/rye"
+	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
 func (m Model) handleBeacon(msg BeaconMsg) (tea.Model, tea.Cmd) {
@@ -822,8 +823,11 @@ func (m Model) handlePayloadCommand(contextName string) (tea.Model, tea.Cmd) {
 	}
 
 	m.AddOutput("info", "Registering stager with Kitchen...")
-	stagerID := payload.KitchenPath[3:]
-	if err := m.registerStager(stagerID); err != nil {
+	stagerID, ok := stagerurl.IDFromPath(payload.KitchenPath)
+	if !ok {
+		m.AddOutput("warning", "Generated stager path could not be parsed for registration")
+		m.AddOutput("info", "Payload will still work if Kitchen is running")
+	} else if err := m.registerStager(stagerID); err != nil {
 		m.AddOutput("warning", fmt.Sprintf("Stager registration failed: %v", err))
 		m.AddOutput("info", "Payload will still work if Kitchen is running")
 	} else {

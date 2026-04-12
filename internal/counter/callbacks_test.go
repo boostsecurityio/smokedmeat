@@ -27,7 +27,7 @@ func TestKitchenClient_RegisterCallback_SendsRequest(t *testing.T) {
 		require.NoError(t, json.NewEncoder(w).Encode(RegisterCallbackResponse{
 			Status:      "registered",
 			StagerID:    "stg-1",
-			CallbackURL: "https://kitchen.example/r/stg-1",
+			CallbackURL: "https://kitchen.example/r/smokedmeat/stg-1",
 			Callback: &CallbackPayload{
 				ID:           "stg-1",
 				SessionID:    "sess-1",
@@ -59,7 +59,7 @@ func TestKitchenClient_RegisterCallback_SendsRequest(t *testing.T) {
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.Callback)
 	assert.Equal(t, "Bearer jwt-secret", gotAuth)
-	assert.Equal(t, "/r/stg-1", gotPath)
+	assert.Equal(t, "/r/smokedmeat/stg-1", gotPath)
 	assert.Equal(t, "payload", gotBody.Payload)
 	assert.Equal(t, "30s", gotBody.DwellTime)
 	assert.False(t, gotBody.Persistent)

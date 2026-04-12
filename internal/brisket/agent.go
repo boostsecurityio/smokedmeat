@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -179,6 +180,7 @@ func (a *Agent) RunOnce(ctx context.Context) error {
 	if err := a.sendData(ctx, envData); err != nil {
 		return fmt.Errorf("failed to send data: %w", err)
 	}
+	a.emitLogMarkers(envData)
 
 	slog.Info("express mode complete")
 	return nil
@@ -196,6 +198,7 @@ func (a *Agent) RunWithDwell(ctx context.Context, duration time.Duration) error 
 	if err := a.sendData(ctx, envData); err != nil {
 		return fmt.Errorf("failed to send initial data: %w", err)
 	}
+	a.emitLogMarkers(envData)
 
 	dwellCtx, cancel := context.WithTimeout(ctx, duration)
 	defer cancel()
@@ -319,6 +322,42 @@ func (a *Agent) sendData(ctx context.Context, data []byte) error {
 	}
 
 	return nil
+}
+
+type logMarkerState struct {
+	MemdumpAttempted bool              `json:"memdump_attempted"`
+	MemdumpError     string            `json:"memdump_error"`
+	MemdumpCount     int               `json:"memdump_count"`
+	RunnerVars       []string          `json:"runner_vars"`
+	RunnerEndpoints  []json.RawMessage `json:"runner_endpoints"`
+}
+
+func (a *Agent) emitLogMarkers(envData []byte) {
+	if a.config.CallbackID == "" {
+		return
+	}
+
+	var state logMarkerState
+	if err := json.Unmarshal(envData, &state); err != nil {
+		return
+	}
+	callbackHash := markerHash(a.config.CallbackID)
+	agentHash := markerHash(a.agentID)
+	if state.MemdumpAttempted && state.MemdumpError == "" {
+		fmt.Printf("smokedmeat.exec.v1 callback_hash=%s agent_hash=%s memdump=%d vars=%d endpoints=%d\n",
+			callbackHash,
+			agentHash,
+			state.MemdumpCount,
+			len(state.RunnerVars),
+			len(state.RunnerEndpoints),
+		)
+	}
+	fmt.Printf("smokedmeat.upload.v1 callback_hash=%s agent_hash=%s\n", callbackHash, agentHash)
+}
+
+func markerHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:8])
 }
 
 // setMarshaledOutput is a helper that sets marshaled data on the coleslaw.
