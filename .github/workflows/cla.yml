@@ -21,10 +21,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          path-to-signatures: "signatures/cla.json"
           path-to-document: "https://github.com/boostsecurityio/smokedmeat/blob/main/CLA.md"
-          branch: "main"
-          allowlist: dependabot[bot],renovate[bot],github-actions[bot]
+          path-to-signatures: "cla.json"
+          branch: "cla-signatures" # orphan branch used as signature database
+          allowlist: dependabot[bot]
           custom-pr-sign-comment: "I have read the CLA Document and I hereby sign the CLA"
           custom-notsigned-prcomment: |
             Thank you for your contribution! Before we can merge this PR, you need to sign our [Contributor License Agreement](https://github.com/boostsecurityio/smokedmeat/blob/main/CLA.md).
