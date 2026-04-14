@@ -952,6 +952,39 @@ func TestDeployIssue_TitleInjection(t *testing.T) {
 	assert.Contains(t, issueURL, "github.com/acme/api/issues")
 }
 
+func TestDeployIssue_UsesExploitUserAgent(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /repos/{owner}/{repo}/issues", func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, gitHubExploitUserAgent(), r.Header.Get("User-Agent"))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"html_url":"https://github.com/acme/api/issues/1","number":1}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	origNew := newGitHubClientFunc
+	newGitHubClientFunc = func(token string) *gitHubClient {
+		baseURL, _ := url.Parse(srv.URL + "/")
+		tc := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token}))
+		c := github.NewClient(tc)
+		c.BaseURL = baseURL
+		return &gitHubClient{client: c, token: token}
+	}
+	t.Cleanup(func() { newGitHubClientFunc = origNew })
+
+	ghClient := newGitHubDeployClient("ghp_test")
+	vuln := &VulnerabilityInfo{
+		Repository: "acme/api",
+		Workflow:   "ci.yml",
+		Context:    "issue_body",
+	}
+
+	issueURL, err := ghClient.deployIssue(context.Background(), vuln, "payload", false)
+	require.NoError(t, err)
+	assert.Equal(t, "https://github.com/acme/api/issues/1", issueURL)
+}
+
 func TestDeployIssue_BodyInjection(t *testing.T) {
 	_, ghClient := newMockGitHubAPI(t)
 
@@ -1206,6 +1239,7 @@ func TestTriggerWorkflowDispatch_NoInputs(t *testing.T) {
 func TestListAccessibleRepos(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /user/repos", func(w http.ResponseWriter, r *http.Request) {
+		assert.NotContains(t, r.Header.Get("User-Agent"), gitHubExploitUserAgentID)
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `[{"full_name":"acme/api"},{"full_name":"acme/web"}]`)
 	})
@@ -2000,15 +2034,18 @@ func TestClosePRByURL(t *testing.T) {
 	var closedPR, deletedRef bool
 	mux := http.NewServeMux()
 	mux.HandleFunc("PATCH /repos/{owner}/{repo}/pulls/{number}", func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, gitHubExploitUserAgent(), r.Header.Get("User-Agent"))
 		closedPR = true
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"state":"closed","number":1}`)
 	})
 	mux.HandleFunc("GET /repos/{owner}/{repo}/pulls/{number}", func(w http.ResponseWriter, r *http.Request) {
+		assert.NotContains(t, r.Header.Get("User-Agent"), gitHubExploitUserAgentID)
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"number":1,"head":{"ref":"smokedmeat-lotp-12345"}}`)
 	})
 	mux.HandleFunc("DELETE /repos/{owner}/{repo}/git/refs/{ref...}", func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, gitHubExploitUserAgent(), r.Header.Get("User-Agent"))
 		deletedRef = true
 		w.WriteHeader(http.StatusNoContent)
 	})
