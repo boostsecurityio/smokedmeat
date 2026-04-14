@@ -1,14 +1,12 @@
-<img src="smokedmeat-logo.png" alt="SmokedMeat Logo" width="400">
-
 # SmokedMeat
-
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
 **CI/CD Red Team Framework**
-
 > Like Metasploit, but for CI/CD pipelines.
 
 *From the makers of the [poutine](https://github.com/boostsecurityio/poutine) Build Pipeline SAST scanner at [BoostSecurity Labs](https://labs.boostsecurity.io).*
+
+![SmokedMeat quickstart demo](https://vhs.charm.sh/vhs-5J9lw1pcFCtE51X6EiaeWM.gif)
 
 ---
 
@@ -41,10 +39,6 @@ SmokedMeat is a post-exploitation framework for CI/CD pipelines. Point it at a G
 - Security engineers testing detection and response for pipeline attacks
 - Researchers developing new CI/CD exploitation techniques
 - Bug bounty hunters exploring supply chain attack surface
-
-## Demo
-
-![SmokedMeat quickstart demo](https://vhs.charm.sh/vhs-5J9lw1pcFCtE51X6EiaeWM.gif)
 
 ## Quick Start
 
