@@ -255,6 +255,52 @@ func closeIssueByNumber(t *testing.T, number int) {
 	t.Logf("Closed issue #%d on %s", number, targetRepo)
 }
 
+func registerIssueFailureCleanup(t *testing.T, number int) {
+	t.Helper()
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		closeIssueByNumber(t, number)
+	})
+}
+
+func issueByNumber(t *testing.T, number int) *ghIssue {
+	t.Helper()
+	out, err := ghCommand(
+		"issue", "view", fmt.Sprintf("%d", number), "-R", targetRepo,
+		"--json", "number,title,url,body,state,comments",
+	).Output()
+	if err != nil {
+		return nil
+	}
+	var issue ghIssue
+	if err := json.Unmarshal(out, &issue); err != nil {
+		return nil
+	}
+	return &issue
+}
+
+func waitForIssueState(t *testing.T, number int, wantState string, timeout time.Duration) *ghIssue {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		issue := issueByNumber(t, number)
+		if issue != nil && strings.EqualFold(issue.State, wantState) {
+			return issue
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	issue := issueByNumber(t, number)
+	if issue == nil {
+		t.Fatalf("issue #%d on %s could not be loaded while waiting for state %s", number, targetRepo, wantState)
+	}
+	t.Fatalf("issue #%d on %s did not reach state %s within %s (last state %s)", number, targetRepo, wantState, timeout, issue.State)
+	return nil
+}
+
 func ensureInputFocus(t *testing.T, tmux *TmuxController) {
 	t.Helper()
 
@@ -432,8 +478,9 @@ func completeIssueDeployWizardWithCachePoison(t *testing.T, tmux *TmuxController
 	requireContent(t, tmux, "Cache Poisoning:", 5*time.Second, "Cache poisoning should remain visible after toggle")
 	requireContent(t, tmux, "Victim:", 5*time.Second, "Cache poisoning should show a victim selection")
 	requireContent(t, tmux, "Replace Cache:", 5*time.Second, "Cache poisoning should expose cache replacement controls")
+	require.NotContains(t, tmux.CaptureClean(), "Unavailable (token lacks actions:write)", "Cache replacement should be available for this flow")
 	require.NoError(t, tmux.SendKeys("r"))
-	requireContent(t, tmux, "Replace Cache:", 5*time.Second, "Cache replacement should remain visible after toggle")
+	require.NotEmpty(t, waitForAny(tmux, []string{"Replace Cache:  On", "Replace Cache: On"}, 5*time.Second), "Cache replacement should turn on")
 
 	if victimWorkflow == "" {
 		return
@@ -499,8 +546,9 @@ func completeCommentDeployWizardWithCachePoison(t *testing.T, tmux *TmuxControll
 	requireContent(t, tmux, "Cache Poisoning:", 5*time.Second, "Cache poisoning should remain visible after toggle")
 	requireContent(t, tmux, "Victim:", 5*time.Second, "Cache poisoning should show a victim selection")
 	requireContent(t, tmux, "Replace Cache:", 5*time.Second, "Cache poisoning should expose cache replacement controls")
+	require.NotContains(t, tmux.CaptureClean(), "Unavailable (token lacks actions:write)", "Cache replacement should be available for this flow")
 	require.NoError(t, tmux.SendKeys("r"))
-	requireContent(t, tmux, "Replace Cache:", 5*time.Second, "Cache replacement should remain visible after toggle")
+	require.NotEmpty(t, waitForAny(tmux, []string{"Replace Cache:  On", "Replace Cache: On"}, 5*time.Second), "Cache replacement should turn on")
 
 	if victimWorkflow == "" {
 		return
@@ -516,6 +564,28 @@ func completeCommentDeployWizardWithCachePoison(t *testing.T, tmux *TmuxControll
 	if err != nil {
 		capture := tmux.CaptureClean()
 		t.Fatalf("%s. Capture:\n%s", err, capture)
+	}
+}
+
+func completeDispatchDeployWizard(t *testing.T, tmux *TmuxController, dwellAdjustments int) {
+	t.Helper()
+
+	t.Log("Step 1/3: Confirming vuln → Enter")
+	require.NoError(t, tmux.SendKeys("Enter"))
+	requireContent(t, tmux, "Step 2/3", 10*time.Second, "Wizard Step 2/3 should appear")
+
+	t.Log("Step 2/3: Selecting Trigger Dispatch (1) → Enter")
+	require.NoError(t, tmux.SendKeys("1"))
+	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, tmux.SendKeys("Enter"))
+	requireContent(t, tmux, "Step 3/3", 10*time.Second, "Wizard Step 3/3 should appear")
+
+	if dwellAdjustments > 0 {
+		t.Log("Step 3/3: Setting dwell time...")
+		for i := 0; i < dwellAdjustments; i++ {
+			require.NoError(t, tmux.SendKeys("d"))
+			time.Sleep(200 * time.Millisecond)
+		}
 	}
 }
 
@@ -856,6 +926,36 @@ func findMenuVuln(capture string, keywords ...string) string {
 
 func findMenuVulnAll(capture string, keywords ...string) string {
 	return findMenuVulnWithMatch(capture, true, keywords...)
+}
+
+func waitForMenuVulnKey(t *testing.T, tmux *TmuxController, timeout time.Duration, keywordSets ...[]string) string {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	capture := ""
+	for time.Now().Before(deadline) {
+		capture = tmux.CaptureClean()
+		for _, keywords := range keywordSets {
+			if key := findMenuVulnAll(capture, keywords...); key != "" {
+				return key
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	t.Fatalf("menu vulnerability not found for any keyword set %v after %s. Capture:\n%s", keywordSets, timeout, capture)
+	return ""
+}
+
+func requireMenuVulnKey(t *testing.T, capture string, keywordSets ...[]string) string {
+	t.Helper()
+	for _, keywords := range keywordSets {
+		if key := findMenuVulnAll(capture, keywords...); key != "" {
+			return key
+		}
+	}
+	t.Fatalf("menu vulnerability not found for any keyword set %v. Capture:\n%s", keywordSets, capture)
+	return ""
 }
 
 func findMenuVulnWithMatch(capture string, requireAll bool, keywords ...string) string {

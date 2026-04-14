@@ -2145,7 +2145,7 @@ func TestListWorkflowsWithDispatch_FiltersCorrectly(t *testing.T) {
 
 	workflows, err := ghClient.listWorkflowsWithDispatch(context.Background(), "acme", "api")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"Deploy"}, workflows)
+	assert.Equal(t, []string{".github/workflows/deploy.yml"}, workflows)
 }
 
 // =============================================================================

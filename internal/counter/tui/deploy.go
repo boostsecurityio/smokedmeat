@@ -28,13 +28,17 @@ func (m Model) deployAutoDispatch(vuln *Vulnerability, stagerID, payload string,
 
 		workflowFile := strings.TrimPrefix(vuln.Workflow, ".github/workflows/")
 		ctx := context.Background()
+		var inputs map[string]interface{}
+		if inputName != "" {
+			inputs = map[string]interface{}{inputName: payload}
+		}
 		err := m.kitchenClient.TriggerDispatch(ctx, counter.DeployDispatchRequest{
 			Token:        token.Value,
 			Owner:        owner,
 			Repo:         repo,
 			WorkflowFile: workflowFile,
 			Ref:          "main",
-			Inputs:       map[string]interface{}{inputName: payload},
+			Inputs:       inputs,
 		})
 		if err != nil {
 			return AutoDispatchFailedMsg{StagerID: stagerID, Err: err}

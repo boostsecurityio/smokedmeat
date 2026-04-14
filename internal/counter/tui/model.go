@@ -1456,6 +1456,43 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 	return summary
 }
 
+func (m *Model) importVulnerabilitiesToPantry(vulns []Vulnerability) importSummary {
+	if len(vulns) == 0 {
+		return importSummary{}
+	}
+
+	findings := make([]poutine.Finding, 0, len(vulns))
+	for _, vuln := range vulns {
+		findings = append(findings, poutine.Finding{
+			ID:                 vuln.ID,
+			Repository:         vuln.Repository,
+			Workflow:           vuln.Workflow,
+			Line:               vuln.Line,
+			Job:                vuln.Job,
+			RuleID:             vuln.RuleID,
+			Title:              vuln.Title,
+			Severity:           vuln.Severity,
+			Context:            vuln.Context,
+			Trigger:            vuln.Trigger,
+			Expression:         vuln.Expression,
+			InjectionSources:   vuln.InjectionSources,
+			ReferencedSecrets:  vuln.ReferencedSecrets,
+			LOTPTool:           vuln.LOTPTool,
+			LOTPAction:         vuln.LOTPAction,
+			LOTPTargets:        vuln.LOTPTargets,
+			CachePoisonWriter:  vuln.CachePoisonWriter,
+			CachePoisonReason:  vuln.CachePoisonReason,
+			CachePoisonVictims: vuln.CachePoisonVictims,
+			GateTriggers:       vuln.GateTriggers,
+			GateRaw:            vuln.GateRaw,
+			GateUnsolvable:     vuln.GateUnsolvable,
+			Fingerprint:        vuln.Fingerprint,
+		})
+	}
+
+	return m.importAnalysisToPantry(&poutine.AnalysisResult{Findings: findings})
+}
+
 // TransitionToPhase changes the current phase and updates the view accordingly.
 func (m *Model) TransitionToPhase(newPhase Phase) {
 	m.phase = newPhase

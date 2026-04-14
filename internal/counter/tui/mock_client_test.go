@@ -40,22 +40,23 @@ type mockKitchenClient struct {
 	startConsumingErr error
 	reconnectErr      error
 
-	deployPRResp         counter.DeployPRResponse
-	deployPRErr          error
-	lastDeployPRReq      counter.DeployPRRequest
-	deployIssueResp      counter.DeployIssueResponse
-	deployIssueErr       error
-	lastDeployIssueReq   counter.DeployIssueRequest
-	deployCommentResp    counter.DeployCommentResponse
-	deployCommentErr     error
-	lastDeployCommentReq counter.DeployCommentRequest
-	deployLOTPResp       counter.DeployLOTPResponse
-	deployLOTPErr        error
-	lastDeployLOTPReq    counter.DeployLOTPRequest
-	triggerDispatchErr   error
-	fetchPreflightResp   *counter.DeployPreflightResponse
-	fetchPreflightErr    error
-	lastPreflightReq     counter.DeployPreflightRequest
+	deployPRResp           counter.DeployPRResponse
+	deployPRErr            error
+	lastDeployPRReq        counter.DeployPRRequest
+	deployIssueResp        counter.DeployIssueResponse
+	deployIssueErr         error
+	lastDeployIssueReq     counter.DeployIssueRequest
+	deployCommentResp      counter.DeployCommentResponse
+	deployCommentErr       error
+	lastDeployCommentReq   counter.DeployCommentRequest
+	deployLOTPResp         counter.DeployLOTPResponse
+	deployLOTPErr          error
+	lastDeployLOTPReq      counter.DeployLOTPRequest
+	triggerDispatchErr     error
+	lastTriggerDispatchReq counter.DeployDispatchRequest
+	fetchPreflightResp     *counter.DeployPreflightResponse
+	fetchPreflightErr      error
+	lastPreflightReq       counter.DeployPreflightRequest
 
 	listReposWithInfoResp []counter.RepoInfo
 	listReposWithInfoErr  error
@@ -150,7 +151,8 @@ func (m *mockKitchenClient) DeployLOTP(_ context.Context, req counter.DeployLOTP
 	return m.deployLOTPResp, m.deployLOTPErr
 }
 
-func (m *mockKitchenClient) TriggerDispatch(_ context.Context, _ counter.DeployDispatchRequest) error {
+func (m *mockKitchenClient) TriggerDispatch(_ context.Context, req counter.DeployDispatchRequest) error {
+	m.lastTriggerDispatchReq = req
 	return m.triggerDispatchErr
 }
 
