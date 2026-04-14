@@ -24,6 +24,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"golang.org/x/oauth2"
 
+	"github.com/boostsecurityio/smokedmeat/internal/buildinfo"
 	"github.com/boostsecurityio/smokedmeat/internal/lotp"
 	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
@@ -50,12 +51,17 @@ type actionsCacheEntry struct {
 const (
 	issueCommentRetryAttempts = 6
 	issueCommentRetryDelay    = 500 * time.Millisecond
+	gitHubExploitUserAgentID  = "smokedmeat-kitchen-exploit"
 )
 
 var newGitHubClientFunc = newGitHubClientDefault
 
 func newGitHubClient(token string) *gitHubClient {
 	return newGitHubClientFunc(token)
+}
+
+func newGitHubDeployClient(token string) *gitHubClient {
+	return withGitHubExploitUserAgent(newGitHubClientFunc(token))
 }
 
 func newGitHubClientDefault(token string) *gitHubClient {
@@ -65,6 +71,64 @@ func newGitHubClientDefault(token string) *gitHubClient {
 		client:     github.NewClient(tc),
 		token:      token,
 		graphqlURL: "https://api.github.com/graphql",
+	}
+}
+
+func gitHubExploitUserAgent() string {
+	version := strings.TrimSpace(buildinfo.Version)
+	if buildinfo.IsDevVersion() {
+		version = "dev"
+	}
+	return gitHubExploitUserAgentID + "/" + version
+}
+
+type gitHubExploitUserAgentTransport struct {
+	base      http.RoundTripper
+	userAgent string
+}
+
+func (t *gitHubExploitUserAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if req == nil || !shouldFlagGitHubExploitMethod(req.Method) {
+		return base.RoundTrip(req)
+	}
+	req = req.Clone(req.Context())
+	req.Header.Set("User-Agent", t.userAgent)
+	return base.RoundTrip(req)
+}
+
+func shouldFlagGitHubExploitMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func withGitHubExploitUserAgent(client *gitHubClient) *gitHubClient {
+	if client == nil || client.client == nil {
+		return client
+	}
+
+	httpClient := client.client.Client()
+	httpClient.Transport = &gitHubExploitUserAgentTransport{
+		base:      httpClient.Transport,
+		userAgent: gitHubExploitUserAgent(),
+	}
+
+	gh := github.NewClient(httpClient)
+	gh.BaseURL = client.client.BaseURL
+	gh.UploadURL = client.client.UploadURL
+	gh.UserAgent = client.client.UserAgent
+
+	return &gitHubClient{
+		client:     gh,
+		token:      client.token,
+		graphqlURL: client.graphqlURL,
 	}
 }
 
@@ -1191,7 +1255,7 @@ func closePRByURL(ctx context.Context, token, prURL string) error {
 	if err != nil {
 		return err
 	}
-	client := newGitHubClient(token)
+	client := newGitHubDeployClient(token)
 	state := "closed"
 	_, _, err = client.client.PullRequests.Edit(ctx, owner, repo, number, &github.PullRequest{State: &state})
 	if err != nil {
@@ -1253,7 +1317,7 @@ func closeIssueByURL(ctx context.Context, token, issueURL string) error {
 	if err != nil {
 		return err
 	}
-	client := newGitHubClient(token)
+	client := newGitHubDeployClient(token)
 	state := "closed"
 	_, _, err = client.client.Issues.Edit(ctx, owner, repo, number, &github.IssueRequest{State: &state})
 	if err != nil {
@@ -1405,7 +1469,7 @@ func (h *Handler) handleGitHubDeployPR(w http.ResponseWriter, r *http.Request) {
 	draft := req.Draft == nil || *req.Draft
 	autoClose := req.AutoClose == nil || *req.AutoClose
 
-	client := newGitHubClient(req.Token)
+	client := newGitHubDeployClient(req.Token)
 	prURL, err := client.deployVulnerability(r.Context(), &req.Vuln, req.Payload, draft)
 	if err != nil {
 		h.recordObservedCapability(req.Token, req.Vuln.Repository, deployCapabilityPR, err)
@@ -1445,7 +1509,7 @@ func (h *Handler) handleGitHubDeployIssue(w http.ResponseWriter, r *http.Request
 
 	autoClose := req.AutoClose == nil || *req.AutoClose
 
-	client := newGitHubClient(req.Token)
+	client := newGitHubDeployClient(req.Token)
 	issueURL, err := client.deployIssue(r.Context(), &req.Vuln, req.Payload, req.CommentMode)
 	if err != nil {
 		h.recordObservedCapability(req.Token, req.Vuln.Repository, deployCapabilityIssue, err)
@@ -1485,7 +1549,7 @@ func (h *Handler) handleGitHubDeployComment(w http.ResponseWriter, r *http.Reque
 
 	autoClose := req.AutoClose == nil || *req.AutoClose
 
-	client := newGitHubClient(req.Token)
+	client := newGitHubDeployClient(req.Token)
 	result, err := client.deployComment(r.Context(), &req.Vuln, req.Payload, req.Target)
 	if err != nil {
 		h.recordObservedCapability(req.Token, req.Vuln.Repository, commentObservedCapability(req.Target), err)
@@ -1536,7 +1600,7 @@ func (h *Handler) handleGitHubDeployLOTP(w http.ResponseWriter, r *http.Request)
 	if repoName == "" {
 		repoName = req.Vuln.Repository
 	}
-	client := newGitHubClient(req.Token)
+	client := newGitHubDeployClient(req.Token)
 	lotpName := req.LOTPTool
 	if lotpName == "" {
 		lotpName = req.LOTPAction
@@ -1582,7 +1646,7 @@ func (h *Handler) handleGitHubDeployDispatch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	client := newGitHubClient(req.Token)
+	client := newGitHubDeployClient(req.Token)
 
 	dispatchCapability := dispatchObservedCapability(req.WorkflowFile)
 	if err := client.getWorkflowByFileName(r.Context(), req.Owner, req.Repo, req.WorkflowFile); err != nil {

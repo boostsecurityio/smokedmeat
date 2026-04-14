@@ -59,7 +59,7 @@ func (h *Handler) handlePrepareCachePoison(w http.ResponseWriter, r *http.Reques
 	var purgedCacheCount int
 	var purgedCacheRef string
 	if req.PurgeToken != "" && (req.PurgeKey != "" || req.PurgeKeyPrefix != "") {
-		client := newGitHubClient(req.PurgeToken)
+		client := newGitHubDeployClient(req.PurgeToken)
 		var err error
 		purgedCacheRef, purgedCacheCount, err = client.purgeActionsCaches(r.Context(), req.Victim.Repository, req.PurgeKey, req.PurgeKeyPrefix, req.PurgeRef)
 		if err != nil {
