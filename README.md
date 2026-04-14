@@ -46,10 +46,6 @@ SmokedMeat is a post-exploitation framework for CI/CD pipelines. Point it at a G
 
 ![SmokedMeat quickstart demo](https://vhs.charm.sh/vhs-5J9lw1pcFCtE51X6EiaeWM.gif)
 
-<a href="https://vhs.charm.sh">
-  <img src="https://stuff.charm.sh/vhs/badge.svg" alt="Made with VHS">
-</a>
-
 ## Quick Start
 
 To try SmokedMeat for the first time, install Docker and `make`. Go is not required.
