@@ -142,10 +142,10 @@ define start_release_quickstart_services
 		if grep -Eqi 'ghcr\.io/boostsecurityio/smokedmeat-kitchen|smokedmeat-kitchen' "$$COMPOSE_OUTPUT" && \
 			grep -Eqi 'pull access denied|requested access to the resource is denied|insufficient_scope|unauthorized|authentication required|denied' "$$COMPOSE_OUTPUT"; then \
 			printf "\033[1;31m[auth]\033[0m \033[1mQuickstart could not pull the pinned Kitchen image from GHCR.\033[0m\n"; \
-			printf "  \033[90mThis private beta release still uses private GHCR packages.\033[0m\n"; \
-			printf "  \033[90mDocker is not presenting usable credentials for \033[36mghcr.io\033[90m.\033[0m\n"; \
+			printf "  \033[90mThe pinned quickstart image is not readable from \033[36mghcr.io\033[90m without credentials.\033[0m\n"; \
+			printf "  \033[90mIf the repository was recently made public, the GHCR package visibility may still need to be updated separately.\033[0m\n"; \
 			printf "\n"; \
-			printf "\033[1;33m[fix]\033[0m Refresh GitHub auth with package scope\n"; \
+			printf "\033[1;33m[fix]\033[0m Make the GHCR package public, or refresh GitHub auth with package scope\n"; \
 			printf "  \033[36mgh auth refresh -h github.com -s read:packages\033[0m\n"; \
 			printf "\033[1;33m[fix]\033[0m Log Docker into GHCR with the same account\n"; \
 			printf '  \033[36mecho "$$(gh auth token)" | docker login ghcr.io -u "$$(gh api user -q .login)" --password-stdin\033[0m\n'; \
@@ -597,18 +597,11 @@ define ensure_quickstart_release_binaries
 	fi; \
 	if [ "$$NEEDS_DOWNLOAD" = "1" ]; then \
 		printf "\033[1;33m[cache]\033[0m Downloading Counter $(QUICKSTART_RELEASE_TAG) (\033[36m%s\033[0m)...\n" "$$COUNTER_ASSET"; \
-		if command -v gh >/dev/null 2>&1; then \
-			if ! gh release download $(QUICKSTART_RELEASE_TAG) --repo $(QUICKSTART_RELEASE_REPOSITORY) --pattern "$$COUNTER_ASSET" --output "$$COUNTER_ARCHIVE"; then \
-				echo "ERROR: Failed to download $$COUNTER_ASSET with gh."; \
-				echo "Authenticate gh or set GH_TOKEN before running 'make quickstart'."; \
-				exit 1; \
-			fi; \
-		else \
-			if ! curl -fsSL -o "$$COUNTER_ARCHIVE" "https://github.com/$(QUICKSTART_RELEASE_REPOSITORY)/releases/download/$(QUICKSTART_RELEASE_TAG)/$$COUNTER_ASSET"; then \
-				echo "ERROR: Failed to download $$COUNTER_ASSET with curl."; \
-				echo "Install gh and authenticate it if the release repository is not public."; \
-				exit 1; \
-			fi; \
+		COUNTER_ASSET_URL="https://github.com/$(QUICKSTART_RELEASE_REPOSITORY)/releases/download/$(QUICKSTART_RELEASE_TAG)/$$COUNTER_ASSET"; \
+		if ! curl -fL --retry 3 --retry-delay 1 -o "$$COUNTER_ARCHIVE" "$$COUNTER_ASSET_URL"; then \
+			echo "ERROR: Failed to download $$COUNTER_ASSET from $$COUNTER_ASSET_URL."; \
+			echo "Verify that the GitHub release asset exists and is publicly readable."; \
+			exit 1; \
 		fi; \
 	fi; \
 	ACTUAL_DIGEST="sha256:$$(shasum -a 256 "$$COUNTER_ARCHIVE" | awk '{print $$1}')"; \
