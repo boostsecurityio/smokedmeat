@@ -879,7 +879,7 @@ func (c *gitHubClient) listWorkflowsWithDispatch(ctx context.Context, owner, rep
 		}
 
 		if strings.Contains(decoded, "workflow_dispatch") {
-			dispatchable = append(dispatchable, wf.GetName())
+			dispatchable = append(dispatchable, wf.GetPath())
 		}
 	}
 

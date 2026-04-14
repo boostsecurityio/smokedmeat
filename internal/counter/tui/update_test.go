@@ -534,6 +534,47 @@ func TestModel_Update_PivotResultSuccess_GitHubToken(t *testing.T) {
 	assert.Equal(t, "V010", model.vulnerabilities[0].ID)
 }
 
+func TestModel_Update_PivotResultSuccess_ImportsDispatchVulnIntoTree(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhasePostExploit
+
+	result, _ := m.Update(PivotResultMsg{
+		Success: true,
+		Type:    PivotTypeGitHubToken,
+		NewVulns: []Vulnerability{
+			{
+				ID:         "V010",
+				Repository: "new-org/new-repo",
+				Workflow:   ".github/workflows/deploy.yml",
+				RuleID:     "workflow_dispatch",
+				Title:      "Dispatchable: .github/workflows/deploy.yml",
+				Severity:   "high",
+				Context:    "workflow_dispatch",
+				Trigger:    "workflow_dispatch",
+			},
+		},
+	})
+
+	model := result.(Model)
+	require.NotNil(t, model.pantry)
+
+	var vulnNode *TreeNode
+	for _, node := range model.treeNodes {
+		if node.Type != TreeNodeVuln {
+			continue
+		}
+		if model.vulnerabilityIndexForNode(node) != 0 {
+			continue
+		}
+		vulnNode = node
+		break
+	}
+
+	require.NotNil(t, vulnNode)
+	assert.Equal(t, "new-org/new-repo", model.treeNodeRepo(vulnNode))
+	assert.Equal(t, ".github/workflows/deploy.yml", nearestTreePath(vulnNode, TreeNodeWorkflow))
+}
+
 func TestModel_Update_PivotResultSuccess_StoresPivotTargets(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhasePostExploit
@@ -549,6 +590,26 @@ func TestModel_Update_PivotResultSuccess_StoresPivotTargets(t *testing.T) {
 	assert.Equal(t, "org/repo1", model.pivotTargets[0])
 	assert.Equal(t, "org/repo2", model.pivotTargets[1])
 	assert.Equal(t, "org/repo3", model.pivotTargets[2])
+}
+
+func TestModel_Update_AutoDispatchSuccess_WithoutStagerStaysOutOfWaiting(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+	m.phase = PhaseRecon
+
+	result, cmd := m.Update(AutoDispatchSuccessMsg{
+		Vuln: &Vulnerability{
+			ID:         "V020",
+			Repository: "org/repo",
+		},
+	})
+
+	model := result.(Model)
+	assert.Equal(t, PhaseRecon, model.phase)
+	assert.Nil(t, model.waiting)
+	require.NotEmpty(t, model.output)
+	assert.Equal(t, "success", model.output[len(model.output)-1].Type)
+	assert.Equal(t, "workflow_dispatch triggered", model.output[len(model.output)-1].Content)
+	assert.NotNil(t, cmd)
 }
 
 func TestModel_Update_PivotResultSuccess_CloudOIDC(t *testing.T) {

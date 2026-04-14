@@ -35,6 +35,16 @@ func cycleWizardCallbackBudget(current int) int {
 	return budgets[0]
 }
 
+func isPureWorkflowDispatchVuln(vuln *Vulnerability) bool {
+	if vuln == nil {
+		return false
+	}
+	if strings.TrimSpace(vuln.RuleID) == "workflow_dispatch" {
+		return true
+	}
+	return strings.TrimSpace(vuln.Context) == "workflow_dispatch" && len(vuln.InjectionSources) == 0
+}
+
 func (m *Model) cycleWizardCallbackBudget() {
 	if m.wizard == nil || m.wizard.Step != 3 || m.wizard.CachePoisonEnabled {
 		return
@@ -621,19 +631,25 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 			injCtx = rye.BashRun
 		}
 
-		stager, payload, err := m.prepareWizardStager(vuln, injCtx)
-		if err != nil {
-			m.AddOutput("error", fmt.Sprintf("Stager registration failed: %v", err))
-			m.CloseWizard()
-			return m, nil
-		}
+		stagerID := ""
+		payload := ""
+		inputName := ""
+		if !isPureWorkflowDispatchVuln(vuln) {
+			stager, payloadValue, err := m.prepareWizardStager(vuln, injCtx)
+			if err != nil {
+				m.AddOutput("error", fmt.Sprintf("Stager registration failed: %v", err))
+				m.CloseWizard()
+				return m, nil
+			}
+			stagerID = stager.ID
+			payload = payloadValue
+			m.wizard.StagerID = stager.ID
+			m.wizard.Payload = payloadValue
 
-		m.wizard.StagerID = stager.ID
-		m.wizard.Payload = payload
-
-		inputName := extractDispatchInputName(vuln.InjectionSources)
-		if inputName == "" {
-			inputName = "payload"
+			inputName = extractDispatchInputName(vuln.InjectionSources)
+			if inputName == "" {
+				inputName = "payload"
+			}
 		}
 
 		dwellTime := m.wizard.DwellTime
@@ -642,7 +658,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 		m.AddOutput("info", fmt.Sprintf("Triggering workflow_dispatch with %s (%s)...", dispatchToken.Name, dwellInfo))
 		m.activityLog.Add(IconInfo, "Triggering workflow_dispatch pivot")
 		m.CloseWizard()
-		return m, m.deployAutoDispatch(vuln, stager.ID, payload, dispatchToken, inputName, dwellTime)
+		return m, m.deployAutoDispatch(vuln, stagerID, payload, dispatchToken, inputName, dwellTime)
 	}
 
 	m.CloseWizard()

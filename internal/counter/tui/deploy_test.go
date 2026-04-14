@@ -450,6 +450,22 @@ func TestDeployAutoDispatch_Success(t *testing.T) {
 	assert.Equal(t, "command", success.InputName)
 }
 
+func TestDeployAutoDispatch_WithoutInputs(t *testing.T) {
+	mock := &mockKitchenClient{}
+	m := newModelWithMockClient(mock)
+	vuln := &Vulnerability{Repository: "acme/api", Workflow: ".github/workflows/deploy.yml", ID: "V011"}
+	token := &CollectedSecret{Value: "ghs_ephemeral", Name: "GITHUB_TOKEN"}
+
+	cmd := m.deployAutoDispatch(vuln, "", "", token, "", 0)
+	msg := cmd()
+
+	success, ok := msg.(AutoDispatchSuccessMsg)
+	require.True(t, ok)
+	assert.Empty(t, success.StagerID)
+	assert.Empty(t, success.InputName)
+	assert.Nil(t, mock.lastTriggerDispatchReq.Inputs)
+}
+
 func TestDeployAutoDispatch_Error(t *testing.T) {
 	mock := &mockKitchenClient{
 		triggerDispatchErr: fmt.Errorf("workflow not found"),

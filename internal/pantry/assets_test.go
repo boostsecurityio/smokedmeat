@@ -134,6 +134,14 @@ func TestNewVulnerability_SetsAnalyzeOnlyMetadata(t *testing.T) {
 	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", vuln.Properties["exploit_support_reason"])
 }
 
+func TestNewVulnerability_WorkflowDispatchIsExploitable(t *testing.T) {
+	vuln := NewVulnerability("workflow_dispatch", "pkg:github/acme/api", ".github/workflows/deploy.yml", 0)
+
+	assert.Equal(t, true, vuln.Properties["exploit_supported"])
+	_, hasReason := vuln.Properties["exploit_support_reason"]
+	assert.False(t, hasReason)
+}
+
 func TestClassifyRuleSeverity(t *testing.T) {
 	tests := []struct {
 		ruleID   string

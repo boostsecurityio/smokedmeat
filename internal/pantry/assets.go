@@ -169,7 +169,7 @@ func VulnerabilityExploitSupport(provider, path, ruleID string) (supported bool,
 		return false, "This finding is analyze-only in v0.1.0. Exploit actions are only available for GitHub Actions workflows."
 	}
 	switch strings.TrimSpace(ruleID) {
-	case "injection", "untrusted_checkout_exec":
+	case "injection", "untrusted_checkout_exec", "workflow_dispatch":
 		return true, ""
 	case "pr_runs_on_self_hosted":
 		return false, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet."

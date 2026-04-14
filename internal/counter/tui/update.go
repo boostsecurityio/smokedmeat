@@ -648,8 +648,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.recordHistoryCmd(historyEntry)
 
 	case AutoDispatchSuccessMsg:
-		m.StartWaiting(msg.StagerID, "", msg.Vuln, "Dispatch", msg.DwellTime)
-		m.AddOutput("success", fmt.Sprintf("workflow_dispatch triggered (input: %s)", msg.InputName))
+		if msg.StagerID != "" {
+			m.StartWaiting(msg.StagerID, "", msg.Vuln, "Dispatch", msg.DwellTime)
+		}
+		if msg.InputName != "" {
+			m.AddOutput("success", fmt.Sprintf("workflow_dispatch triggered (input: %s)", msg.InputName))
+		} else {
+			m.AddOutput("success", "workflow_dispatch triggered")
+		}
 		m.activityLog.Add(IconSuccess, "Pivot dispatch sent, waiting for agent")
 		historyEntry := counter.HistoryPayload{
 			Type:      "exploit.attempted",
@@ -726,6 +732,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case PivotTypeGitHubToken:
 			if len(msg.NewVulns) > 0 {
 				m.vulnerabilities = append(m.vulnerabilities, msg.NewVulns...)
+				m.importVulnerabilitiesToPantry(msg.NewVulns)
 				m.AddOutput("success", fmt.Sprintf("Found %d dispatchable workflows", len(msg.NewVulns)))
 				m.activityLog.Add(IconSecret, fmt.Sprintf("Pivot found %d new targets", len(msg.NewVulns)))
 			}
