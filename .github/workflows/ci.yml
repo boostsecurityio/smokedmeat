@@ -3,16 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - '**.png'
-      - 'docs/*.tape'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - '**.png'
-      - 'docs/*.tape'
 
 permissions:
   contents: read
