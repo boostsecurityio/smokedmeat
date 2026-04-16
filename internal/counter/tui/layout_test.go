@@ -338,6 +338,65 @@ func TestBuildWizardStep3LOTP_PreviewBoxKeepsInnerGutter(t *testing.T) {
 	assert.True(t, sawBoxLine, "expected LOTP preview box")
 }
 
+func TestBuildWizardModal_LOTPShowsAdvancedOptionsBeforePreview(t *testing.T) {
+	m := NewModel(Config{SessionID: "test", KitchenExternalURL: "https://kitchen.example"})
+	m.wizard = &WizardState{
+		Step: 3,
+		SelectedVuln: &Vulnerability{
+			Repository:        "messypoutine/gravy-overflow",
+			LOTPTool:          "npm",
+			LOTPTargets:       []string{"package.json"},
+			CachePoisonWriter: true,
+			CachePoisonVictims: []cachepoison.VictimCandidate{
+				{Workflow: ".github/workflows/deploy.yml", Ready: true},
+			},
+		},
+		DeliveryMethod: DeliveryLOTP,
+	}
+
+	out := stripANSI(strings.Join(m.buildWizardModal(90, 26), "\n"))
+
+	assert.Contains(t, out, "Mode:")
+	assert.Contains(t, out, "Callbacks:")
+	assert.Contains(t, out, "Cache Poisoning:")
+	assert.Contains(t, out, "Preview:")
+	assert.Contains(t, out, ":dwell")
+	assert.Contains(t, out, "╰")
+	assert.Contains(t, out, "Only proceed if you are authorized")
+}
+
+func TestBuildWizardStep3LOTP_PreviewShowsPayloadLine(t *testing.T) {
+	m := NewModel(Config{SessionID: "test", KitchenExternalURL: "https://kitchen.example"})
+	m.wizard = &WizardState{
+		Step: 3,
+		SelectedVuln: &Vulnerability{
+			Repository:  "messypoutine/gravy-overflow",
+			LOTPTool:    "npm",
+			LOTPTargets: []string{"package.json"},
+		},
+	}
+
+	out := stripANSI(strings.Join(m.buildWizardStep3LOTP(90), "\n"))
+
+	assert.Contains(t, out, "postinstall")
+}
+
+func TestPadRight_KeepsRequestedWidth(t *testing.T) {
+	assert.Equal(t, 4, lipgloss.Width(padRight("⚠️", 4)))
+}
+
+func TestFormatWizardContent_AddsVariationSelectorSlack(t *testing.T) {
+	assert.Equal(t, "⚠️   ", formatWizardContent("", "", "⚠️", 4))
+}
+
+func TestRenderPreviewBoxContent_TruncatesLongLinesWithoutWrapping(t *testing.T) {
+	box := renderPreviewBoxContent(30, []string{strings.Repeat("x", 80)})
+
+	lines := strings.Split(stripANSI(box), "\n")
+	require.Len(t, lines, 3)
+	assert.Contains(t, lines[1], "...")
+}
+
 func TestRenderWaitingView_ShowsETA(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.width = 120
