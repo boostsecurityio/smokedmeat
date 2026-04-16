@@ -346,7 +346,7 @@ func (m Model) advanceWizardStep() (tea.Model, tea.Cmd) {
 			m.wizard.DeliveryMethod == DeliveryManualSteps {
 			vuln := m.wizard.SelectedVuln
 			if vuln != nil {
-				injCtx, ok := rye.GetContextByName(vuln.Context)
+				injCtx, ok := payloadInjectionContextForVuln(vuln)
 				if !ok {
 					injCtx = rye.BashRun
 				}
@@ -396,7 +396,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		injCtx, ok := rye.GetContextByName(vuln.Context)
+		injCtx, ok := payloadInjectionContextForVuln(vuln)
 		if !ok {
 			injCtx = rye.PRBody
 		}
@@ -427,7 +427,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		injCtx, ok := rye.GetContextByName(vuln.Context)
+		injCtx, ok := payloadInjectionContextForVuln(vuln)
 		if !ok {
 			injCtx = rye.PRBody
 		}
@@ -477,7 +477,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 		}
 		m.wizard.IssueNumber = issueNum
 
-		injCtx, ok := rye.GetContextByName(vuln.Context)
+		injCtx, ok := payloadInjectionContextForVuln(vuln)
 		if !ok {
 			injCtx = rye.PRBody
 		}
@@ -547,7 +547,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 		return m, m.deployLOTP(vuln, stager.ID, dwellTime)
 
 	case DeliveryCopyOnly:
-		injCtx, ok := rye.GetContextByName(vuln.Context)
+		injCtx, ok := payloadInjectionContextForVuln(vuln)
 		if !ok {
 			injCtx = rye.BashRun
 		}
@@ -584,7 +584,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 	case DeliveryManualSteps:
 		payload := m.wizard.Payload
 		if payload == "" {
-			injCtx, ok := rye.GetContextByName(vuln.Context)
+			injCtx, ok := payloadInjectionContextForVuln(vuln)
 			if !ok {
 				injCtx = rye.BashRun
 			}
@@ -626,7 +626,7 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		injCtx, ok := rye.GetContextByName(vuln.Context)
+		injCtx, ok := payloadInjectionContextForVuln(vuln)
 		if !ok {
 			injCtx = rye.BashRun
 		}

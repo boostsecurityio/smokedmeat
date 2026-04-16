@@ -69,6 +69,7 @@ type Vulnerability struct {
 	Title       string // "Injection", "Untrusted Checkout" - human readable
 	RuleID      string // "injection", "untrusted_checkout_exec" - poutine rule
 	Context     string // "bash", "github_script"
+	BashContext string
 	Trigger     string // "pull_request", "push", "issues"
 	Expression  string // The vulnerable expression
 	Severity    string // "critical", "high", "medium", "low"
@@ -715,6 +716,10 @@ func (m *Model) extractVulnerabilitiesFromPantry() []Vulnerability {
 		if u, ok := pv.Properties["gate_unsolvable"].(string); ok {
 			gateUnsolvable = u
 		}
+		bashContext := ""
+		if b, ok := pv.Properties["bash_context"].(string); ok {
+			bashContext = b
+		}
 		cachePoisonWriter, _ := pv.Properties["cache_poison_writer"].(bool)
 		cachePoisonReason := ""
 		if reason, ok := pv.Properties["cache_poison_reason"].(string); ok {
@@ -740,6 +745,7 @@ func (m *Model) extractVulnerabilitiesFromPantry() []Vulnerability {
 			RuleID:               pv.RuleID,
 			Severity:             pv.Severity,
 			Context:              ctx,
+			BashContext:          bashContext,
 			Trigger:              trigger,
 			Expression:           expression,
 			InjectionSources:     injectionSources,
@@ -1047,7 +1053,6 @@ func (m *Model) importScanToPantry(scan *models.ScanResult) (int, error) {
 			finding.Line,
 		)
 		vuln.Provider = "github"
-		pantry.SetVulnerabilityExploitSupport(&vuln)
 
 		// Map poutine severity levels
 		var severity string
@@ -1080,6 +1085,7 @@ func (m *Model) importScanToPantry(scan *models.ScanResult) (int, error) {
 		if finding.Title != "" {
 			vuln.SetProperty("title", finding.Title)
 		}
+		pantry.SetVulnerabilityExploitSupport(&vuln)
 
 		if err := m.pantry.AddAsset(vuln); err != nil {
 			continue
@@ -1386,7 +1392,6 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 		}
 		vuln := pantry.NewVulnerability(f.RuleID, purl, f.Workflow, f.Line)
 		vuln.Provider = "github"
-		pantry.SetVulnerabilityExploitSupport(&vuln)
 		vuln.State = pantry.StateHighValue
 		vuln.Severity = f.Severity
 		if f.Title != "" {
@@ -1397,6 +1402,9 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 		}
 		if f.Context != "" {
 			vuln.SetProperty("context", f.Context)
+		}
+		if f.BashContext != "" {
+			vuln.SetProperty("bash_context", f.BashContext)
 		}
 		if f.Trigger != "" {
 			vuln.SetProperty("trigger", f.Trigger)
@@ -1428,6 +1436,7 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 		if f.GateUnsolvable != "" {
 			vuln.SetProperty("gate_unsolvable", f.GateUnsolvable)
 		}
+		pantry.SetVulnerabilityExploitSupport(&vuln)
 		if f.CachePoisonWriter {
 			vuln.SetProperty("cache_poison_writer", true)
 		}
@@ -1473,6 +1482,7 @@ func (m *Model) importVulnerabilitiesToPantry(vulns []Vulnerability) importSumma
 			Title:              vuln.Title,
 			Severity:           vuln.Severity,
 			Context:            vuln.Context,
+			BashContext:        vuln.BashContext,
 			Trigger:            vuln.Trigger,
 			Expression:         vuln.Expression,
 			InjectionSources:   vuln.InjectionSources,

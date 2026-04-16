@@ -808,6 +808,7 @@ func TestImportAnalysis_RoundTrip_PreservesAllFields(t *testing.T) {
 				Title:             "Code injection via comment body",
 				Severity:          "critical",
 				Context:           "comment_body",
+				BashContext:       "bash_single_quoted",
 				Trigger:           "issue_comment",
 				Expression:        "${{ github.event.comment.body }}",
 				InjectionSources:  []string{"github.event.comment.body"},
@@ -833,6 +834,7 @@ func TestImportAnalysis_RoundTrip_PreservesAllFields(t *testing.T) {
 	assert.Equal(t, "build", v.Job)
 	assert.Equal(t, "critical", v.Severity)
 	assert.Equal(t, "comment_body", v.Context)
+	assert.Equal(t, "bash_single_quoted", v.BashContext)
 	assert.Equal(t, "issue_comment", v.Trigger)
 	assert.Equal(t, "${{ github.event.comment.body }}", v.Expression)
 	assert.Equal(t, []string{"github.event.comment.body"}, v.InjectionSources)
@@ -871,6 +873,37 @@ func TestImportAnalysis_RoundTrip_PreservesAnalyzeOnlySupportReason(t *testing.T
 	require.Len(t, vulns, 1)
 	assert.False(t, vulns[0].ExploitSupported)
 	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", vulns[0].ExploitSupportReason)
+}
+
+func TestImportAnalysis_RoundTrip_QuotedHeredocIsAnalyzeOnly(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+
+	result := &poutine.AnalysisResult{
+		Success: true,
+		Findings: []poutine.Finding{
+			{
+				ID:          "V001",
+				Repository:  "acme/api",
+				Workflow:    ".github/workflows/ci.yml",
+				Line:        42,
+				Job:         "build",
+				RuleID:      "injection",
+				Title:       "Quoted heredoc injection",
+				Severity:    "critical",
+				Context:     "comment_body",
+				BashContext: "bash_heredoc_quoted",
+				Trigger:     "issue_comment",
+				Expression:  "${{ github.event.comment.body }}",
+			},
+		},
+	}
+
+	m.importAnalysisToPantry(result)
+
+	vulns := m.extractVulnerabilitiesFromPantry()
+	require.Len(t, vulns, 1)
+	assert.False(t, vulns[0].ExploitSupported)
+	assert.Equal(t, "Quoted heredoc bodies do not evaluate shell substitutions.", vulns[0].ExploitSupportReason)
 }
 
 func TestImportAnalysis_RoundTrip_CommentInjectionDetected(t *testing.T) {

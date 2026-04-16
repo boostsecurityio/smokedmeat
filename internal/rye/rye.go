@@ -107,6 +107,38 @@ var (
 		Language:   LangBash,
 	}
 
+	BashUnquoted = InjectionContext{
+		Name:       "bash_unquoted",
+		MaxLength:  0,
+		QuoteStyle: QuoteNone,
+		Multiline:  true,
+		Language:   LangBash,
+	}
+
+	BashSingleQuoted = InjectionContext{
+		Name:       "bash_single_quoted",
+		MaxLength:  65536,
+		QuoteStyle: QuoteSingle,
+		Multiline:  true,
+		Language:   LangBash,
+	}
+
+	BashDoubleQuoted = InjectionContext{
+		Name:       "bash_double_quoted",
+		MaxLength:  0,
+		QuoteStyle: QuoteDouble,
+		Multiline:  true,
+		Language:   LangBash,
+	}
+
+	BashHeredocUnquoted = InjectionContext{
+		Name:       "bash_heredoc_unquoted",
+		MaxLength:  0,
+		QuoteStyle: QuoteNone,
+		Multiline:  true,
+		Language:   LangBash,
+	}
+
 	// GitHubScript - actions/github-script JavaScript context.
 	// Injected into template literals or script blocks.
 	GitHubScript = InjectionContext{
@@ -302,17 +334,25 @@ func (g *Generator) fits(payload string) bool {
 	return true
 }
 
-// GetContextByName returns the injection context by name.
+// GetContextByName resolves an injection context name or alias.
 func GetContextByName(name string) (InjectionContext, bool) {
 	contexts := map[string]InjectionContext{
-		"git_branch":     BranchName,
-		"pr_title":       PRTitle,
-		"pr_body":        PRBody,
-		"commit_message": CommitMessage,
-		"issue_title":    IssueTitle,
-		"issue_body":     IssueBody,
-		"github_script":  GitHubScript,
-		"bash_run":       BashRun,
+		"git_branch":            BranchName,
+		"pr_title":              PRTitle,
+		"pr_body":               PRBody,
+		"commit_message":        CommitMessage,
+		"issue_title":           IssueTitle,
+		"issue_body":            IssueBody,
+		"bash_run":              BashRun,
+		"bash_unquoted":         BashUnquoted,
+		"bash_single_quoted":    BashSingleQuoted,
+		"bash_double_quoted":    BashDoubleQuoted,
+		"bash_heredoc_unquoted": BashHeredocUnquoted,
+		"issue_comment":         BashSingleQuoted,
+		"comment_body":          BashSingleQuoted,
+		"comment.body":          BashSingleQuoted,
+		"issue_comment.body":    BashSingleQuoted,
+		"github_script":         GitHubScript,
 	}
 
 	ctx, ok := contexts[name]

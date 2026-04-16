@@ -800,8 +800,17 @@ func (m Model) handlePayloadCommand(contextName string) (tea.Model, tea.Cmd) {
 	if contextName == "" {
 		if m.selectedVuln >= 0 && m.selectedVuln < len(m.vulnerabilities) {
 			v := m.vulnerabilities[m.selectedVuln]
-			contextName = v.Context
-			m.AddOutput("info", fmt.Sprintf("Using selected vulnerability: %s (%s)", v.ID, v.Context))
+			injCtx, ok := payloadInjectionContextForVuln(&v)
+			if !ok {
+				if reason := exploitSupportBlockReason(&v); reason != "" {
+					m.AddOutput("error", reason)
+				} else {
+					m.AddOutput("error", fmt.Sprintf("No payload context available for %s", v.ID))
+				}
+				return m, nil
+			}
+			contextName = injCtx.Name
+			m.AddOutput("info", fmt.Sprintf("Using selected vulnerability: %s (%s)", v.ID, contextName))
 		} else {
 			m.AddOutput("error", "No context specified and no vulnerability selected.")
 			m.AddOutput("info", "Usage: payload <context>")
@@ -818,7 +827,7 @@ func (m Model) handlePayloadCommand(contextName string) (tea.Model, tea.Cmd) {
 	payload, err := m.lightRye.QuickStager(contextName)
 	if err != nil {
 		m.AddOutput("error", fmt.Sprintf("Failed to generate payload: %v", err))
-		m.AddOutput("info", "Valid contexts: pr_title, pr_body, github_script, git_branch, commit_message, bash_run")
+		m.AddOutput("info", "Valid contexts: pr_title, pr_body, github_script, git_branch, commit_message, bash_run, bash_unquoted, bash_single_quoted, bash_double_quoted, bash_heredoc_unquoted")
 		return m, nil
 	}
 

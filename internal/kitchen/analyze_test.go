@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/boostsecurityio/smokedmeat/internal/bashctx"
 	"github.com/boostsecurityio/smokedmeat/internal/kitchen/db"
 	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 	"github.com/boostsecurityio/smokedmeat/internal/poutine"
@@ -487,10 +488,17 @@ func TestHandleAnalyze_DefersAnalysisMetadataSync(t *testing.T) {
 		return entities[0].Name == "acme/api" && entities[0].IsPrivate
 	}, 2*time.Second, 25*time.Millisecond)
 
-	repos := h.Pantry().GetAssetsByType(pantry.AssetRepository)
-	require.Len(t, repos, 1)
-	assert.Equal(t, "api", repos[0].Name)
-	assert.Equal(t, true, repos[0].Properties["private"])
+	require.Eventually(t, func() bool {
+		repos := h.Pantry().GetAssetsByType(pantry.AssetRepository)
+		if len(repos) != 1 {
+			return false
+		}
+		if repos[0].Name != "api" {
+			return false
+		}
+		private, _ := repos[0].Properties["private"].(bool)
+		return private
+	}, 2*time.Second, 25*time.Millisecond)
 	assert.Equal(t, 1, repoInfoCalls)
 }
 
@@ -1087,6 +1095,30 @@ func TestImportAnalysisToPantry_SetsExploitSupportMetadata(t *testing.T) {
 	require.Len(t, vulns, 1)
 	assert.Equal(t, false, vulns[0].Properties["exploit_supported"])
 	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", vulns[0].Properties["exploit_support_reason"])
+}
+
+func TestImportAnalysisToPantry_PersistsBashContextBeforeExploitSupport(t *testing.T) {
+	h := NewHandlerWithPublisher(&mockPublisher{}, nil)
+	result := &poutine.AnalysisResult{
+		Success: true,
+		Findings: []poutine.Finding{
+			{
+				Repository:  "acme/api",
+				Workflow:    ".github/workflows/pr.yml",
+				RuleID:      "injection",
+				Severity:    "critical",
+				BashContext: bashctx.QuotedHeredoc,
+			},
+		},
+	}
+
+	h.importAnalysisToPantry(result)
+
+	vulns := h.Pantry().FindVulnerabilities()
+	require.Len(t, vulns, 1)
+	assert.Equal(t, bashctx.QuotedHeredoc, vulns[0].Properties["bash_context"])
+	assert.Equal(t, false, vulns[0].Properties["exploit_supported"])
+	assert.Equal(t, "Quoted heredoc bodies do not evaluate shell substitutions.", vulns[0].Properties["exploit_support_reason"])
 }
 
 func TestAnalyzeRequest_IncludesSessionID(t *testing.T) {

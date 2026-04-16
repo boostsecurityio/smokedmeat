@@ -122,13 +122,15 @@ func TestNewVulnerability(t *testing.T) {
 	assert.Equal(t, ".github/workflows/ci.yml", vuln.Properties["path"])
 	assert.Equal(t, 42, vuln.Properties["line"])
 	assert.Equal(t, "critical", vuln.Severity) // injection is critical
-	assert.Equal(t, true, vuln.Properties["exploit_supported"])
+	_, hasSupported := vuln.Properties["exploit_supported"]
+	assert.False(t, hasSupported)
 	_, hasReason := vuln.Properties["exploit_support_reason"]
 	assert.False(t, hasReason)
 }
 
 func TestNewVulnerability_SetsAnalyzeOnlyMetadata(t *testing.T) {
 	vuln := NewVulnerability("pr_runs_on_self_hosted", "pkg:github/acme/api", ".github/workflows/pr.yml", 19)
+	SetVulnerabilityExploitSupport(&vuln)
 
 	assert.Equal(t, false, vuln.Properties["exploit_supported"])
 	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", vuln.Properties["exploit_support_reason"])
@@ -136,10 +138,21 @@ func TestNewVulnerability_SetsAnalyzeOnlyMetadata(t *testing.T) {
 
 func TestNewVulnerability_WorkflowDispatchIsExploitable(t *testing.T) {
 	vuln := NewVulnerability("workflow_dispatch", "pkg:github/acme/api", ".github/workflows/deploy.yml", 0)
+	SetVulnerabilityExploitSupport(&vuln)
 
 	assert.Equal(t, true, vuln.Properties["exploit_supported"])
 	_, hasReason := vuln.Properties["exploit_support_reason"]
 	assert.False(t, hasReason)
+}
+
+func TestSetVulnerabilityExploitSupport_QuotedHeredocIsAnalyzeOnly(t *testing.T) {
+	vuln := NewVulnerability("injection", "pkg:github/acme/api", ".github/workflows/ci.yml", 42)
+	vuln.SetProperty("bash_context", "bash_heredoc_quoted")
+
+	SetVulnerabilityExploitSupport(&vuln)
+
+	assert.Equal(t, false, vuln.Properties["exploit_supported"])
+	assert.Equal(t, "Quoted heredoc bodies do not evaluate shell substitutions.", vuln.Properties["exploit_support_reason"])
 }
 
 func TestClassifyRuleSeverity(t *testing.T) {

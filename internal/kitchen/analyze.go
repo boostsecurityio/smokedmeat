@@ -771,7 +771,6 @@ func (h *Handler) importAnalysisToPantry(result *poutine.AnalysisResult) int {
 		}
 		vuln := pantry.NewVulnerability(f.RuleID, purl, f.Workflow, f.Line)
 		vuln.Provider = "github"
-		pantry.SetVulnerabilityExploitSupport(&vuln)
 		vuln.State = pantry.StateHighValue
 		vuln.Severity = f.Severity
 		if f.Title != "" {
@@ -782,6 +781,9 @@ func (h *Handler) importAnalysisToPantry(result *poutine.AnalysisResult) int {
 		}
 		if f.Context != "" {
 			vuln.SetProperty("context", f.Context)
+		}
+		if f.BashContext != "" {
+			vuln.SetProperty("bash_context", f.BashContext)
 		}
 		if f.Trigger != "" {
 			vuln.SetProperty("trigger", f.Trigger)
@@ -822,6 +824,7 @@ func (h *Handler) importAnalysisToPantry(result *poutine.AnalysisResult) int {
 		if len(f.CachePoisonVictims) > 0 {
 			vuln.SetProperty("cache_poison_victims", f.CachePoisonVictims)
 		}
+		pantry.SetVulnerabilityExploitSupport(&vuln)
 
 		if err := p.AddAsset(vuln); err == nil {
 			imported++

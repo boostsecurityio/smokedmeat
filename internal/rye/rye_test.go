@@ -105,15 +105,26 @@ func TestGenerator_FitsConstraints(t *testing.T) {
 
 func TestGetContextByName(t *testing.T) {
 	tests := []struct {
-		name   string
-		exists bool
+		name     string
+		exists   bool
+		wantName string
 	}{
-		{"git_branch", true},
-		{"pr_title", true},
-		{"pr_body", true},
-		{"commit_message", true},
-		{"github_script", true},
-		{"nonexistent", false},
+		{"git_branch", true, "git_branch"},
+		{"pr_title", true, "pr_title"},
+		{"pr_body", true, "pr_body"},
+		{"commit_message", true, "commit_message"},
+		{"issue_title", true, "issue_title"},
+		{"issue_body", true, "issue_body"},
+		{"issue_comment", true, "bash_single_quoted"},
+		{"comment_body", true, "bash_single_quoted"},
+		{"comment.body", true, "bash_single_quoted"},
+		{"issue_comment.body", true, "bash_single_quoted"},
+		{"bash_unquoted", true, "bash_unquoted"},
+		{"bash_single_quoted", true, "bash_single_quoted"},
+		{"bash_double_quoted", true, "bash_double_quoted"},
+		{"bash_heredoc_unquoted", true, "bash_heredoc_unquoted"},
+		{"github_script", true, "github_script"},
+		{"nonexistent", false, ""},
 	}
 
 	for _, tt := range tests {
@@ -121,7 +132,7 @@ func TestGetContextByName(t *testing.T) {
 			ctx, ok := GetContextByName(tt.name)
 			assert.Equal(t, tt.exists, ok)
 			if tt.exists {
-				assert.Equal(t, tt.name, ctx.Name)
+				assert.Equal(t, tt.wantName, ctx.Name)
 			}
 		})
 	}

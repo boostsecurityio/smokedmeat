@@ -517,7 +517,7 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 
 	supportedCount := 0
 	for _, f := range result.Findings {
-		if supported, _ := pantry.VulnerabilityExploitSupport("github", f.Workflow, f.RuleID); supported {
+		if supported, _ := pantry.VulnerabilityExploitSupportWithBashContext("github", f.Workflow, f.RuleID, f.BashContext); supported {
 			supportedCount++
 		}
 	}
@@ -561,7 +561,7 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 			if existing[key] {
 				continue
 			}
-			supported, reason := pantry.VulnerabilityExploitSupport("github", f.Workflow, f.RuleID)
+			supported, reason := pantry.VulnerabilityExploitSupportWithBashContext("github", f.Workflow, f.RuleID, f.BashContext)
 			vulnID := fmt.Sprintf("V%03d", nextVulnID)
 			nextVulnID++
 			m.vulnerabilities = append(m.vulnerabilities, Vulnerability{
@@ -574,6 +574,7 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 				Title:                f.Title,
 				RuleID:               f.RuleID,
 				Context:              f.Context,
+				BashContext:          f.BashContext,
 				Trigger:              f.Trigger,
 				Expression:           f.Expression,
 				Severity:             f.Severity,

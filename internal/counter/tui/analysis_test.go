@@ -389,6 +389,7 @@ func TestModel_Update_AnalysisCompleted_PreservesAllVulnFields(t *testing.T) {
 					RuleID:            "injection",
 					Severity:          "critical",
 					Context:           "comment_body",
+					BashContext:       "bash_single_quoted",
 					Trigger:           "issue_comment",
 					Expression:        "${{ github.event.comment.body }}",
 					InjectionSources:  []string{"github.event.comment.body"},
@@ -405,6 +406,7 @@ func TestModel_Update_AnalysisCompleted_PreservesAllVulnFields(t *testing.T) {
 	require.Len(t, model.vulnerabilities, 1)
 	v := model.vulnerabilities[0]
 
+	assert.Equal(t, "bash_single_quoted", v.BashContext)
 	assert.Equal(t, []string{"github.event.comment.body"}, v.InjectionSources)
 	assert.Equal(t, []string{"AWS_KEY"}, v.ReferencedSecrets)
 	assert.Equal(t, []string{"/deploy"}, v.GateTriggers)

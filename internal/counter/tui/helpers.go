@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
+	"github.com/boostsecurityio/smokedmeat/internal/rye"
 )
 
 func Hyperlink(url, displayText string) string {
@@ -203,6 +204,23 @@ func applyFocusIndicatorAndPad(lines []string, targetHeight int, focused bool) [
 
 func (m *Model) getEphemeralTokenForDispatch() *CollectedSecret {
 	return m.dispatchCredential()
+}
+
+func payloadContextNameForVuln(vuln *Vulnerability) string {
+	if vuln == nil {
+		return rye.BashRun.Name
+	}
+	if name := strings.TrimSpace(vuln.BashContext); name != "" {
+		return name
+	}
+	if name := strings.TrimSpace(vuln.Context); name != "" {
+		return name
+	}
+	return rye.BashRun.Name
+}
+
+func payloadInjectionContextForVuln(vuln *Vulnerability) (rye.InjectionContext, bool) {
+	return rye.GetContextByName(payloadContextNameForVuln(vuln))
 }
 
 func (m Model) canPivotSecret(secret CollectedSecret) bool {
