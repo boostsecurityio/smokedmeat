@@ -567,6 +567,28 @@ func completeCommentDeployWizardWithCachePoison(t *testing.T, tmux *TmuxControll
 	}
 }
 
+func completeAutoPRDeployWizard(t *testing.T, tmux *TmuxController, dwellAdjustments int) {
+	t.Helper()
+
+	t.Log("Step 1/3: Confirming vuln → Enter")
+	require.NoError(t, tmux.SendKeys("Enter"))
+	requireContent(t, tmux, "Step 2/3", 10*time.Second, "Wizard Step 2/3 should appear")
+
+	t.Log("Step 2/3: Selecting Create PR (1) → Enter")
+	require.NoError(t, tmux.SendKeys("1"))
+	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, tmux.SendKeys("Enter"))
+	requireContent(t, tmux, "Step 3/3", 10*time.Second, "Wizard Step 3/3 should appear")
+
+	if dwellAdjustments > 0 {
+		t.Log("Step 3/3: Setting dwell time...")
+		for i := 0; i < dwellAdjustments; i++ {
+			require.NoError(t, tmux.SendKeys("d"))
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+}
+
 func completeDispatchDeployWizard(t *testing.T, tmux *TmuxController, dwellAdjustments int) {
 	t.Helper()
 

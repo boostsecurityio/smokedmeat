@@ -7,6 +7,8 @@ package e2e
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,16 +20,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	infraRepo            = "whooli/infrastructure-definitions"
-	benchmarkBotWorkflow = ".github/workflows/benchmark-bot.yml"
-	deployWorkflow       = ".github/workflows/deploy.yml"
-	flagBucket           = "whooli-newcleus-benchmarks"
+	infraRepo              = "whooli/infrastructure-definitions"
+	benchmarkBotWorkflow   = ".github/workflows/benchmark-bot.yml"
+	deployWorkflow         = ".github/workflows/deploy.yml"
+	founderPreviewWorkflow = ".github/workflows/founder-preview-intake.yml"
+	flagBucket             = "whooli-newcleus-benchmarks"
+	flagXYZHash            = "2c90d898d0924d8d5cf3f4094fd446bb0f1deea61c4b41f9b40215852dfe1414"
 )
 
 var (
@@ -80,6 +85,32 @@ func TestGOATFlagPath(t *testing.T) {
 	requireContent(t, tmux, "whooli", 15*time.Second, "Attack tree should show target org")
 	requireContent(t, tmux, "xyz", 15*time.Second, "Attack tree should show target repo")
 
+	runCounterCommand(t, tmux, "exploit "+filepath.Base(founderPreviewWorkflow)+" git_branch")
+	requireContent(t, tmux, "Step 1/3", 10*time.Second, "Branch-name side quest wizard should appear")
+	completeAutoPRDeployWizard(t, tmux, 0)
+	require.NoError(t, tmux.SendKeys("Enter"))
+
+	deployPhase := waitForAny(tmux, []string{"Phase:Waiting", "Phase:Post-Exploit"}, 30*time.Second)
+	require.NotEmpty(t, deployPhase, "Branch-name side quest should transition after deploy")
+
+	if deployPhase == "Phase:Waiting" {
+		require.True(t, waitForContent(tmux, "Phase:Post-Exploit", 5*time.Minute),
+			"Branch-name side quest should transition to Post-Exploit")
+	}
+
+	requireContent(t, tmux, "FLAG_XYZ", 2*time.Minute, "Branch-name side quest should surface FLAG_XYZ in findings")
+	jumpOmnibox(t, tmux, "JILFOIL_FIREWALL_DIRECTIVE", "JILFOIL_FIREWALL_DIRECTIVE", 2*time.Minute)
+	ensureLootFocus(t, tmux)
+	require.NoError(t, clipboard.WriteAll(""))
+	require.NoError(t, tmux.SendKeys("c"))
+	flagXYZ := waitForClipboardValue(t, 10*time.Second)
+	require.True(t, strings.HasPrefix(flagXYZ, "flag_"), "FLAG_XYZ should start with flag_")
+	assert.Equal(t, flagXYZHash, sha256Hex(flagXYZ))
+
+	ensureShortcutFocus(t, tmux)
+	require.NoError(t, tmux.SendKeys("r"))
+	requireContent(t, tmux, "Phase:Recon", 10*time.Second, "Should return to Recon phase after branch-name side quest")
+
 	vulnKey := "2"
 	if capture := tmux.CaptureClean(); capture != "" {
 		if key := findMenuVulnAll(capture, "issue body", "auto-labeler"); key != "" {
@@ -92,7 +123,7 @@ func TestGOATFlagPath(t *testing.T) {
 	requireContent(t, tmux, "5m0s", 2*time.Second, "Dwell time should be 5m0s")
 	require.NoError(t, tmux.SendKeys("Enter"))
 
-	deployPhase := waitForAny(tmux, []string{"Phase:Waiting", "Phase:Post-Exploit"}, 30*time.Second)
+	deployPhase = waitForAny(tmux, []string{"Phase:Waiting", "Phase:Post-Exploit"}, 30*time.Second)
 	require.NotEmpty(t, deployPhase, "Phase should transition after deploy")
 
 	issue := findDeployedIssue(t, 30*time.Second)
@@ -231,20 +262,99 @@ func TestGOATFlagPath(t *testing.T) {
 func requireVaultAppKey(t *testing.T, root string) vaultToken {
 	t.Helper()
 
+	token := requireVaultTokenByName(t, root, "WHOOLI_BOT_APP_PRIVATE_KEY")
+	require.NotEmpty(t, token.PairedAppID, "vault did not contain a paired WHOOLI_BOT_APP_PRIVATE_KEY")
+	return token
+}
+
+func requireVaultTokenByName(t *testing.T, root, name string) vaultToken {
+	t.Helper()
+
+	return requireVaultTokenByNames(t, root, name)
+}
+
+func requireVaultTokenByNames(t *testing.T, root string, names ...string) vaultToken {
+	t.Helper()
+
 	data, err := os.ReadFile(filepath.Join(root, e2eVault))
 	require.NoError(t, err)
 
 	var vault vaultFile
 	require.NoError(t, yaml.Unmarshal(data, &vault))
 
-	for _, token := range vault.Tokens {
-		if token.Name == "WHOOLI_BOT_APP_PRIVATE_KEY" && token.Value != "" && token.PairedAppID != "" {
-			return token
+	for i := len(vault.Tokens) - 1; i >= 0; i-- {
+		token := vault.Tokens[i]
+		if token.Value == "" {
+			continue
+		}
+		for _, name := range names {
+			if token.Name == name {
+				return token
+			}
 		}
 	}
 
-	t.Fatalf("vault did not contain a paired WHOOLI_BOT_APP_PRIVATE_KEY")
+	t.Fatalf("vault did not contain any of %s", strings.Join(names, ", "))
 	return vaultToken{}
+}
+
+func waitForVaultTokenByNames(t *testing.T, root string, timeout time.Duration, names ...string) vaultToken {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if path := filepath.Join(root, e2eVault); fileExists(path) {
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+
+			var vault vaultFile
+			require.NoError(t, yaml.Unmarshal(data, &vault))
+
+			for i := len(vault.Tokens) - 1; i >= 0; i-- {
+				token := vault.Tokens[i]
+				if token.Value == "" {
+					continue
+				}
+				for _, name := range names {
+					if token.Name == name {
+						return token
+					}
+				}
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	t.Fatalf("vault did not contain any of %s within %s", strings.Join(names, ", "), timeout)
+	return vaultToken{}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func sha256Hex(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func waitForClipboardValue(t *testing.T, timeout time.Duration) string {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		value, err := clipboard.ReadAll()
+		require.NoError(t, err)
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	t.Fatalf("clipboard did not contain a value within %s", timeout)
+	return ""
 }
 
 func matchingActionsCaches(caches []actionsCache, prefix, ref string) []actionsCache {

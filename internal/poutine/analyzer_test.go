@@ -803,6 +803,7 @@ func TestDetermineContextFromSources(t *testing.T) {
 		{"empty sources", nil, "unknown"},
 		{"workflow dispatch input", []string{"github.event.inputs.name"}, "workflow_dispatch_input"},
 		{"head ref", []string{"github.head_ref"}, "git_branch"},
+		{"pr head ref", []string{"github.event.pull_request.head.ref"}, "git_branch"},
 		{"pr title", []string{"github.event.pull_request.title"}, "pr_title"},
 		{"pr body", []string{"github.event.pull_request.body"}, "pr_body"},
 		{"issue title", []string{"github.event.issue.title"}, "issue_title"},

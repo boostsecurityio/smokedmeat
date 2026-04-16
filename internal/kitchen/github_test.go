@@ -272,8 +272,26 @@ func TestBuildPRContent_PRBodyInjection(t *testing.T) {
 	assert.Equal(t, payload, body, "body should be the injected payload")
 }
 
+func TestBuildPRContent_GitBranchInjection(t *testing.T) {
+	vuln := &VulnerabilityInfo{
+		Repository: "acme/api",
+		Workflow:   "ci.yml",
+		Context:    "git_branch",
+		ID:         "V003",
+	}
+	payload := "test-branch-$(whoami)"
+
+	title, body := buildPRContent(vuln, payload)
+
+	assert.Equal(t, "test: CI workflow validation", title, "branch-name PR title should stay generic")
+	assert.Contains(t, body, "ci.yml", "body should mention workflow")
+	assert.Contains(t, body, "git_branch", "body should mention context")
+	assert.NotContains(t, body, payload, "body should not contain the branch-name payload")
+	assert.NotContains(t, body, "Payload:", "body should not include a payload section")
+}
+
 func TestBuildPRContent_DefaultFallback(t *testing.T) {
-	contexts := []string{"git_branch", "unknown", "comment"}
+	contexts := []string{"unknown", "comment"}
 
 	for _, ctx := range contexts {
 		t.Run(ctx, func(t *testing.T) {
@@ -305,7 +323,7 @@ func TestBuildPRContent_AllContexts(t *testing.T) {
 	}{
 		{"pr_title", "", true, false},
 		{"pr_body", "test: CI workflow validation", false, true},
-		{"git_branch", "", false, true},
+		{"git_branch", "test: CI workflow validation", false, false},
 		{"comment", "", false, true},
 		{"issue_comment", "", false, true},
 	}
@@ -329,6 +347,8 @@ func TestBuildPRContent_AllContexts(t *testing.T) {
 
 			if tt.payloadInBody {
 				assert.Contains(t, body, payload)
+			} else {
+				assert.NotContains(t, body, payload)
 			}
 		})
 	}
