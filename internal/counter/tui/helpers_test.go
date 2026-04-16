@@ -244,6 +244,24 @@ func TestCanUseDeliveryMethod_AppTokenAllowsPRWithContentsAndPullRequests(t *tes
 	assert.True(t, m.canUseDeliveryMethod(DeliveryLOTP))
 }
 
+func TestPayloadContextNameForVuln_PrefersBashContextForCommentBody(t *testing.T) {
+	vuln := &Vulnerability{
+		Context:     "comment_body",
+		BashContext: "bash_unquoted",
+	}
+
+	assert.Equal(t, "bash_unquoted", payloadContextNameForVuln(vuln))
+}
+
+func TestPayloadContextNameForVuln_KeepsSourceContextForGitBranch(t *testing.T) {
+	vuln := &Vulnerability{
+		Context:     "git_branch",
+		BashContext: "bash_single_quoted",
+	}
+
+	assert.Equal(t, "git_branch", payloadContextNameForVuln(vuln))
+}
+
 func TestPermissionAllowsWrite_NormalizesHyphenatedKeys(t *testing.T) {
 	perms := map[string]string{"pull-requests": "write"}
 
