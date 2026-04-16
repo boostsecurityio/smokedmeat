@@ -237,7 +237,6 @@ func shouldPreferBashContextForPayload(contextName string) bool {
 		return false
 	}
 }
-
 func (m Model) canPivotSecret(secret CollectedSecret) bool {
 	if secret.Type == "github_app_key" || secret.Type == "github_app_id" || secret.CanUseAsSSHKey() {
 		return true
