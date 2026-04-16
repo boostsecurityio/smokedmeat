@@ -705,6 +705,8 @@ func determineContextFromSources(sources []string) string {
 		return "pr_title"
 	case strings.Contains(src, "pull_request.body"):
 		return "pr_body"
+	case strings.Contains(src, "pull_request.head.ref"):
+		return "git_branch"
 	case strings.Contains(src, "issue.title"):
 		return "issue_title"
 	case strings.Contains(src, "issue.body"):
