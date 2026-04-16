@@ -76,6 +76,13 @@ EOF`,
 			expected: bashContextQuotedHeredoc,
 		},
 		{
+			name: "double quoted heredoc delimiter",
+			run: `cat <<"EOF"
+${{ github.event.comment.body }}
+EOF`,
+			expected: bashContextQuotedHeredoc,
+		},
+		{
 			name: "escaped heredoc delimiter",
 			run: `cat <<\EOF
 ${{ github.event.comment.body }}

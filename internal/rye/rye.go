@@ -117,7 +117,7 @@ var (
 
 	BashSingleQuoted = InjectionContext{
 		Name:       "bash_single_quoted",
-		MaxLength:  65536,
+		MaxLength:  0,
 		QuoteStyle: QuoteSingle,
 		Multiline:  true,
 		Language:   LangBash,

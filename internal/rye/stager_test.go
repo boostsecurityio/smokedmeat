@@ -56,7 +56,7 @@ func TestStager_GenerateBash_IssueCommentPolyglot(t *testing.T) {
 	)
 }
 
-func TestStager_GenerateBash_IssueCommentPolyglot_SingleQuotedWorkflowShape(t *testing.T) {
+func TestStager_GenerateBash_IssueCommentPolyglot_VerifiesSingleQuotedWorkflowShape(t *testing.T) {
 	stager := NewStagerWithID("cmt123", "http://k.io", BashSingleQuoted)
 	payload := stager.Generate()
 
