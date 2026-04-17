@@ -32,6 +32,7 @@ require (
 	github.com/nats-io/nats.go v1.38.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go/modules/nats v0.40.0
+	mvdan.cc/sh/v3 v3.13.1
 	github.com/zricethezav/gitleaks/v8 v8.30.0
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/crypto v0.49.0

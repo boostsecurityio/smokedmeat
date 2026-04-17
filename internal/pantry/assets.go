@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/boostsecurityio/smokedmeat/internal/bashctx"
 )
 
 // AssetType represents the type of discovered asset.
@@ -160,16 +162,22 @@ func NewVulnerability(ruleID, purl, path string, line int) Asset {
 	asset.Properties["path"] = path
 	asset.Properties["line"] = line
 	asset.Severity = classifyRuleSeverity(ruleID)
-	SetVulnerabilityExploitSupport(&asset)
 	return asset
 }
 
 func VulnerabilityExploitSupport(provider, path, ruleID string) (supported bool, reason string) {
+	return VulnerabilityExploitSupportWithBashContext(provider, path, ruleID, "")
+}
+
+func VulnerabilityExploitSupportWithBashContext(provider, path, ruleID, bashContext string) (supported bool, reason string) {
 	if strings.TrimSpace(provider) != "github" || !strings.HasPrefix(strings.TrimSpace(path), ".github/workflows/") {
 		return false, "This finding is analyze-only in v0.1.0. Exploit actions are only available for GitHub Actions workflows."
 	}
 	switch strings.TrimSpace(ruleID) {
 	case "injection", "untrusted_checkout_exec", "workflow_dispatch":
+		if strings.TrimSpace(bashContext) == bashctx.QuotedHeredoc {
+			return false, "Quoted heredoc bodies do not evaluate shell substitutions."
+		}
 		return true, ""
 	case "pr_runs_on_self_hosted":
 		return false, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet."
@@ -183,7 +191,8 @@ func SetVulnerabilityExploitSupport(asset *Asset) {
 		return
 	}
 	path, _ := asset.Properties["path"].(string)
-	supported, reason := VulnerabilityExploitSupport(asset.Provider, path, asset.RuleID)
+	bashContext, _ := asset.Properties["bash_context"].(string)
+	supported, reason := VulnerabilityExploitSupportWithBashContext(asset.Provider, path, asset.RuleID, bashContext)
 	asset.Properties["exploit_supported"] = supported
 	if reason == "" {
 		delete(asset.Properties, "exploit_support_reason")

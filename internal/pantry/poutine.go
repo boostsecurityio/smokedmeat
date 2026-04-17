@@ -185,6 +185,7 @@ func (p *Pantry) ImportPoutineFindings(insights *PackageInsights) error {
 		if len(finding.Meta.LOTPTargets) > 0 {
 			vuln.SetProperty("lotp_targets", finding.Meta.LOTPTargets)
 		}
+		SetVulnerabilityExploitSupport(&vuln)
 
 		if err := p.AddAsset(vuln); err != nil {
 			continue

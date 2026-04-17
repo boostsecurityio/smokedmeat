@@ -137,9 +137,10 @@ type Finding struct {
 	Details     string `json:"details,omitempty"`     // Additional details
 
 	// Injection-specific metadata (for initial access exploitation)
-	Context    string `json:"context,omitempty"`    // Injection context: "bash_run", "github_script", etc.
-	Trigger    string `json:"trigger,omitempty"`    // Workflow trigger: "pull_request", "push", etc.
-	Expression string `json:"expression,omitempty"` // The vulnerable expression (${{ ... }})
+	Context     string `json:"context,omitempty"`      // Injection context: "bash_run", "github_script", etc.
+	BashContext string `json:"bash_context,omitempty"` // Bash wrapper context when applicable
+	Trigger     string `json:"trigger,omitempty"`      // Workflow trigger: "pull_request", "push", etc.
+	Expression  string `json:"expression,omitempty"`   // The vulnerable expression (${{ ... }})
 
 	InjectionSources   []string                      `json:"injection_sources,omitempty"`
 	ReferencedSecrets  []string                      `json:"referenced_secrets,omitempty"`
@@ -428,6 +429,14 @@ func convertFindings(result *AnalysisResult, packages []*models.PackageInsights)
 			if len(f.Meta.InjectionSources) > 0 {
 				finding.Context = determineContextFromSources(f.Meta.InjectionSources)
 				finding.Expression = "${{ " + f.Meta.InjectionSources[0] + " }}"
+				finding.BashContext = determineBashContextForFinding(
+					pkg.GithubActionsWorkflows,
+					f.Meta.Path,
+					f.Meta.Job,
+					f.Meta.Step,
+					f.Meta.Line,
+					f.Meta.InjectionSources,
+				)
 			} else {
 				finding.Context = determineContext(f.RuleId, f.Meta)
 				finding.Expression = extractExpression(f.Meta.Details)
