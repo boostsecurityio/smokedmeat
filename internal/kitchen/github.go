@@ -1149,19 +1149,14 @@ func (c *gitHubClient) deployLOTP(ctx context.Context, vuln *VulnerabilityInfo, 
 		return "", fmt.Errorf("LOTP tool not specified — select a vulnerability with lotp_tool metadata")
 	}
 
-	var files []lotpFile
-	switch lotpTool {
-	case "bash", "powershell", "python":
-		files = dynamicScriptFiles(lotpTool, lotpTargets, callbackURL)
-	default:
-		opts := lotp.PayloadOptions{
-			CallbackURL: callbackURL,
-		}
-		payload := lotp.RecommendBestPayload([]lotp.Technique{{Name: lotpTool}}, opts)
-		if payload == nil {
-			return "", fmt.Errorf("unsupported LOTP tool: %s", lotpTool)
-		}
-		files = lotpFilesToCommit(payload, lotpTool, lotpTargets, callbackURL)
+	generatedFiles := lotp.GenerateFiles(lotpTool, lotpTargets, callbackURL)
+	if len(generatedFiles) == 0 {
+		return "", fmt.Errorf("unsupported LOTP tool: %s", lotpTool)
+	}
+
+	files := make([]lotpFile, 0, len(generatedFiles))
+	for _, f := range generatedFiles {
+		files = append(files, lotpFile{path: f.Path, content: f.Content})
 	}
 
 	for _, f := range files {

