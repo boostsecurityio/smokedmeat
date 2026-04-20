@@ -22,7 +22,6 @@ Last updated: 2026-04-20
 | P1 | Planned | Demo hardening and rehearsal path | The happy path for the talk needs to be stable, repeatable, and covered by the exact repos and flows that will be shown live. | Ref: [WHOOLI.md](WHOOLI.md) |
 | P2 | Deferred | Make LOTP targeting and detection path-aware, or hide unsupported shapes | Useful follow-up, but not worth spending pre-NorthSec time on until the demo path is dry-run and the talk prep is under control. | Issue [#54](https://github.com/boostsecurityio/smokedmeat/issues/54) |
 | P2 | Planned | Bracket-notation secret extraction | Workflow secret inventory and app-action secret extraction still only recognize `secrets.NAME`, so bracket notation stays invisible in recon output and secret typing. | Current analysis path |
-| P2 | Planned | Quoted Bash heredoc exploitation | Valuable exploit-coverage expansion, but current analyze-only behavior is at least honest. | Issue [#51](https://github.com/boostsecurityio/smokedmeat/issues/51) |
 
 ## Validated Near-Term Work
 
@@ -88,6 +87,7 @@ The phase breakdown in [tasks/self-hosted-runner-enumeration-and-persistence.md]
 | P3 | Operator notifications | Outbound webhook notifications for check-ins, loot, and deploy outcomes. | Task: [tasks/operator-notifications.md](tasks/operator-notifications.md) |
 | P3 | Kitchen audit trail and IOC export | Extend history into append-only audit and exportable IOC reporting. | Task: [tasks/kitchen-audit-trail-and-ioc-export.md](tasks/kitchen-audit-trail-and-ioc-export.md) |
 | P3 | Goal-oriented kill chain planning | Combine multiple credentials and repo constraints toward a chosen end state. | Task: [tasks/goal-oriented-killchain.md](tasks/goal-oriented-killchain.md) |
+| P3 | Quoted Bash heredoc exploitation | Useful exploit-coverage expansion, but the current analyze-only behavior is honest enough that this can wait until after NorthSec. | Issue [#51](https://github.com/boostsecurityio/smokedmeat/issues/51) |
 | P4 | Counter / Kitchen boundary refactor | Move client-neutral logic toward Kitchen and tighten shared contracts. | Task: [tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
 | P4 | Shared analysis progress constants and payload contract | Keep the Kitchen to Counter protocol in one place so client and server cannot drift. | Ref: [tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
 | P4 | Embedded shell mode and native Go E2E | Replace the tmux shell boundary with an in-app shell and stronger native E2E coverage. | Task: [tasks/embedded-shell-and-native-go-e2e.md](tasks/embedded-shell-and-native-go-e2e.md) |
