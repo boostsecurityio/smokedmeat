@@ -467,9 +467,13 @@ func TestModel_Update_AnalysisCompleted_AssignsUniqueIDsAcrossRuns(t *testing.T)
 	model = result.(Model)
 
 	require.Len(t, model.vulnerabilities, 2)
-	assert.Equal(t, "V001", model.vulnerabilities[0].ID)
-	assert.Equal(t, "V002", model.vulnerabilities[1].ID)
-	assert.Equal(t, "acme/infrastructure", model.vulnerabilities[1].Repository)
+	byID := make(map[string]Vulnerability, len(model.vulnerabilities))
+	for _, vuln := range model.vulnerabilities {
+		byID[vuln.ID] = vuln
+	}
+	assert.Contains(t, byID, "V001")
+	assert.Contains(t, byID, "V002")
+	assert.Equal(t, "acme/infrastructure", byID["V002"].Repository)
 }
 
 func TestModel_Update_AnalysisCompleted_DeduplicatesByFingerprint(t *testing.T) {

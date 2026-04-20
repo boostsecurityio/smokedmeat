@@ -5,6 +5,7 @@
 package db
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -35,8 +36,12 @@ var (
 var schemaKey = []byte("schema")
 
 const (
-	currentSchemaMajor = 1
+	currentSchemaMajor = 2
 	currentSchemaMinor = 0
+	legacySchemaMajor  = 1
+	legacySchemaMinor  = 0
+	// Keep this string stable - quickstart readiness checks grep for it in Kitchen logs.
+	schemaPurgeHint = "purge the Kitchen volume with make quickstart-purge or make dev-quickstart-purge"
 )
 
 // DB wraps a BBolt database connection for Kitchen persistence.
@@ -69,20 +74,22 @@ type unversionedSchemaError struct {
 
 func (e *schemaVersionError) Error() string {
 	return fmt.Sprintf(
-		"kitchen DB schema %d.%d is incompatible with this binary schema %d.%d - purge the Kitchen volume with make quickstart-purge or make dev-quickstart-purge, or remove %s manually",
+		"kitchen DB schema %d.%d is incompatible with this binary schema %d.%d - this existing Kitchen volume cannot be opened directly; %s, or remove %s manually",
 		e.StoredMajor,
 		e.StoredMinor,
 		e.CurrentMajor,
 		e.CurrentMinor,
+		schemaPurgeHint,
 		e.Path,
 	)
 }
 
 func (e *unversionedSchemaError) Error() string {
 	return fmt.Sprintf(
-		"kitchen DB at %s has no schema metadata and unknown top-level buckets [%s] - purge the Kitchen volume with make quickstart-purge or make dev-quickstart-purge, or remove %s manually",
+		"kitchen DB at %s has no schema metadata and unknown top-level buckets [%s] - %s, or remove %s manually",
 		e.Path,
 		strings.Join(e.UnknownBuckets, ", "),
+		schemaPurgeHint,
 		e.Path,
 	)
 }
@@ -200,8 +207,12 @@ func validateUnversionedLayout(tx *bolt.Tx, path string) error {
 	}
 
 	var unknown []string
+	hasKnownBuckets := false
 	if err := tx.ForEach(func(name []byte, _ *bolt.Bucket) error {
 		if _, ok := allowed[string(name)]; ok {
+			if !bytes.Equal(name, BucketMeta) {
+				hasKnownBuckets = true
+			}
 			return nil
 		}
 		unknown = append(unknown, string(name))
@@ -211,6 +222,15 @@ func validateUnversionedLayout(tx *bolt.Tx, path string) error {
 	}
 
 	if len(unknown) == 0 {
+		if hasKnownBuckets {
+			return &schemaVersionError{
+				Path:         path,
+				StoredMajor:  legacySchemaMajor,
+				StoredMinor:  legacySchemaMinor,
+				CurrentMajor: currentSchemaMajor,
+				CurrentMinor: currentSchemaMinor,
+			}
+		}
 		return nil
 	}
 

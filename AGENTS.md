@@ -30,6 +30,14 @@ Bad: `Kitchen — C2 teamserver with WebSocket API`
 Good: `// Timeout prevents infinite hangs from malicious payloads`
 Bad: `// Create a new context with timeout`
 
+## CRITICAL: GitHub Operations Use `gh` CLI
+
+The GitHub App for Codex is not installed for this repository, and we will not install it.
+
+- Use `gh` CLI for GitHub operations in this repo
+- Do not rely on GitHub App write access for PR comments, review-thread resolution, labels, or similar actions
+- If a GitHub connector can read metadata but cannot perform the write, fall back to `gh` immediately
+
 ## Quick Start (Local Dev)
 
 ```bash

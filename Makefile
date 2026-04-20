@@ -112,6 +112,22 @@ define print_quickstart_hint
 	@printf "  \033[1;34m%s\033[0m\n" "$(1)"
 endef
 
+define print_quickstart_schema_mismatch
+		printf "\n"; \
+		printf "\033[1;31m[schema]\033[0m \033[1mKitchen cannot open the existing quickstart DB volume.\033[0m\n"; \
+		STORED_SCHEMA=$$(printf '%s\n' "$$SCHEMA_LOG" | sed -n 's/.*schema \([0-9][0-9]*\.[0-9][0-9]*\) is incompatible with this binary schema \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p'); \
+		CURRENT_SCHEMA=$$(printf '%s\n' "$$SCHEMA_LOG" | sed -n 's/.*schema \([0-9][0-9]*\.[0-9][0-9]*\) is incompatible with this binary schema \([0-9][0-9]*\.[0-9][0-9]*\).*/\2/p'); \
+		if [ -n "$$STORED_SCHEMA" ] && [ -n "$$CURRENT_SCHEMA" ]; then \
+			printf "  \033[90mExisting volume schema: \033[36m%s\033[90m  Current binary schema: \033[36m%s\033[0m\n" "$$STORED_SCHEMA" "$$CURRENT_SCHEMA"; \
+		fi; \
+		printf "  \033[90mPurge the Kitchen volume before retrying this quickstart.\033[0m\n"; \
+		printf "\n"; \
+		printf "\033[1;33m[fix]\033[0m \033[36m%s\033[0m\n" "$(1)"; \
+		printf "  \033[90mRerun the same quickstart command after the purge completes.\033[0m\n"; \
+		printf "\033[1;34m[note]\033[0m If this volume came from the other quickstart flavor, use \033[36m%s\033[0m\n" "$(2)"; \
+		printf "\n";
+endef
+
 define start_release_quickstart_services
 	@COMPOSE_OUTPUT=$$(mktemp); \
 	$(QUICKSTART_RELEASE_COMPOSE) up -d --quiet-pull cloudflared nats kitchen-init kitchen >"$$COMPOSE_OUTPUT" 2>&1 & \
@@ -456,6 +472,14 @@ define wait_for_release_quickstart_tunnel_health
 				exit 0; \
 			fi; \
 		fi; \
+		SCHEMA_LOG=$$($(QUICKSTART_RELEASE_COMPOSE) logs --tail=50 kitchen 2>&1 | \
+			grep -F 'purge the Kitchen volume with make quickstart-purge or make dev-quickstart-purge' | \
+			tail -1); \
+		if [ -n "$$SCHEMA_LOG" ]; then \
+			$(QUICKSTART_RELEASE_COMPOSE) stop kitchen >/dev/null 2>&1 || true; \
+			$(call print_quickstart_schema_mismatch,make quickstart-purge,make dev-quickstart-purge) \
+			exit 1; \
+		fi; \
 		sleep 2; \
 	done; \
 	echo "ERROR: quickstart tunnel never became ready (kitchen ready count: $$LAST_KITCHEN, local health code: $$LAST_CODE)"; \
@@ -511,6 +535,14 @@ define wait_for_quickstart_tunnel_health
 				echo "External callbacks may still take a moment while the tunnel hostname propagates."; \
 				exit 0; \
 			fi; \
+		fi; \
+		SCHEMA_LOG=$$($(QUICKSTART_COMPOSE) logs --tail=50 kitchen 2>&1 | \
+			grep -F 'purge the Kitchen volume with make quickstart-purge or make dev-quickstart-purge' | \
+			tail -1); \
+		if [ -n "$$SCHEMA_LOG" ]; then \
+			$(QUICKSTART_COMPOSE) stop kitchen >/dev/null 2>&1 || true; \
+			$(call print_quickstart_schema_mismatch,make dev-quickstart-purge,make quickstart-purge) \
+			exit 1; \
 		fi; \
 		sleep 2; \
 	done; \
@@ -667,6 +699,14 @@ define wait_for_quickstart_kitchen_health
 		if [ "$$CODE" = "200" ]; then \
 			echo "Quickstart Kitchen is reachable locally at http://127.0.0.1:$$BROWSER_PORT."; \
 			exit 0; \
+		fi; \
+		SCHEMA_LOG=$$($(QUICKSTART_COMPOSE) logs --tail=50 kitchen 2>&1 | \
+			grep -F 'purge the Kitchen volume with make quickstart-purge or make dev-quickstart-purge' | \
+			tail -1); \
+		if [ -n "$$SCHEMA_LOG" ]; then \
+			$(QUICKSTART_COMPOSE) stop kitchen >/dev/null 2>&1 || true; \
+			$(call print_quickstart_schema_mismatch,make dev-quickstart-purge,make quickstart-purge) \
+			exit 1; \
 		fi; \
 		sleep 1; \
 	done; \

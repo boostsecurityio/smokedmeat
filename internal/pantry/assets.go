@@ -6,6 +6,7 @@ package pantry
 
 import (
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"time"
 
@@ -151,8 +152,8 @@ func NewAgent(agentID, hostname, platform string) Asset {
 }
 
 // NewVulnerability creates a vulnerability asset from a poutine finding.
-func NewVulnerability(ruleID, purl, path string, line int) Asset {
-	id := fmt.Sprintf("vuln:%s:%s:%d", ruleID, path, line)
+func NewVulnerability(ruleID, purl, path string, line int, discriminator ...string) Asset {
+	id := vulnerabilityAssetID(ruleID, path, line, discriminator...)
 	asset := NewAsset(id, AssetVulnerability, ruleID)
 	asset.RuleID = ruleID
 	asset.Purl = purl
@@ -163,6 +164,24 @@ func NewVulnerability(ruleID, purl, path string, line int) Asset {
 	asset.Properties["line"] = line
 	asset.Severity = classifyRuleSeverity(ruleID)
 	return asset
+}
+
+func vulnerabilityAssetID(ruleID, path string, line int, discriminator ...string) string {
+	id := fmt.Sprintf("vuln:%s:%s:%d", ruleID, path, line)
+	values := make([]string, 0, len(discriminator))
+	for _, part := range discriminator {
+		value := strings.TrimSpace(part)
+		if value == "" {
+			continue
+		}
+		values = append(values, value)
+	}
+	if len(values) == 0 {
+		return id
+	}
+	hasher := fnv.New64a()
+	_, _ = hasher.Write([]byte(strings.Join(values, "\x00")))
+	return fmt.Sprintf("%s:%016x", id, hasher.Sum64())
 }
 
 func VulnerabilityExploitSupport(provider, path, ruleID string) (supported bool, reason string) {

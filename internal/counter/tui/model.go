@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -65,6 +66,7 @@ type Vulnerability struct {
 	Repository  string // org/repo
 	Workflow    string // .github/workflows/foo.yml
 	Job         string // Job name in workflow
+	Step        string // Step index or name in workflow
 	Line        int    // Line number in workflow
 	Title       string // "Injection", "Untrusted Checkout" - human readable
 	RuleID      string // "injection", "untrusted_checkout_exec" - poutine rule
@@ -651,80 +653,6 @@ func (m *Model) extractVulnerabilitiesFromPantry() []Vulnerability {
 	var vulns []Vulnerability
 
 	for _, pv := range pantryVulns {
-		repo := ""
-		if pv.Purl != "" {
-			_, org, repoName := pantry.ParsePurl(pv.Purl)
-			if org != "" && repoName != "" {
-				repo = org + "/" + repoName
-			}
-		}
-
-		workflow := ""
-		if path, ok := pv.Properties["path"].(string); ok {
-			workflow = path
-		}
-
-		line := 0
-		switch l := pv.Properties["line"].(type) {
-		case float64:
-			line = int(l)
-		case int:
-			line = l
-		}
-
-		title := ""
-		if t, ok := pv.Properties["title"].(string); ok && t != "" {
-			title = t
-		} else {
-			title = formatRuleID(pv.RuleID)
-		}
-
-		ctx := ""
-		if c, ok := pv.Properties["context"].(string); ok {
-			ctx = c
-		}
-		trigger := ""
-		if t, ok := pv.Properties["trigger"].(string); ok {
-			trigger = t
-		}
-		expression := ""
-		if e, ok := pv.Properties["expression"].(string); ok {
-			expression = e
-		}
-		job := ""
-		if j, ok := pv.Properties["job"].(string); ok {
-			job = j
-		}
-
-		injectionSources := propertyStringSlice(pv.Properties, "injection_sources")
-		referencedSecrets := propertyStringSlice(pv.Properties, "referenced_secrets")
-		lotpTool := ""
-		if t, ok := pv.Properties["lotp_tool"].(string); ok {
-			lotpTool = t
-		}
-		lotpAction := ""
-		if a, ok := pv.Properties["lotp_action"].(string); ok {
-			lotpAction = a
-		}
-		lotpTargets := propertyStringSlice(pv.Properties, "lotp_targets")
-		gateTriggers := propertyStringSlice(pv.Properties, "gate_triggers")
-		gateRaw := ""
-		if r, ok := pv.Properties["gate_raw"].(string); ok {
-			gateRaw = r
-		}
-		gateUnsolvable := ""
-		if u, ok := pv.Properties["gate_unsolvable"].(string); ok {
-			gateUnsolvable = u
-		}
-		bashContext := ""
-		if b, ok := pv.Properties["bash_context"].(string); ok {
-			bashContext = b
-		}
-		cachePoisonWriter, _ := pv.Properties["cache_poison_writer"].(bool)
-		cachePoisonReason := ""
-		if reason, ok := pv.Properties["cache_poison_reason"].(string); ok {
-			cachePoisonReason = reason
-		}
 		cachePoisonVictims := propertyVictimCandidates(pv.Properties, "cache_poison_victims")
 		exploitSupported, hasExploitSupport := pv.Properties["exploit_supported"].(bool)
 		exploitSupportReason := ""
@@ -735,36 +663,95 @@ func (m *Model) extractVulnerabilitiesFromPantry() []Vulnerability {
 			exploitSupported = false
 		}
 
+		repo := ""
+		if pv.Purl != "" {
+			_, org, repoName := pantry.ParsePurl(pv.Purl)
+			if org != "" && repoName != "" {
+				repo = org + "/" + repoName
+			}
+		}
+
+		workflow, _ := pv.Properties["path"].(string)
+		line := 0
+		switch value := pv.Properties["line"].(type) {
+		case float64:
+			line = int(value)
+		case int:
+			line = value
+		}
+
+		title := formatRuleID(pv.RuleID)
+		if value, ok := pv.Properties["title"].(string); ok && value != "" {
+			title = value
+		}
+
 		vulns = append(vulns, Vulnerability{
 			ID:                   pv.ID,
+			Fingerprint:          propertyString(pv.Properties, "fingerprint"),
 			Repository:           repo,
 			Workflow:             workflow,
-			Job:                  job,
+			Job:                  propertyString(pv.Properties, "job"),
+			Step:                 propertyString(pv.Properties, "step"),
 			Line:                 line,
 			Title:                title,
 			RuleID:               pv.RuleID,
 			Severity:             pv.Severity,
-			Context:              ctx,
-			BashContext:          bashContext,
-			Trigger:              trigger,
-			Expression:           expression,
-			InjectionSources:     injectionSources,
-			ReferencedSecrets:    referencedSecrets,
-			LOTPTool:             lotpTool,
-			LOTPAction:           lotpAction,
-			LOTPTargets:          lotpTargets,
-			CachePoisonWriter:    cachePoisonWriter,
-			CachePoisonReason:    cachePoisonReason,
+			Context:              propertyString(pv.Properties, "context"),
+			BashContext:          propertyString(pv.Properties, "bash_context"),
+			Trigger:              propertyString(pv.Properties, "trigger"),
+			Expression:           propertyString(pv.Properties, "expression"),
+			InjectionSources:     propertyStringSlice(pv.Properties, "injection_sources"),
+			ReferencedSecrets:    propertyStringSlice(pv.Properties, "referenced_secrets"),
+			LOTPTool:             propertyString(pv.Properties, "lotp_tool"),
+			LOTPAction:           propertyString(pv.Properties, "lotp_action"),
+			LOTPTargets:          propertyStringSlice(pv.Properties, "lotp_targets"),
+			CachePoisonWriter:    propertyBool(pv.Properties, "cache_poison_writer"),
+			CachePoisonReason:    propertyString(pv.Properties, "cache_poison_reason"),
 			CachePoisonVictims:   cachePoisonVictims,
-			GateTriggers:         gateTriggers,
-			GateRaw:              gateRaw,
-			GateUnsolvable:       gateUnsolvable,
+			GateTriggers:         propertyStringSlice(pv.Properties, "gate_triggers"),
+			GateRaw:              propertyString(pv.Properties, "gate_raw"),
+			GateUnsolvable:       propertyString(pv.Properties, "gate_unsolvable"),
 			ExploitSupported:     exploitSupported,
 			ExploitSupportReason: exploitSupportReason,
 		})
 	}
 
+	sort.Slice(vulns, func(i, j int) bool {
+		return vulnerabilitySortKey(vulns[i]) < vulnerabilitySortKey(vulns[j])
+	})
+
 	return vulns
+}
+
+func propertyString(props map[string]any, key string) string {
+	if props == nil || key == "" {
+		return ""
+	}
+	value, _ := props[key].(string)
+	return value
+}
+
+func propertyBool(props map[string]any, key string) bool {
+	if props == nil || key == "" {
+		return false
+	}
+	value, _ := props[key].(bool)
+	return value
+}
+
+func vulnerabilitySortKey(vuln Vulnerability) string {
+	return strings.Join([]string{
+		strings.TrimSpace(vuln.Repository),
+		strings.TrimSpace(vuln.Workflow),
+		fmt.Sprintf("%09d", vuln.Line),
+		strings.TrimSpace(vuln.Job),
+		strings.TrimSpace(vuln.Step),
+		strings.TrimSpace(vuln.RuleID),
+		strings.TrimSpace(vuln.Context),
+		strings.TrimSpace(vuln.Expression),
+		strings.TrimSpace(vuln.Fingerprint),
+		strings.TrimSpace(vuln.ID),
+	}, "\x00")
 }
 
 // AddOutput records a line and mirrors it to the visible activity log
@@ -1300,7 +1287,8 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 		return summary
 	}
 
-	for _, f := range result.Findings {
+	findings := poutine.ExpandFindings(result.Findings)
+	for _, f := range findings {
 		org, repoName := "", ""
 		if f.Repository != "" {
 			parts := strings.Split(f.Repository, "/")
@@ -1390,7 +1378,7 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 		if repoID != "" {
 			purl = fmt.Sprintf("pkg:github/%s/%s", org, repoName)
 		}
-		vuln := pantry.NewVulnerability(f.RuleID, purl, f.Workflow, f.Line)
+		vuln := pantry.NewVulnerability(f.RuleID, purl, f.Workflow, f.Line, poutine.FindingVariantDiscriminator(f))
 		vuln.Provider = "github"
 		vuln.State = pantry.StateHighValue
 		vuln.Severity = f.Severity
@@ -1399,6 +1387,9 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 		}
 		if f.Job != "" {
 			vuln.SetProperty("job", f.Job)
+		}
+		if f.Step != "" {
+			vuln.SetProperty("step", f.Step)
 		}
 		if f.Context != "" {
 			vuln.SetProperty("context", f.Context)
@@ -1411,6 +1402,9 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 		}
 		if f.Expression != "" {
 			vuln.SetProperty("expression", f.Expression)
+		}
+		if f.Fingerprint != "" {
+			vuln.SetProperty("fingerprint", f.Fingerprint)
 		}
 		if f.LOTPTool != "" {
 			vuln.SetProperty("lotp_tool", f.LOTPTool)

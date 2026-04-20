@@ -37,6 +37,37 @@ func determineBashContextForFinding(
 	line int,
 	injectionSources []string,
 ) string {
+	primarySource := ""
+	for _, source := range injectionSources {
+		source = strings.TrimSpace(source)
+		if source == "" {
+			continue
+		}
+		primarySource = source
+		break
+	}
+	if primarySource == "" {
+		return ""
+	}
+
+	return determineBashContextForSource(
+		workflows,
+		findingPath,
+		findingJob,
+		findingStep,
+		line,
+		injectionSources,
+		primarySource,
+	)
+}
+
+func determineBashContextForSource(
+	workflows []models.GithubActionsWorkflow,
+	findingPath, findingJob, findingStep string,
+	line int,
+	injectionSources []string,
+	source string,
+) string {
 	patterns := expressionPatternsFromInjectionSources(injectionSources)
 	if len(patterns) == 0 {
 		return ""
@@ -51,7 +82,12 @@ func determineBashContextForFinding(
 	if len(spans) == 0 {
 		return ""
 	}
-	primarySpans := findExpressionSpans(run, patterns[:1])
+
+	primaryPatterns := expressionPatternsFromInjectionSources([]string{source})
+	if len(primaryPatterns) == 0 {
+		return ""
+	}
+	primarySpans := findExpressionSpans(run, primaryPatterns)
 	if len(primarySpans) == 0 {
 		return ""
 	}
