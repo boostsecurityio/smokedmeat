@@ -9,6 +9,7 @@ Last updated: 2026-04-20
 - Minimize breaking changes when possible, but explicit DB schema breaks are still acceptable in `v0.1.x` when they materially simplify the model and purge guidance is clear.
 - Do not present a capability as deployable unless the backend can actually deliver it.
 - Target a demo-stable build by 2026-05-07 so slides, rehearsal, and the live path can settle before the conference.
+- Treat self-hosted runner work as the main pre-NorthSec feature track, but only merge slices that provide real operator value.
 
 ## Immediate Priorities
 
@@ -16,10 +17,10 @@ Last updated: 2026-04-20
 |----------|--------|------|---------|----------|
 | P0 | In flight | Merge the fix for multi-source injection persistence and quickstart schema fail-fast | Real user bug already has an open PR. Finish it instead of duplicating work. | Issue [#58](https://github.com/boostsecurityio/smokedmeat/issues/58), PR [#59](https://github.com/boostsecurityio/smokedmeat/pull/59) |
 | P0 | Next | Make LOTP deployment support honest for callback payloads and capability gating | The current deploy path still offers LOTP for any finding with `lotp_tool` or `lotp_action`, but the backend only supports a narrow set of generators and several non-script families still fall back to literal `id` or the wrong first payload. | Issue [#55](https://github.com/boostsecurityio/smokedmeat/issues/55), issue [#53](https://github.com/boostsecurityio/smokedmeat/issues/53) |
-| P0 | Next | Make LOTP targeting and detection path-aware, or hide unsupported shapes | The UI can imply correct targeting while non-script deployment ignores `lotp_targets`, and Brisket LOTP detection still collapses repo paths to basenames and misses subpath-backed catalog entries. | Issue [#54](https://github.com/boostsecurityio/smokedmeat/issues/54) |
 | P0 | Next | Fix the Kitchen stager metadata race | `StagerStore.Get()` still returns a live pointer and deploy handlers mutate `Metadata` outside the store lock. Callback-heavy flows can therefore race on shared state and panic. | Current deploy path |
-| P1 | Planned | Self-hosted runner enumeration and persistence, phase 1 | This is the most valuable missing feature for the NorthSec demo, but it needs a narrow first slice that is reliable. | Task: [tasks/self-hosted-runner-enumeration-and-persistence.md](tasks/self-hosted-runner-enumeration-and-persistence.md) |
+| P1 | Planned | Self-hosted runner enumeration and persistence | This is the most valuable missing feature for the NorthSec demo. The implementation can land in chunks, but `main` should only take slices that provide real operator value. | Task: [tasks/self-hosted-runner-enumeration-and-persistence.md](tasks/self-hosted-runner-enumeration-and-persistence.md) |
 | P1 | Planned | Demo hardening and rehearsal path | The happy path for the talk needs to be stable, repeatable, and covered by the exact repos and flows that will be shown live. | Ref: [WHOOLI.md](WHOOLI.md) |
+| P2 | Deferred | Make LOTP targeting and detection path-aware, or hide unsupported shapes | Useful follow-up, but not worth spending pre-NorthSec time on until the demo path is dry-run and the talk prep is under control. | Issue [#54](https://github.com/boostsecurityio/smokedmeat/issues/54) |
 | P2 | Planned | Bracket-notation secret extraction | Workflow secret inventory and app-action secret extraction still only recognize `secrets.NAME`, so bracket notation stays invisible in recon output and secret typing. | Current analysis path |
 | P2 | Planned | Quoted Bash heredoc exploitation | Valuable exploit-coverage expansion, but current analyze-only behavior is at least honest. | Issue [#51](https://github.com/boostsecurityio/smokedmeat/issues/51) |
 
@@ -53,26 +54,29 @@ The following near-term items are already validated in the current code:
 
 - close the in-flight `#58` work by merging PR `#59`
 - fix or gate the broken LOTP families
-- fix or gate unsupported LOTP path-targeting cases
 - remove the stager metadata race from the deploy path
 
 The main rule for this window is simple: narrower but trustworthy support is better than broader support that fails during a live demo.
 
-### Demo feature target
+### Self-Hosted Runner Scope
 
-The self-hosted runner work should be intentionally scoped to phases 1 through 4 of [tasks/self-hosted-runner-enumeration-and-persistence.md](tasks/self-hosted-runner-enumeration-and-persistence.md):
+The self-hosted runner work is the main pre-NorthSec feature track.
 
-1. define the runner-target Pantry asset and Kitchen enumeration API
-2. persist passive enumeration results into Pantry
-3. enrich with elevated GitHub API evidence when the token allows it
-4. surface `[SH-RUNNER]` targets cleanly in Counter and the graph
+Implementation can still be broken into small, low-risk chunks, but `main` should only take slices that provide real operator value. The feature should not stop at background plumbing or passive data collection that leaves the operator with no meaningful next step.
 
-Phase 5 active probing and phase 6 exploit or persistence follow-up should land only if the earlier slice is already stable and the rehearsal path is green.
+The minimum acceptable outcome before NorthSec is an operator-usable self-hosted runner flow that:
+
+1. discovers likely self-hosted runner targets for a repo
+2. persists and surfaces those targets cleanly in Counter and the graph
+3. gives the operator a meaningful way to validate or act on those targets
+
+The phase breakdown in [tasks/self-hosted-runner-enumeration-and-persistence.md](tasks/self-hosted-runner-enumeration-and-persistence.md) remains useful for implementation order, but it is not itself the merge criterion.
 
 ### Demo hardening
 
 - choose the exact demo repos and lock the expected happy path early
 - add or tighten automated coverage for the demoed path, even if that means fewer side quests
+- do not spend pre-NorthSec time on nice-to-have work such as LOTP path-aware targeting until the slides are materially done and the happy path has been dry-run end to end
 - avoid broad refactors after 2026-05-07 unless they directly unblock the talk
 
 ## After NorthSec
