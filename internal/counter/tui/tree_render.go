@@ -154,6 +154,9 @@ func (m *Model) buildMenuNumberMap() map[string]int {
 }
 
 func (m *Model) nodeMatchesVuln(node *TreeNode, vuln Vulnerability) bool {
+	if node.ID == vuln.ID {
+		return true
+	}
 	repo := m.treeNodeRepo(node)
 	path, _ := node.Properties["path"].(string)
 	line, _ := node.Properties["line"].(int)
@@ -167,6 +170,7 @@ func (m *Model) nodeMatchesVuln(node *TreeNode, vuln Vulnerability) bool {
 		ruleID = node.RuleID
 	}
 	job := nodeStringProperty(node, "job")
+	step := nodeStringProperty(node, "step")
 	context := nodeStringProperty(node, "context")
 	expression := nodeStringProperty(node, "expression")
 
@@ -183,6 +187,9 @@ func (m *Model) nodeMatchesVuln(node *TreeNode, vuln Vulnerability) bool {
 		return false
 	}
 	if job != "" && vuln.Job != "" && vuln.Job != job {
+		return false
+	}
+	if step != "" && vuln.Step != "" && vuln.Step != step {
 		return false
 	}
 	if context != "" && vuln.Context != "" && vuln.Context != context {
@@ -420,6 +427,9 @@ func (m *Model) renderVulnDetails(node *TreeNode, width int) []string {
 
 	if vuln.Context != "" {
 		lines = append(lines, detailStyle.Render(indent+"├─ Context: ")+valueStyle.Render(vuln.Context))
+	}
+	if vuln.Step != "" {
+		lines = append(lines, detailStyle.Render(indent+"├─ Step: ")+valueStyle.Render(vuln.Step))
 	}
 
 	lotpDisplay := vuln.LOTPTool

@@ -14,6 +14,7 @@ import (
 	"net"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -515,15 +516,17 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 		m.AddOutput("success", "Imported to attack graph: "+summary.String())
 	}
 
+	expandedFindings := poutine.ExpandFindings(result.Findings)
+
 	supportedCount := 0
-	for _, f := range result.Findings {
+	for _, f := range expandedFindings {
 		if supported, _ := pantry.VulnerabilityExploitSupportWithBashContext("github", f.Workflow, f.RuleID, f.BashContext); supported {
 			supportedCount++
 		}
 	}
-	analyzeOnlyCount := len(result.Findings) - supportedCount
+	analyzeOnlyCount := len(expandedFindings) - supportedCount
 
-	if len(result.Findings) == 0 {
+	if len(expandedFindings) == 0 {
 		m.AddOutput("info", "No exploitable vulnerabilities found.")
 	} else {
 		switch {
@@ -556,7 +559,7 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 			existing[vulnerabilityDedupKey(v)] = true
 		}
 		nextVulnID := nextVulnerabilityOrdinal(m.vulnerabilities)
-		for _, f := range result.Findings {
+		for _, f := range expandedFindings {
 			key := findingDedupKey(f)
 			if existing[key] {
 				continue
@@ -570,6 +573,7 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 				Repository:           f.Repository,
 				Workflow:             f.Workflow,
 				Job:                  f.Job,
+				Step:                 f.Step,
 				Line:                 f.Line,
 				Title:                f.Title,
 				RuleID:               f.RuleID,
@@ -594,6 +598,9 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 			})
 			existing[key] = true
 		}
+		sort.Slice(m.vulnerabilities, func(i, j int) bool {
+			return vulnerabilitySortKey(m.vulnerabilities[i]) < vulnerabilitySortKey(m.vulnerabilities[j])
+		})
 	}
 
 	if len(result.SecretFindings) > 0 {
@@ -647,14 +654,14 @@ func findingDedupKey(f poutine.Finding) string {
 	if fp := strings.TrimSpace(f.Fingerprint); fp != "" {
 		return fp
 	}
-	return fmt.Sprintf("%s|%s|%s|%d|%s|%s|%s", f.Repository, f.Workflow, f.Job, f.Line, f.RuleID, f.Context, f.Expression)
+	return fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s", f.Repository, f.Workflow, f.Job, f.Step, f.Line, f.RuleID, f.Context, f.Expression)
 }
 
 func vulnerabilityDedupKey(v Vulnerability) string {
 	if fp := strings.TrimSpace(v.Fingerprint); fp != "" {
 		return fp
 	}
-	return fmt.Sprintf("%s|%s|%s|%d|%s|%s|%s", v.Repository, v.Workflow, v.Job, v.Line, v.RuleID, v.Context, v.Expression)
+	return fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s", v.Repository, v.Workflow, v.Job, v.Step, v.Line, v.RuleID, v.Context, v.Expression)
 }
 
 func nextVulnerabilityOrdinal(vulns []Vulnerability) int {

@@ -31,17 +31,16 @@ func TestOpen_WritesSchemaMetadata(t *testing.T) {
 	assert.NotEmpty(t, metadata.LastOpenedBy)
 }
 
-func TestOpen_BackfillsSchemaMetadataForLegacyDB(t *testing.T) {
+func TestOpen_RejectsUnversionedLegacyDB(t *testing.T) {
 	path := createSchemaTestDB(t, nil, BucketOrders)
 
 	db, err := Open(Config{Path: path})
-	require.NoError(t, err)
-	t.Cleanup(func() { db.Close() })
-
-	metadata := readSchemaMetadataFromHandle(t, db)
-	require.NotNil(t, metadata)
-	assert.Equal(t, currentSchemaMajor, metadata.Major)
-	assert.Equal(t, currentSchemaMinor, metadata.Minor)
+	require.Error(t, err)
+	assert.Nil(t, db)
+	assert.ErrorContains(t, err, "schema 1.0")
+	assert.ErrorContains(t, err, "cannot be opened directly")
+	assert.ErrorContains(t, err, "make quickstart-purge")
+	assert.ErrorContains(t, err, "make dev-quickstart-purge")
 }
 
 func TestOpen_PreservesCompatibleNewerMinor(t *testing.T) {
@@ -67,7 +66,7 @@ func TestOpen_PreservesCompatibleNewerMinor(t *testing.T) {
 
 func TestOpen_RejectsIncompatibleSchemaMajor(t *testing.T) {
 	path := createSchemaTestDB(t, &schemaMetadata{
-		Major: currentSchemaMajor + 1,
+		Major: legacySchemaMajor,
 		Minor: 0,
 	}, BucketOrders)
 

@@ -461,17 +461,20 @@ func convertFindings(result *AnalysisResult, packages []*models.PackageInsights)
 				}
 			}
 
-			result.Findings = append(result.Findings, finding)
+			variants := ExpandFindingVariantsWithWorkflows(pkg.GithubActionsWorkflows, finding)
+			result.Findings = append(result.Findings, variants...)
 
-			switch finding.Severity {
-			case "critical":
-				result.CriticalFindings++
-			case "high":
-				result.HighFindings++
-			case "medium":
-				result.MediumFindings++
-			default:
-				result.LowFindings++
+			for _, variant := range variants {
+				switch variant.Severity {
+				case "critical":
+					result.CriticalFindings++
+				case "high":
+					result.HighFindings++
+				case "medium":
+					result.MediumFindings++
+				default:
+					result.LowFindings++
+				}
 			}
 		}
 	}

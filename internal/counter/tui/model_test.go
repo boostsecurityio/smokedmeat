@@ -935,6 +935,75 @@ func TestImportAnalysis_RoundTrip_CommentInjectionDetected(t *testing.T) {
 		"isCommentInjection should return true after pantry round-trip")
 }
 
+func TestImportAnalysis_RoundTrip_ExpandsInjectionSourcesIntoTreeVulns(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+
+	result := &poutine.AnalysisResult{
+		Success:    true,
+		Target:     "whooli/xyz",
+		TargetType: "repo",
+		Repository: "whooli/xyz",
+		Findings: []poutine.Finding{
+			{
+				ID:               "V001",
+				Fingerprint:      "fp-auto-labeler-step-1",
+				Repository:       "whooli/xyz",
+				Workflow:         ".github/workflows/auto-labeler.yml",
+				Line:             23,
+				Job:              "whooli-triage",
+				Step:             "1",
+				RuleID:           "injection",
+				Title:            "Auto labeler step 1",
+				Severity:         "critical",
+				Trigger:          "issues",
+				InjectionSources: []string{"github.event.issue.title", "github.event.issue.body"},
+			},
+			{
+				ID:               "V002",
+				Fingerprint:      "fp-auto-labeler-step-2",
+				Repository:       "whooli/xyz",
+				Workflow:         ".github/workflows/auto-labeler.yml",
+				Line:             41,
+				Job:              "whooli-triage",
+				Step:             "2",
+				RuleID:           "injection",
+				Title:            "Auto labeler step 2",
+				Severity:         "critical",
+				Trigger:          "issues",
+				InjectionSources: []string{"github.event.issue.title", "github.event.issue.body"},
+			},
+		},
+	}
+
+	m.importAnalysisToPantry(result)
+
+	vulns := m.extractVulnerabilitiesFromPantry()
+	require.Len(t, vulns, 4)
+
+	m.vulnerabilities = vulns
+	m.GenerateSuggestions()
+	m.RebuildTree()
+
+	var treeVulnIDs []string
+	for _, node := range m.treeNodes {
+		if node.Type == TreeNodeVuln {
+			treeVulnIDs = append(treeVulnIDs, node.ID)
+		}
+	}
+
+	assert.Len(t, treeVulnIDs, 4)
+
+	contexts := make([]string, 0, len(vulns))
+	steps := make([]string, 0, len(vulns))
+	for _, vuln := range vulns {
+		contexts = append(contexts, vuln.Context)
+		steps = append(steps, vuln.Step)
+	}
+
+	assert.ElementsMatch(t, []string{"issue_body", "issue_title", "issue_body", "issue_title"}, contexts)
+	assert.ElementsMatch(t, []string{"1", "1", "2", "2"}, steps)
+}
+
 func TestImportAnalysis_RoundTrip_UnsolvableGate(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 

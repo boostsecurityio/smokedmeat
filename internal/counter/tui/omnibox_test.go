@@ -326,11 +326,32 @@ func TestModel_ApplyOmniboxSelection_SelectsRepoAndUpdatesTarget(t *testing.T) {
 
 func TestTreeSelectByID_ExpandsCollapsedAncestors(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
+	m.vulnerabilities = []Vulnerability{{
+		ID:         "V001",
+		Repository: "whooli/infra",
+		Workflow:   ".github/workflows/deploy.yml",
+		Job:        "deploy",
+		Line:       42,
+		RuleID:     "injection",
+		Context:    "issue_body",
+	}}
 
 	root := &TreeNode{ID: "root", Expanded: true}
 	org := &TreeNode{ID: "org:whooli", Label: "whooli", Type: TreeNodeOrg, Expanded: false, Parent: root}
 	repo := &TreeNode{ID: "repo:whooli/infra", Label: "infra", Type: TreeNodeRepo, Expanded: false, Parent: org}
-	vuln := &TreeNode{ID: "V001", Label: "Bash injection", Type: TreeNodeVuln, Parent: repo}
+	vuln := &TreeNode{
+		ID:     "vuln:injection:.github/workflows/deploy.yml:42:abc123",
+		Label:  "Bash injection",
+		Type:   TreeNodeVuln,
+		Parent: repo,
+		Properties: map[string]interface{}{
+			"path":    ".github/workflows/deploy.yml",
+			"line":    42,
+			"job":     "deploy",
+			"context": "issue_body",
+		},
+		RuleID: "injection",
+	}
 	root.Children = []*TreeNode{org}
 	org.Children = []*TreeNode{repo}
 	repo.Children = []*TreeNode{vuln}
@@ -340,7 +361,7 @@ func TestTreeSelectByID_ExpandsCollapsedAncestors(t *testing.T) {
 
 	require.True(t, m.TreeSelectByID("V001"))
 	require.NotNil(t, m.SelectedTreeNode())
-	assert.Equal(t, "V001", m.SelectedTreeNode().ID)
+	assert.Equal(t, vuln.ID, m.SelectedTreeNode().ID)
 	assert.True(t, org.Expanded)
 	assert.True(t, repo.Expanded)
 }

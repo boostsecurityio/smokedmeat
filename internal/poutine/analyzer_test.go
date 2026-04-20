@@ -101,6 +101,83 @@ func TestFinding_AllFields(t *testing.T) {
 	assert.Equal(t, "abc123", finding.Fingerprint)
 }
 
+func TestExpandFindingVariants_ExpandsInjectionSources(t *testing.T) {
+	finding := Finding{
+		ID:               "V001",
+		Repository:       "whooli/xyz",
+		Workflow:         ".github/workflows/auto-labeler.yml",
+		Job:              "whooli-triage",
+		Step:             "1",
+		Line:             23,
+		RuleID:           "injection",
+		Trigger:          "issues",
+		Fingerprint:      "fp-auto-labeler-step-1",
+		InjectionSources: []string{"github.event.issue.title", "github.event.issue.body"},
+	}
+
+	variants := ExpandFindingVariants(finding)
+	require.Len(t, variants, 2)
+
+	assert.Equal(t, "V001.1", variants[0].ID)
+	assert.Equal(t, "issue_body", variants[0].Context)
+	assert.Equal(t, "${{ github.event.issue.body }}", variants[0].Expression)
+	assert.Equal(t, []string{"github.event.issue.body"}, variants[0].InjectionSources)
+	assert.Equal(t, "1", variants[0].Step)
+	assert.NotEqual(t, variants[0].Fingerprint, variants[1].Fingerprint)
+	assert.NotEqual(t, FindingVariantDiscriminator(variants[0]), FindingVariantDiscriminator(variants[1]))
+
+	assert.Equal(t, "V001.2", variants[1].ID)
+	assert.Equal(t, "issue_title", variants[1].Context)
+	assert.Equal(t, "${{ github.event.issue.title }}", variants[1].Expression)
+	assert.Equal(t, []string{"github.event.issue.title"}, variants[1].InjectionSources)
+	assert.Equal(t, "1", variants[1].Step)
+}
+
+func TestExpandFindingVariants_DoesNotSplitDegenerateNormalizedSourceList(t *testing.T) {
+	finding := Finding{
+		ID:               "V001",
+		Fingerprint:      "fp-auto-labeler-step-1",
+		Repository:       "whooli/xyz",
+		Workflow:         ".github/workflows/auto-labeler.yml",
+		Job:              "whooli-triage",
+		Step:             "1",
+		Line:             23,
+		RuleID:           "injection",
+		InjectionSources: []string{"github.event.issue.body", " ", "github.event.issue.body"},
+	}
+
+	variants := ExpandFindingVariants(finding)
+	require.Len(t, variants, 1)
+	assert.Equal(t, finding, variants[0])
+}
+
+func TestFindingVariantDiscriminator_IgnoresNonIdentityEnrichment(t *testing.T) {
+	base := Finding{
+		Repository:       "acme/api",
+		Workflow:         ".github/workflows/ci.yml",
+		Line:             42,
+		Job:              "build",
+		Step:             "run",
+		RuleID:           "injection",
+		Context:          "issue_body",
+		Expression:       "${{ github.event.issue.body }}",
+		InjectionSources: []string{"github.event.issue.body"},
+	}
+
+	enriched := base
+	enriched.BashContext = "bash_double_quoted"
+	enriched.Trigger = "issues"
+	enriched.ReferencedSecrets = []string{"BOT_TOKEN"}
+	enriched.LOTPTool = "npm"
+	enriched.LOTPAction = "setup-node"
+	enriched.LOTPTargets = []string{"package.json"}
+	enriched.GateTriggers = []string{"issues"}
+	enriched.GateRaw = "github.actor == 'bot'"
+	enriched.GateUnsolvable = "comparison with non-controllable field: github.actor"
+
+	assert.Equal(t, FindingVariantDiscriminator(base), FindingVariantDiscriminator(enriched))
+}
+
 // =============================================================================
 // determineContext Tests
 // =============================================================================
@@ -336,6 +413,66 @@ func TestConvertFindings_MultipleSeverities(t *testing.T) {
 	assert.Equal(t, 1, result.HighFindings)
 	assert.Equal(t, 1, result.MediumFindings)
 	assert.Equal(t, 1, result.LowFindings)
+}
+
+func TestConvertFindings_ExpandsInjectionSourcesWithPerVariantBashContext(t *testing.T) {
+	result := &AnalysisResult{Findings: []Finding{}}
+	pkg := &models.PackageInsights{
+		Purl: "pkg:github/acme/api",
+		FindingsResults: results.FindingsResult{
+			Findings: []results.Finding{
+				{
+					RuleId: "injection",
+					Meta: results.FindingMeta{
+						Path:             ".github/workflows/ci.yml",
+						Line:             12,
+						Job:              "build",
+						Step:             "run",
+						InjectionSources: []string{"github.head_ref", "github.event.comment.body"},
+					},
+				},
+			},
+			Rules: map[string]results.Rule{
+				"injection": {Level: "error"},
+			},
+		},
+		GithubActionsWorkflows: []models.GithubActionsWorkflow{
+			{
+				Path: ".github/workflows/ci.yml",
+				Jobs: models.GithubActionsJobs{
+					{
+						ID: "build",
+						Steps: models.GithubActionsSteps{
+							{
+								Name: "run",
+								Run:  `echo '${{ github.event.comment.body }}' "${{ github.head_ref }}"`,
+								Line: 12,
+								Lines: map[string]int{
+									"run": 12,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	convertFindings(result, []*models.PackageInsights{pkg})
+
+	require.Len(t, result.Findings, 2)
+	assert.Equal(t, 2, result.TotalFindings)
+	assert.Equal(t, 2, result.CriticalFindings)
+
+	assert.Equal(t, "V001.1", result.Findings[0].ID)
+	assert.Equal(t, []string{"github.event.comment.body"}, result.Findings[0].InjectionSources)
+	assert.Equal(t, bashContextSingleQuoted, result.Findings[0].BashContext)
+	assert.Equal(t, "${{ github.event.comment.body }}", result.Findings[0].Expression)
+
+	assert.Equal(t, "V001.2", result.Findings[1].ID)
+	assert.Equal(t, []string{"github.head_ref"}, result.Findings[1].InjectionSources)
+	assert.Equal(t, bashContextDoubleQuoted, result.Findings[1].BashContext)
+	assert.Equal(t, "${{ github.head_ref }}", result.Findings[1].Expression)
 }
 
 func TestConvertFindings_IDGeneration(t *testing.T) {

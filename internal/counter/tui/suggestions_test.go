@@ -165,6 +165,101 @@ func TestGenerateSuggestions_AllowsDistinctTriggersFromSameWorkflow(t *testing.T
 	assert.Contains(t, ids, "V002")
 }
 
+func TestGenerateSuggestions_DeduplicatesSourceVariantsWithinSameJob(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.vulnerabilities = []Vulnerability{
+		{
+			ID:         "V004",
+			Repository: "whooli/xyz",
+			Workflow:   ".github/workflows/auto-labeler.yml",
+			Job:        "whooli-triage",
+			Step:       "alpha-cleanup",
+			Line:       41,
+			RuleID:     "injection",
+			Trigger:    "issues",
+			Context:    "issue_title",
+			Expression: "${{ github.event.issue.title }}",
+		},
+		{
+			ID:         "V001",
+			Repository: "whooli/xyz",
+			Workflow:   ".github/workflows/auto-labeler.yml",
+			Job:        "whooli-triage",
+			Step:       "zeta-triage",
+			Line:       23,
+			RuleID:     "injection",
+			Trigger:    "issues",
+			Context:    "issue_body",
+			Expression: "${{ github.event.issue.body }}",
+		},
+		{
+			ID:         "V003",
+			Repository: "whooli/xyz",
+			Workflow:   ".github/workflows/auto-labeler.yml",
+			Job:        "whooli-triage",
+			Step:       "alpha-cleanup",
+			Line:       41,
+			RuleID:     "injection",
+			Trigger:    "issues",
+			Context:    "issue_body",
+			Expression: "${{ github.event.issue.body }}",
+		},
+		{
+			ID:         "V002",
+			Repository: "whooli/xyz",
+			Workflow:   ".github/workflows/auto-labeler.yml",
+			Job:        "whooli-triage",
+			Step:       "zeta-triage",
+			Line:       23,
+			RuleID:     "injection",
+			Trigger:    "issues",
+			Context:    "issue_title",
+			Expression: "${{ github.event.issue.title }}",
+		},
+	}
+
+	m.GenerateSuggestions()
+
+	require.Len(t, m.suggestions, 1)
+	require.GreaterOrEqual(t, m.suggestions[0].VulnIndex, 0)
+	assert.Equal(t, "V001", m.vulnerabilities[m.suggestions[0].VulnIndex].ID)
+}
+
+func TestRankVulnerabilities_IgnoresSeverity(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.vulnerabilities = []Vulnerability{
+		{
+			ID:         "V002",
+			Repository: "acme/api",
+			Workflow:   ".github/workflows/auto-labeler.yml",
+			Job:        "beta",
+			Step:       "1",
+			Line:       23,
+			RuleID:     "injection",
+			Trigger:    "issues",
+			Context:    "issue_body",
+			Severity:   "critical",
+		},
+		{
+			ID:         "V001",
+			Repository: "acme/api",
+			Workflow:   ".github/workflows/auto-labeler.yml",
+			Job:        "alpha",
+			Step:       "1",
+			Line:       23,
+			RuleID:     "injection",
+			Trigger:    "issues",
+			Context:    "issue_body",
+			Severity:   "high",
+		},
+	}
+
+	ranked := m.rankVulnerabilities()
+	require.Len(t, ranked, 2)
+	assert.Equal(t, "V001", m.vulnerabilities[ranked[0]].ID)
+	assert.Equal(t, "V002", m.vulnerabilities[ranked[1]].ID)
+}
+
 func TestRenderSuggestions_DropsFocusIndicatorWhenModalActive(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.focus = FocusSessions

@@ -128,6 +128,17 @@ func TestNewVulnerability(t *testing.T) {
 	assert.False(t, hasReason)
 }
 
+func TestNewVulnerability_WithDiscriminator(t *testing.T) {
+	first := NewVulnerability("injection", "pkg:github/acme/api", ".github/workflows/ci.yml", 42, "issue_body")
+	second := NewVulnerability("injection", "pkg:github/acme/api", ".github/workflows/ci.yml", 42, "issue_title")
+	third := NewVulnerability("injection", "pkg:github/acme/api", ".github/workflows/ci.yml", 42, "issue", "body")
+
+	assert.NotEqual(t, first.ID, second.ID)
+	assert.Contains(t, first.ID, "vuln:injection:.github/workflows/ci.yml:42:")
+	assert.Contains(t, second.ID, "vuln:injection:.github/workflows/ci.yml:42:")
+	assert.NotEqual(t, first.ID, third.ID)
+}
+
 func TestNewVulnerability_SetsAnalyzeOnlyMetadata(t *testing.T) {
 	vuln := NewVulnerability("pr_runs_on_self_hosted", "pkg:github/acme/api", ".github/workflows/pr.yml", 19)
 	SetVulnerabilityExploitSupport(&vuln)

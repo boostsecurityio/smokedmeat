@@ -505,8 +505,6 @@ func (m *Model) rankVulnerabilities() []int {
 	type scoredVuln struct {
 		index       int
 		workflowKey string
-		line        int
-		ruleID      string
 		score       int
 	}
 
@@ -532,8 +530,6 @@ func (m *Model) rankVulnerabilities() []int {
 		scored[i] = scoredVuln{
 			index:       i,
 			workflowKey: workflowKey,
-			line:        vuln.Line,
-			ruleID:      vuln.RuleID,
 			score:       score,
 		}
 	}
@@ -545,10 +541,7 @@ func (m *Model) rankVulnerabilities() []int {
 		if scored[i].workflowKey != scored[j].workflowKey {
 			return scored[i].workflowKey < scored[j].workflowKey
 		}
-		if scored[i].line != scored[j].line {
-			return scored[i].line < scored[j].line
-		}
-		return scored[i].ruleID < scored[j].ruleID
+		return vulnerabilitySortKey(m.vulnerabilities[scored[i].index]) < vulnerabilitySortKey(m.vulnerabilities[scored[j].index])
 	})
 
 	seen := make(map[string]bool)
@@ -614,7 +607,14 @@ func vulnSuggestionDedupKey(vuln Vulnerability) string {
 	if trigger == "" {
 		trigger = vuln.Context
 	}
-	return strings.Join([]string{vuln.Repository, vuln.Workflow, trigger, vuln.Context, vuln.RuleID}, "\x00")
+	group := strings.TrimSpace(vuln.Job)
+	if group == "" {
+		group = strings.TrimSpace(vuln.Step)
+	}
+	if group == "" {
+		group = strings.TrimSpace(vuln.Context)
+	}
+	return strings.Join([]string{vuln.Repository, vuln.Workflow, trigger, group, vuln.RuleID}, "\x00")
 }
 
 func vulnNeedsDispatch(vuln Vulnerability) bool {

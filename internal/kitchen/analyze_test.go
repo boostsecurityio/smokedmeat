@@ -1121,6 +1121,55 @@ func TestImportAnalysisToPantry_PersistsBashContextBeforeExploitSupport(t *testi
 	assert.Equal(t, "Quoted heredoc bodies do not evaluate shell substitutions.", vulns[0].Properties["exploit_support_reason"])
 }
 
+func TestImportAnalysisToPantry_PreservesMultiSourceInjectionFindings(t *testing.T) {
+	h := NewHandlerWithPublisher(&mockPublisher{}, nil)
+	result := &poutine.AnalysisResult{
+		Success: true,
+		Findings: []poutine.Finding{
+			{
+				Repository:       "whooli/xyz",
+				Workflow:         ".github/workflows/auto-labeler.yml",
+				Line:             23,
+				Job:              "whooli-triage",
+				Step:             "1",
+				RuleID:           "injection",
+				Title:            "Auto labeler step 1",
+				Severity:         "critical",
+				Trigger:          "issues",
+				Fingerprint:      "fp-auto-labeler-step-1",
+				InjectionSources: []string{"github.event.issue.title", "github.event.issue.body"},
+			},
+			{
+				Repository:       "whooli/xyz",
+				Workflow:         ".github/workflows/auto-labeler.yml",
+				Line:             41,
+				Job:              "whooli-triage",
+				Step:             "2",
+				RuleID:           "injection",
+				Title:            "Auto labeler step 2",
+				Severity:         "critical",
+				Trigger:          "issues",
+				Fingerprint:      "fp-auto-labeler-step-2",
+				InjectionSources: []string{"github.event.issue.title", "github.event.issue.body"},
+			},
+		},
+	}
+
+	h.importAnalysisToPantry(result)
+
+	vulns := h.Pantry().FindVulnerabilities()
+	require.Len(t, vulns, 4)
+	seenSources := make(map[string]bool, len(vulns))
+	for _, vuln := range vulns {
+		sources, ok := vuln.Properties["injection_sources"].([]string)
+		require.True(t, ok)
+		assert.Len(t, sources, 1)
+		seenSources[sources[0]] = true
+	}
+	assert.True(t, seenSources["github.event.issue.title"])
+	assert.True(t, seenSources["github.event.issue.body"])
+}
+
 func TestAnalyzeRequest_IncludesSessionID(t *testing.T) {
 	reqData := `{"token":"ghp_test","target":"acme/repo","target_type":"repo","session_id":"sess-abc-123"}`
 

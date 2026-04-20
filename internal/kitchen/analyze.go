@@ -679,7 +679,8 @@ func (h *Handler) importAnalysisToPantry(result *poutine.AnalysisResult) int {
 		}
 	}
 
-	for _, f := range result.Findings {
+	findings := poutine.ExpandFindings(result.Findings)
+	for _, f := range findings {
 		org, repoName := "", ""
 		if f.Repository != "" {
 			parts := strings.Split(f.Repository, "/")
@@ -769,7 +770,7 @@ func (h *Handler) importAnalysisToPantry(result *poutine.AnalysisResult) int {
 		if repoID != "" {
 			purl = fmt.Sprintf("pkg:github/%s/%s", org, repoName)
 		}
-		vuln := pantry.NewVulnerability(f.RuleID, purl, f.Workflow, f.Line)
+		vuln := pantry.NewVulnerability(f.RuleID, purl, f.Workflow, f.Line, poutine.FindingVariantDiscriminator(f))
 		vuln.Provider = "github"
 		vuln.State = pantry.StateHighValue
 		vuln.Severity = f.Severity
@@ -778,6 +779,9 @@ func (h *Handler) importAnalysisToPantry(result *poutine.AnalysisResult) int {
 		}
 		if f.Job != "" {
 			vuln.SetProperty("job", f.Job)
+		}
+		if f.Step != "" {
+			vuln.SetProperty("step", f.Step)
 		}
 		if f.Context != "" {
 			vuln.SetProperty("context", f.Context)
@@ -790,6 +794,9 @@ func (h *Handler) importAnalysisToPantry(result *poutine.AnalysisResult) int {
 		}
 		if f.Expression != "" {
 			vuln.SetProperty("expression", f.Expression)
+		}
+		if f.Fingerprint != "" {
+			vuln.SetProperty("fingerprint", f.Fingerprint)
 		}
 		if f.LOTPTool != "" {
 			vuln.SetProperty("lotp_tool", f.LOTPTool)

@@ -466,13 +466,19 @@ func sortChildren(node *TreeNode) {
 			if orderI != orderJ {
 				return orderI < orderJ
 			}
-			return node.Children[i].Label < node.Children[j].Label
+			if node.Children[i].Label != node.Children[j].Label {
+				return node.Children[i].Label < node.Children[j].Label
+			}
+			return node.Children[i].ID < node.Children[j].ID
 		}
 		// Default: sort by type, then label
 		if ti != tj {
 			return ti < tj
 		}
-		return node.Children[i].Label < node.Children[j].Label
+		if node.Children[i].Label != node.Children[j].Label {
+			return node.Children[i].Label < node.Children[j].Label
+		}
+		return node.Children[i].ID < node.Children[j].ID
 	})
 
 	for _, child := range node.Children {

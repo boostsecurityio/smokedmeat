@@ -113,6 +113,9 @@ func (m *Model) treeGoToParent() {
 func (m *Model) TreeSelectByID(id string) bool {
 	node := findNodeByID(m.treeRoot, id)
 	if node == nil {
+		node = m.findTreeNodeForVulnerabilityID(id)
+	}
+	if node == nil {
 		return false
 	}
 	expandNodeAncestors(node)
@@ -124,6 +127,34 @@ func (m *Model) TreeSelectByID(id string) bool {
 		}
 	}
 	return false
+}
+
+func (m *Model) findTreeNodeForVulnerabilityID(id string) *TreeNode {
+	if id == "" {
+		return nil
+	}
+	for i := range m.vulnerabilities {
+		if m.vulnerabilities[i].ID != id {
+			continue
+		}
+		return m.findTreeNodeForVulnerability(m.treeRoot, m.vulnerabilities[i])
+	}
+	return nil
+}
+
+func (m *Model) findTreeNodeForVulnerability(node *TreeNode, vuln Vulnerability) *TreeNode {
+	if node == nil {
+		return nil
+	}
+	if node.Type == TreeNodeVuln && m.nodeMatchesVuln(node, vuln) {
+		return node
+	}
+	for _, child := range node.Children {
+		if match := m.findTreeNodeForVulnerability(child, vuln); match != nil {
+			return match
+		}
+	}
+	return nil
 }
 
 func findNodeByID(root *TreeNode, id string) *TreeNode {
