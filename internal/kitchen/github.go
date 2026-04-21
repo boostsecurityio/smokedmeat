@@ -1484,14 +1484,11 @@ func (h *Handler) handleGitHubDeployPR(w http.ResponseWriter, r *http.Request) {
 	h.recordObservedCapability(req.Token, req.Vuln.Repository, deployCapabilityPR, nil)
 
 	if req.StagerID != "" && autoClose {
-		if stager := h.stagerStore.Get(req.StagerID); stager != nil {
-			if stager.Metadata == nil {
-				stager.Metadata = make(map[string]string)
-			}
-			stager.Metadata["pr_url"] = prURL
-			stager.Metadata["deploy_token"] = req.Token
-			h.persistStager(stager)
-		}
+		stager := h.stagerStore.UpdateMetadata(req.StagerID, map[string]string{
+			"pr_url":       prURL,
+			"deploy_token": req.Token,
+		})
+		h.persistStager(stager)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1524,14 +1521,11 @@ func (h *Handler) handleGitHubDeployIssue(w http.ResponseWriter, r *http.Request
 	h.recordObservedCapability(req.Token, req.Vuln.Repository, deployCapabilityIssue, nil)
 
 	if req.StagerID != "" && autoClose {
-		if stager := h.stagerStore.Get(req.StagerID); stager != nil {
-			if stager.Metadata == nil {
-				stager.Metadata = make(map[string]string)
-			}
-			stager.Metadata["issue_url"] = issueURL
-			stager.Metadata["deploy_token"] = req.Token
-			h.persistStager(stager)
-		}
+		stager := h.stagerStore.UpdateMetadata(req.StagerID, map[string]string{
+			"issue_url":    issueURL,
+			"deploy_token": req.Token,
+		})
+		h.persistStager(stager)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1564,19 +1558,17 @@ func (h *Handler) handleGitHubDeployComment(w http.ResponseWriter, r *http.Reque
 	h.recordObservedCapability(req.Token, req.Vuln.Repository, commentObservedCapability(req.Target), nil)
 
 	if req.StagerID != "" && autoClose && (result.CreatedIssueURL != "" || result.CreatedPRURL != "") {
-		if stager := h.stagerStore.Get(req.StagerID); stager != nil {
-			if stager.Metadata == nil {
-				stager.Metadata = make(map[string]string)
-			}
-			if result.CreatedIssueURL != "" {
-				stager.Metadata["issue_url"] = result.CreatedIssueURL
-			}
-			if result.CreatedPRURL != "" {
-				stager.Metadata["pr_url"] = result.CreatedPRURL
-			}
-			stager.Metadata["deploy_token"] = req.Token
-			h.persistStager(stager)
+		metadata := map[string]string{
+			"deploy_token": req.Token,
 		}
+		if result.CreatedIssueURL != "" {
+			metadata["issue_url"] = result.CreatedIssueURL
+		}
+		if result.CreatedPRURL != "" {
+			metadata["pr_url"] = result.CreatedPRURL
+		}
+		stager := h.stagerStore.UpdateMetadata(req.StagerID, metadata)
+		h.persistStager(stager)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1619,12 +1611,11 @@ func (h *Handler) handleGitHubDeployLOTP(w http.ResponseWriter, r *http.Request)
 	}
 	h.recordObservedCapability(req.Token, repoName, deployCapabilityLOTP, nil)
 
-	if stager := h.stagerStore.Get(req.StagerID); stager != nil {
-		if stager.Metadata == nil {
-			stager.Metadata = make(map[string]string)
-		}
-		stager.Metadata["lotp_pr_url"] = prURL
-		stager.Metadata["lotp_token"] = req.Token
+	if req.StagerID != "" {
+		stager := h.stagerStore.UpdateMetadata(req.StagerID, map[string]string{
+			"lotp_pr_url": prURL,
+			"lotp_token":  req.Token,
+		})
 		h.persistStager(stager)
 	}
 

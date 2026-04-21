@@ -1833,6 +1833,54 @@ func TestHandlerDeployPR_Success(t *testing.T) {
 	assert.Contains(t, resp.PRURL, "github.com/acme/api/pull")
 }
 
+func TestHandlerDeployPR_StoresStagerMetadata(t *testing.T) {
+	h, mux, ghSrv := newGitHubTestHandlerWithMock(t)
+
+	require.NoError(t, h.stagerStore.Register(&RegisteredStager{ID: "stg1"}))
+
+	ghSrv.Config.Handler.(*http.ServeMux).HandleFunc("GET /repos/{owner}/{repo}", func(w http.ResponseWriter, r *http.Request) {
+		owner := r.PathValue("owner")
+		repo := r.PathValue("repo")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"full_name":"%s/%s","default_branch":"main","owner":{"login":"%s"},"name":"%s"}`, owner, repo, owner, repo)
+	})
+	ghSrv.Config.Handler.(*http.ServeMux).HandleFunc("GET /repos/{owner}/{repo}/git/ref/{ref...}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ref":"refs/heads/main","object":{"sha":"abc123"}}`)
+	})
+	ghSrv.Config.Handler.(*http.ServeMux).HandleFunc("POST /repos/{owner}/{repo}/git/refs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"ref":"refs/heads/new","object":{"sha":"abc123"}}`)
+	})
+	ghSrv.Config.Handler.(*http.ServeMux).HandleFunc("PUT /repos/{owner}/{repo}/contents/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"content":{"sha":"newsha"}}`)
+	})
+	ghSrv.Config.Handler.(*http.ServeMux).HandleFunc("POST /repos/{owner}/{repo}/pulls", func(w http.ResponseWriter, r *http.Request) {
+		owner := r.PathValue("owner")
+		repo := r.PathValue("repo")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintf(w, `{"html_url":"https://github.com/%s/%s/pull/1","number":1}`, owner, repo)
+	})
+
+	swapGitHubClient(t, ghSrv.URL)
+
+	body := `{"token":"ghp_test","stager_id":"stg1","vuln":{"repository":"acme/api","workflow":"ci.yml","context":"pr_body"},"payload":"injected body"}`
+	req := httptest.NewRequest(http.MethodPost, "/github/deploy/pr", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	stager := h.stagerStore.Get("stg1")
+	require.NotNil(t, stager)
+	assert.Equal(t, "https://github.com/acme/api/pull/1", stager.Metadata["pr_url"])
+	assert.Equal(t, "ghp_test", stager.Metadata["deploy_token"])
+}
+
 func TestHandlerDeployLOTP_Success(t *testing.T) {
 	_, mux, ghSrv := newGitHubTestHandlerWithMock(t)
 
