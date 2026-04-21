@@ -15,9 +15,7 @@ Last updated: 2026-04-20
 
 | Priority | Status | Item | Why now | Tracking |
 |----------|--------|------|---------|----------|
-| P0 | In flight | Merge the fix for multi-source injection persistence and quickstart schema fail-fast | Real user bug already has an open PR. Finish it instead of duplicating work. | Issue [#58](https://github.com/boostsecurityio/smokedmeat/issues/58), PR [#59](https://github.com/boostsecurityio/smokedmeat/pull/59) |
 | P0 | Next | Make LOTP deployment support honest for callback payloads and capability gating | The current deploy path still offers LOTP for any finding with `lotp_tool` or `lotp_action`, but the backend only supports a narrow set of generators and several non-script families still fall back to literal `id` or the wrong first payload. | Issue [#55](https://github.com/boostsecurityio/smokedmeat/issues/55), issue [#53](https://github.com/boostsecurityio/smokedmeat/issues/53) |
-| P0 | Next | Fix the Kitchen stager metadata race | `StagerStore.Get()` still returns a live pointer and deploy handlers mutate `Metadata` outside the store lock. Callback-heavy flows can therefore race on shared state and panic. | Current deploy path |
 | P1 | Planned | Self-hosted runner enumeration and persistence | This is the most valuable missing feature for the NorthSec demo. The implementation can land in chunks, but `main` should only take slices that provide real operator value. | Task: [tasks/self-hosted-runner-enumeration-and-persistence.md](tasks/self-hosted-runner-enumeration-and-persistence.md) |
 | P1 | Planned | Demo hardening and rehearsal path | The happy path for the talk needs to be stable, repeatable, and covered by the exact repos and flows that will be shown live. | Ref: [WHOOLI.md](WHOOLI.md) |
 | P2 | Deferred | Make LOTP targeting and detection path-aware, or hide unsupported shapes | Useful follow-up, but not worth spending pre-NorthSec time on until the demo path is dry-run and the talk prep is under control. | Issue [#54](https://github.com/boostsecurityio/smokedmeat/issues/54) |
@@ -38,11 +36,6 @@ The following near-term items are already validated in the current code:
   - `internal/lotp/payload.go` still ignores `lotp_targets` for non-script families and emits fixed filenames such as `setup.py`, `.yarnrc.yml`, `build.rs`, and `Makefile`.
   - `internal/brisket/inject.go` still records only `filepath.Base(rel)` during LOTP detection, so subpath-sensitive catalog entries such as `.bundle/config` or `.cargo/config.toml` cannot be matched reliably.
 
-- Stager metadata concurrency
-  - `internal/kitchen/stager.go` still exposes the live `*RegisteredStager` from `Get()`.
-  - `internal/kitchen/github.go` still mutates `stager.Metadata[...]` after `Get()`, outside store locking.
-  - `internal/kitchen/handlers.go` and persistence paths still read the same map, so the race remains real.
-
 - Secret reference extraction parity
   - `internal/poutine/analyzer.go` still extracts secrets with dot-notation parsing only.
   - `extractSecretRef()` still strips only `secrets.` and rejects bracket notation forms such as `secrets['NAME']` and `secrets["NAME"]`.
@@ -51,9 +44,7 @@ The following near-term items are already validated in the current code:
 
 ### Must be stable first
 
-- close the in-flight `#58` work by merging PR `#59`
 - fix or gate the broken LOTP families
-- remove the stager metadata race from the deploy path
 
 The main rule for this window is simple: narrower but trustworthy support is better than broader support that fails during a live demo.
 

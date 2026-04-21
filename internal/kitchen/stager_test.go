@@ -63,6 +63,25 @@ func TestStagerStore_Get_NotFound(t *testing.T) {
 	assert.Nil(t, result)
 }
 
+func TestStagerStore_Get_ReturnsClone(t *testing.T) {
+	store := NewStagerStore(DefaultStagerStoreConfig())
+
+	require.NoError(t, store.Register(&RegisteredStager{
+		ID:       "clone-test",
+		Metadata: map[string]string{"pr_url": "https://github.com/acme/api/pull/1"},
+	}))
+
+	retrieved := store.Get("clone-test")
+	require.NotNil(t, retrieved)
+	retrieved.CalledBack = true
+	retrieved.Metadata["pr_url"] = "https://github.com/acme/api/pull/2"
+
+	current := store.Get("clone-test")
+	require.NotNil(t, current)
+	assert.False(t, current.CalledBack)
+	assert.Equal(t, "https://github.com/acme/api/pull/1", current.Metadata["pr_url"])
+}
+
 func TestStagerStore_MarkCalledBack(t *testing.T) {
 	store := NewStagerStore(DefaultStagerStoreConfig())
 
@@ -123,6 +142,23 @@ func TestStagerStore_List(t *testing.T) {
 	assert.True(t, ids["stager1"])
 	assert.True(t, ids["stager2"])
 	assert.True(t, ids["stager3"])
+}
+
+func TestStagerStore_List_ReturnsClones(t *testing.T) {
+	store := NewStagerStore(DefaultStagerStoreConfig())
+
+	require.NoError(t, store.Register(&RegisteredStager{
+		ID:       "stager1",
+		Metadata: map[string]string{"env": "production"},
+	}))
+
+	list := store.List()
+	require.Len(t, list, 1)
+	list[0].Metadata["env"] = "staging"
+
+	current := store.Get("stager1")
+	require.NotNil(t, current)
+	assert.Equal(t, "production", current.Metadata["env"])
 }
 
 func TestStagerStore_Stats(t *testing.T) {
@@ -369,6 +405,46 @@ func TestStagerStore_GetBySessionID(t *testing.T) {
 	assert.Equal(t, "s1", result.ID)
 
 	assert.Nil(t, store.GetBySessionID("nonexistent"))
+}
+
+func TestStagerStore_GetBySessionID_ReturnsClone(t *testing.T) {
+	store := NewStagerStore(DefaultStagerStoreConfig())
+
+	require.NoError(t, store.Register(&RegisteredStager{
+		ID:        "s1",
+		SessionID: "session-A",
+		Metadata:  map[string]string{"repository": "acme/api"},
+	}))
+
+	result := store.GetBySessionID("session-A")
+	require.NotNil(t, result)
+	result.Metadata["repository"] = "acme/other"
+
+	current := store.Get("s1")
+	require.NotNil(t, current)
+	assert.Equal(t, "acme/api", current.Metadata["repository"])
+}
+
+func TestStagerStore_UpdateMetadata(t *testing.T) {
+	store := NewStagerStore(DefaultStagerStoreConfig())
+
+	require.NoError(t, store.Register(&RegisteredStager{ID: "meta-test"}))
+
+	updated := store.UpdateMetadata("meta-test", map[string]string{
+		"pr_url":       "https://github.com/acme/api/pull/1",
+		"deploy_token": "ghp_test",
+	})
+	require.NotNil(t, updated)
+	assert.Equal(t, "https://github.com/acme/api/pull/1", updated.Metadata["pr_url"])
+	assert.Equal(t, "ghp_test", updated.Metadata["deploy_token"])
+
+	updated.Metadata["pr_url"] = "https://github.com/acme/api/pull/2"
+
+	current := store.Get("meta-test")
+	require.NotNil(t, current)
+	assert.Equal(t, "https://github.com/acme/api/pull/1", current.Metadata["pr_url"])
+	assert.Equal(t, "ghp_test", current.Metadata["deploy_token"])
+	assert.Nil(t, store.UpdateMetadata("missing", map[string]string{"pr_url": "x"}))
 }
 
 func TestDefaultBashPayloadWithDwell(t *testing.T) {

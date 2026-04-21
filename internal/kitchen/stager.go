@@ -102,7 +102,7 @@ func (s *StagerStore) Register(stager *RegisteredStager) error {
 		stager.MaxCallbacks = 1
 	}
 
-	s.stagers[stager.ID] = stager
+	s.stagers[stager.ID] = cloneRegisteredStager(stager)
 	return nil
 }
 
@@ -110,7 +110,7 @@ func (s *StagerStore) Register(stager *RegisteredStager) error {
 func (s *StagerStore) Get(id string) *RegisteredStager {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.stagers[id]
+	return cloneRegisteredStager(s.stagers[id])
 }
 
 // ValidateStager checks if a stager exists and is valid.
@@ -280,6 +280,27 @@ func (s *StagerStore) ControlPersistent(id, action string) (*RegisteredStager, e
 	return cloneRegisteredStager(stager), nil
 }
 
+func (s *StagerStore) UpdateMetadata(id string, metadata map[string]string) *RegisteredStager {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stager, exists := s.stagers[id]
+	if !exists {
+		return nil
+	}
+
+	if len(metadata) > 0 {
+		if stager.Metadata == nil {
+			stager.Metadata = make(map[string]string, len(metadata))
+		}
+		for k, v := range metadata {
+			stager.Metadata[k] = v
+		}
+	}
+
+	return cloneRegisteredStager(stager)
+}
+
 // Remove deletes a stager.
 func (s *StagerStore) Remove(id string) {
 	s.mu.Lock()
@@ -294,7 +315,7 @@ func (s *StagerStore) List() []*RegisteredStager {
 
 	result := make([]*RegisteredStager, 0, len(s.stagers))
 	for _, stager := range s.stagers {
-		result = append(result, stager)
+		result = append(result, cloneRegisteredStager(stager))
 	}
 	return result
 }
@@ -306,7 +327,7 @@ func (s *StagerStore) GetBySessionID(sessionID string) *RegisteredStager {
 
 	for _, stager := range s.stagers {
 		if stager.SessionID == sessionID {
-			return stager
+			return cloneRegisteredStager(stager)
 		}
 	}
 	return nil
