@@ -44,7 +44,7 @@ func TestExecuteWizardDeployment_AutoPR_Success(t *testing.T) {
 		deployPRResp: counter.DeployPRResponse{PRURL: "https://github.com/acme/api/pull/1"},
 	}
 	m := newModelForWizardDeploy(t, mock)
-	m.tokenInfo = &TokenInfo{Value: "ghp_test", Type: TokenTypeClassicPAT}
+	m.tokenInfo = &TokenInfo{Value: "ghp_test", Type: TokenTypeClassicPAT, Scopes: []string{"repo"}}
 	m.wizard.SelectedVuln = &Vulnerability{Repository: "acme/api", Workflow: "ci.yml", Context: "pr_body", ID: "V001"}
 	m.wizard.DeliveryMethod = DeliveryAutoPR
 	m.wizard.Step = 3
@@ -193,6 +193,26 @@ func TestExecuteWizardDeployment_LOTP_Success(t *testing.T) {
 	model := result.(Model)
 	assert.NotNil(t, cmd)
 	assert.Equal(t, PhaseRecon, model.phase)
+}
+
+func TestExecuteWizardDeployment_LOTPUnsupportedAutoGenerationBlocked(t *testing.T) {
+	mock := &mockKitchenClient{}
+	m := newModelForWizardDeploy(t, mock)
+	m.tokenInfo = &TokenInfo{Value: "ghp_test"}
+	m.wizard.SelectedVuln = &Vulnerability{
+		Repository: "acme/api",
+		LOTPAction: "actions/setup-go",
+		RuleID:     "untrusted_checkout_exec",
+		ID:         "V004",
+	}
+	m.wizard.DeliveryMethod = DeliveryLOTP
+
+	result, cmd := m.executeWizardDeployment()
+
+	model := result.(Model)
+	assert.Nil(t, cmd)
+	require.NotEmpty(t, model.output)
+	assert.Contains(t, model.output[len(model.output)-1].Content, "actions/setup-go")
 }
 
 func TestExecuteWizardDeployment_CopyOnly(t *testing.T) {
@@ -548,6 +568,7 @@ func TestAdvanceWizardStep_Step1To2(t *testing.T) {
 func TestAdvanceWizardStep_Step2To3(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhaseWizard
+	m.tokenInfo = &TokenInfo{Value: "ghp_test", Type: TokenTypeClassicPAT, Scopes: []string{"repo"}}
 	m.wizard = &WizardState{
 		Step:           2,
 		SelectedVuln:   &Vulnerability{Repository: "acme/api", Context: "pr_body"},
@@ -564,6 +585,7 @@ func TestAdvanceWizardStep_Step2To3(t *testing.T) {
 func TestAdvanceWizardStep_Step2To3_CommentFocusesInput(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhaseWizard
+	m.tokenInfo = &TokenInfo{Value: "ghp_test", Type: TokenTypeClassicPAT, Scopes: []string{"repo"}}
 	m.wizard = &WizardState{
 		Step:           2,
 		SelectedVuln:   &Vulnerability{Repository: "acme/api", Context: "issue_comment"},
@@ -689,9 +711,33 @@ func TestWizardKeyMsg_NumberKey_SelectsDelivery(t *testing.T) {
 	assert.Equal(t, methods[1], model.wizard.DeliveryMethod, "Should select second delivery method")
 }
 
+func TestWizardKeyMsg_NumberKey_IgnoresBlockedDelivery(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWizard
+	m.tokenInfo = &TokenInfo{Value: "ghp_test", Type: TokenTypeClassicPAT, Scopes: []string{"repo"}}
+	vuln := &Vulnerability{
+		Repository: "acme/api",
+		Workflow:   ".github/workflows/pr.yml",
+		RuleID:     "untrusted_checkout_exec",
+		LOTPAction: "actions/setup-go",
+	}
+	m.wizard = &WizardState{
+		Step:           2,
+		SelectedVuln:   vuln,
+		DeliveryMethod: DeliveryManualSteps,
+	}
+
+	result, cmd := m.handleWizardKeyMsg(tea.KeyPressMsg{Code: '1'})
+
+	model := result.(Model)
+	assert.Nil(t, cmd)
+	assert.Equal(t, DeliveryManualSteps, model.wizard.DeliveryMethod)
+}
+
 func TestWizardKeyMsg_DownKey_NavigatesDelivery(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhaseWizard
+	m.tokenInfo = &TokenInfo{Value: "ghp_test", Type: TokenTypeClassicPAT, Scopes: []string{"repo"}}
 	vuln := &Vulnerability{Repository: "acme/api", Context: "pr_body", Trigger: "pull_request"}
 	methods := ApplicableDeliveryMethods(vuln)
 	m.wizard = &WizardState{
@@ -709,6 +755,7 @@ func TestWizardKeyMsg_DownKey_NavigatesDelivery(t *testing.T) {
 func TestWizardKeyMsg_UpKey_NavigatesDelivery(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhaseWizard
+	m.tokenInfo = &TokenInfo{Value: "ghp_test", Type: TokenTypeClassicPAT, Scopes: []string{"repo"}}
 	vuln := &Vulnerability{Repository: "acme/api", Context: "pr_body", Trigger: "pull_request"}
 	methods := ApplicableDeliveryMethods(vuln)
 	require.True(t, len(methods) >= 2)
@@ -727,6 +774,7 @@ func TestWizardKeyMsg_UpKey_NavigatesDelivery(t *testing.T) {
 func TestWizardKeyMsg_UpKey_AtTop_StaysAtTop(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhaseWizard
+	m.tokenInfo = &TokenInfo{Value: "ghp_test", Type: TokenTypeClassicPAT, Scopes: []string{"repo"}}
 	vuln := &Vulnerability{Repository: "acme/api", Context: "pr_body", Trigger: "pull_request"}
 	methods := ApplicableDeliveryMethods(vuln)
 	m.wizard = &WizardState{

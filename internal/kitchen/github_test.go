@@ -657,7 +657,8 @@ func TestDynamicScriptFiles_Powershell(t *testing.T) {
 
 	require.Len(t, files, 1)
 	assert.Contains(t, files[0].content, "#!/usr/bin/env pwsh")
-	assert.Contains(t, files[0].content, "Invoke-WebRequest")
+	assert.Contains(t, files[0].content, "sh -c 'curl -s ''http://k.example.com/r/x'' | sh'")
+	assert.NotContains(t, files[0].content, "Invoke-WebRequest")
 	assert.Contains(t, files[0].content, "http://k.example.com/r/x")
 }
 

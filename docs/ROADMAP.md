@@ -1,6 +1,6 @@
 # SmokedMeat Roadmap
 
-Last updated: 2026-04-20
+Last updated: 2026-04-21
 
 ## Planning Rules
 
@@ -15,24 +15,21 @@ Last updated: 2026-04-20
 
 | Priority | Status | Item | Why now | Tracking |
 |----------|--------|------|---------|----------|
-| P0 | Next | Make LOTP deployment support honest for callback payloads and capability gating | The current deploy path still offers LOTP for any finding with `lotp_tool` or `lotp_action`, but the backend only supports a narrow set of generators and several non-script families still fall back to literal `id` or the wrong first payload. | Issue [#55](https://github.com/boostsecurityio/smokedmeat/issues/55), issue [#53](https://github.com/boostsecurityio/smokedmeat/issues/53) |
 | P1 | Planned | Self-hosted runner enumeration and persistence | This is the most valuable missing feature for the NorthSec demo. The implementation can land in chunks, but `main` should only take slices that provide real operator value. | Task: [tasks/self-hosted-runner-enumeration-and-persistence.md](tasks/self-hosted-runner-enumeration-and-persistence.md) |
 | P1 | Planned | Demo hardening and rehearsal path | The happy path for the talk needs to be stable, repeatable, and covered by the exact repos and flows that will be shown live. | Ref: [WHOOLI.md](WHOOLI.md) |
-| P2 | Deferred | Make LOTP targeting and detection path-aware, or hide unsupported shapes | Useful follow-up, but not worth spending pre-NorthSec time on until the demo path is dry-run and the talk prep is under control. | Issue [#54](https://github.com/boostsecurityio/smokedmeat/issues/54) |
+| P2 | Deferred | Finish LOTP path-aware targeting for the remaining detection-only families | The current support boundary is now honest: auto-supported LOTP families show up in the menu, and other detected LOTP findings stay manual-only in the wizard. The remaining gap is path-aware targeting for directory-sensitive shapes that still cannot be generated cleanly. | Issue [#54](https://github.com/boostsecurityio/smokedmeat/issues/54) |
 | P2 | Planned | Bracket-notation secret extraction | Workflow secret inventory and app-action secret extraction still only recognize `secrets.NAME`, so bracket notation stays invisible in recon output and secret typing. | Current analysis path |
 
 ## Validated Near-Term Work
 
 The following near-term items are already validated in the current code:
 
-- LOTP callback payload generation and capability gating
-  - `internal/lotp/payload.go` still special-cases only `bash`, `powershell`, and `python` in `GenerateFiles()`.
-  - `pip`, `yarn`, `cargo`, and `make` still default to `id` when no explicit `Command` is set.
-  - `generatePayloadForTechnique()` still returns only the first payload, which is why the callback-capable `requirements.txt` path is not the deployed `pip` payload today.
-  - `internal/counter/tui/phase.go` still offers LOTP whenever `lotp_tool` or `lotp_action` metadata exists.
-  - `internal/kitchen/github_preflight.go` still treats LOTP like generic PR capability instead of generator-specific support.
+- Current LOTP support boundary
+  - Auto-deliverable today: `bash`, `powershell`, `python`, `npm`, `yarn`, `pip`, `cargo`, and `make`.
+  - Other detected LOTP families are still intentionally detection-only: they can be opened in the wizard and shown as unsupported for automatic delivery, but they should not take menu priority away from real auto-exploit paths.
+  - The current auto-supported set has been validated against `poutineville/lotp-today`, and the detection-only behavior has been validated against `poutineville/gazillion-lotp`.
 
-- LOTP path-aware targeting and detection
+- Remaining LOTP follow-up
   - `internal/lotp/payload.go` still ignores `lotp_targets` for non-script families and emits fixed filenames such as `setup.py`, `.yarnrc.yml`, `build.rs`, and `Makefile`.
   - `internal/brisket/inject.go` still records only `filepath.Base(rel)` during LOTP detection, so subpath-sensitive catalog entries such as `.bundle/config` or `.cargo/config.toml` cannot be matched reliably.
 
@@ -40,11 +37,13 @@ The following near-term items are already validated in the current code:
   - `internal/poutine/analyzer.go` still extracts secrets with dot-notation parsing only.
   - `extractSecretRef()` still strips only `secrets.` and rejects bracket notation forms such as `secrets['NAME']` and `secrets["NAME"]`.
 
+- Native PowerShell LOTP delivery across runner platforms
+  - The current PowerShell LOTP path shells out through `sh`, which is good enough for the hosted Linux demo path but is not a trustworthy contract for generic Windows or self-hosted PowerShell runners.
+  - A real follow-up should serve a native PowerShell callback path so `pwsh` delivery is honest on Linux, macOS, and Windows without depending on a POSIX shell being present.
+
 ## NorthSec Scope
 
 ### Must be stable first
-
-- fix or gate the broken LOTP families
 
 The main rule for this window is simple: narrower but trustworthy support is better than broader support that fails during a live demo.
 
@@ -78,6 +77,7 @@ The phase breakdown in [tasks/self-hosted-runner-enumeration-and-persistence.md]
 | P3 | Operator notifications | Outbound webhook notifications for check-ins, loot, and deploy outcomes. | Task: [tasks/operator-notifications.md](tasks/operator-notifications.md) |
 | P3 | Kitchen audit trail and IOC export | Extend history into append-only audit and exportable IOC reporting. | Task: [tasks/kitchen-audit-trail-and-ioc-export.md](tasks/kitchen-audit-trail-and-ioc-export.md) |
 | P3 | Goal-oriented kill chain planning | Combine multiple credentials and repo constraints toward a chosen end state. | Task: [tasks/goal-oriented-killchain.md](tasks/goal-oriented-killchain.md) |
+| P3 | Native PowerShell LOTP delivery across runner platforms | Replace the current `pwsh -> sh` wrapper with a real PowerShell callback path so LOTP delivery is reliable on Linux, macOS, Windows, and especially self-hosted Windows runners. | Idea |
 | P3 | Quoted Bash heredoc exploitation | Useful exploit-coverage expansion, but the current analyze-only behavior is honest enough that this can wait until after NorthSec. | Issue [#51](https://github.com/boostsecurityio/smokedmeat/issues/51) |
 | P4 | Counter / Kitchen boundary refactor | Move client-neutral logic toward Kitchen and tighten shared contracts. | Task: [tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
 | P4 | Shared analysis progress constants and payload contract | Keep the Kitchen to Counter protocol in one place so client and server cannot drift. | Ref: [tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |

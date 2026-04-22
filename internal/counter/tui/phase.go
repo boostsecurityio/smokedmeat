@@ -9,6 +9,7 @@ import (
 
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
 	"github.com/boostsecurityio/smokedmeat/internal/counter"
+	"github.com/boostsecurityio/smokedmeat/internal/lotp"
 	"github.com/boostsecurityio/smokedmeat/internal/models"
 	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 )
@@ -208,6 +209,20 @@ func vulnerabilityExploitError(v *Vulnerability) error {
 	return nil
 }
 
+func deliveryMethodBlockReason(v *Vulnerability, method DeliveryMethod) string {
+	if v == nil {
+		return ""
+	}
+	if method != DeliveryLOTP || v.RuleID != "untrusted_checkout_exec" {
+		return ""
+	}
+	status := lotp.AutoDeployStatusFor(v.LOTPTool, v.LOTPAction)
+	if status.Supported {
+		return ""
+	}
+	return status.Reason
+}
+
 func ApplicableDeliveryMethods(v *Vulnerability) []DeliveryMethod {
 	if v == nil {
 		return []DeliveryMethod{DeliveryIssue, DeliveryComment, DeliveryAutoPR, DeliveryCopyOnly, DeliveryManualSteps}
@@ -262,7 +277,6 @@ type WizardState struct {
 	SelectedVuln           *Vulnerability
 	DeliveryMethod         DeliveryMethod
 	CommentTarget          CommentTarget
-	LOTPTechnique          string
 	StagerID               string
 	VictimStagerID         string
 	Payload                string
@@ -286,7 +300,6 @@ func (w *WizardState) Reset() {
 	w.SelectedVuln = nil
 	w.DeliveryMethod = DeliveryIssue
 	w.CommentTarget = CommentTargetIssue
-	w.LOTPTechnique = ""
 	w.StagerID = ""
 	w.VictimStagerID = ""
 	w.Payload = ""

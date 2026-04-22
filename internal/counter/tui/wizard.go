@@ -117,6 +117,40 @@ func (m *Model) normalizeCommentTarget() {
 	m.wizardInput.Focus()
 }
 
+func (m *Model) setWizardDeliveryMethod(method DeliveryMethod) bool {
+	if m.wizard == nil {
+		return false
+	}
+	state, _ := m.deliveryMethodStatus(method)
+	if state == deployStateFail || state == deployStateDenied {
+		return false
+	}
+	m.wizard.DeliveryMethod = method
+	return true
+}
+
+func (m *Model) moveWizardDelivery(delta int) {
+	if m.wizard == nil || m.wizard.Step != 2 || delta == 0 {
+		return
+	}
+	methods := ApplicableDeliveryMethods(m.wizard.SelectedVuln)
+	if len(methods) == 0 {
+		return
+	}
+	currentIdx := 0
+	for i, method := range methods {
+		if m.wizard.DeliveryMethod == method {
+			currentIdx = i
+			break
+		}
+	}
+	for nextIdx := currentIdx + delta; nextIdx >= 0 && nextIdx < len(methods); nextIdx += delta {
+		if m.setWizardDeliveryMethod(methods[nextIdx]) {
+			return
+		}
+	}
+}
+
 func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.wizard == nil {
 		m.CloseWizard()
@@ -217,49 +251,20 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			idx := int(msg.String()[0] - '1')
 			methods := ApplicableDeliveryMethods(m.wizard.SelectedVuln)
 			if idx < len(methods) {
-				m.wizard.DeliveryMethod = methods[idx]
-				if methods[idx] == DeliveryLOTP {
-					m.wizard.LOTPTechnique = "npm"
-				}
+				m.setWizardDeliveryMethod(methods[idx])
 			}
 		}
 		return m, m.startWizardPreflight(false)
 
 	case "up", "k":
 		if m.wizard.Step == 2 {
-			methods := ApplicableDeliveryMethods(m.wizard.SelectedVuln)
-			currentIdx := 0
-			for i, method := range methods {
-				if m.wizard.DeliveryMethod == method {
-					currentIdx = i
-					break
-				}
-			}
-			if currentIdx > 0 {
-				m.wizard.DeliveryMethod = methods[currentIdx-1]
-				if methods[currentIdx-1] == DeliveryLOTP {
-					m.wizard.LOTPTechnique = "npm"
-				}
-			}
+			m.moveWizardDelivery(-1)
 		}
 		return m, m.startWizardPreflight(false)
 
 	case "down", "j":
 		if m.wizard.Step == 2 {
-			methods := ApplicableDeliveryMethods(m.wizard.SelectedVuln)
-			currentIdx := 0
-			for i, method := range methods {
-				if m.wizard.DeliveryMethod == method {
-					currentIdx = i
-					break
-				}
-			}
-			if currentIdx < len(methods)-1 {
-				m.wizard.DeliveryMethod = methods[currentIdx+1]
-				if methods[currentIdx+1] == DeliveryLOTP {
-					m.wizard.LOTPTechnique = "npm"
-				}
-			}
+			m.moveWizardDelivery(1)
 		}
 		return m, m.startWizardPreflight(false)
 
@@ -342,6 +347,14 @@ func (m Model) advanceWizardStep() (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case 2:
+		state, reason := m.deliveryMethodStatus(m.wizard.DeliveryMethod)
+		if state == deployStateFail || state == deployStateDenied {
+			if reason == "" {
+				reason = "Selected delivery path is unavailable"
+			}
+			m.AddOutput("error", reason)
+			return m, nil
+		}
 		if m.wizard.DeliveryMethod == DeliveryCopyOnly ||
 			m.wizard.DeliveryMethod == DeliveryManualSteps {
 			vuln := m.wizard.SelectedVuln
@@ -379,6 +392,10 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 
 	vuln := m.wizard.SelectedVuln
 	m.pendingCachePoison = nil
+	if reason := deliveryMethodBlockReason(vuln, m.wizard.DeliveryMethod); reason != "" {
+		m.AddOutput("error", reason)
+		return m, nil
+	}
 	state, reason := m.wizardPreflightBlockForMethod(m.wizard.DeliveryMethod)
 	if state != "" {
 		if reason == "" {

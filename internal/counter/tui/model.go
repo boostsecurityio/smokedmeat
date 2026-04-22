@@ -1571,6 +1571,12 @@ func (m *Model) OpenWizard(vuln *Vulnerability) error {
 	methods := ApplicableDeliveryMethods(vuln)
 	if len(methods) > 0 {
 		m.wizard.DeliveryMethod = methods[0]
+		for _, method := range methods {
+			if m.canUseDeliveryMethod(method) {
+				m.wizard.DeliveryMethod = method
+				break
+			}
+		}
 	}
 
 	m.prevView = m.view

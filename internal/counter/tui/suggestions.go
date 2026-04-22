@@ -391,43 +391,9 @@ func (m *Model) detectOIDCProviders() []oidcProvider {
 func (m *Model) generateIdleSuggestions() {
 	if len(m.vulnerabilities) > 0 {
 		ranked := m.rankVulnerabilities()
-		count := 0
-		for _, vulnIdx := range ranked {
-			if count >= 5 {
-				break
-			}
-			vuln := m.vulnerabilities[vulnIdx]
-
-			if !vulnerabilitySupportsExploit(&vuln) {
-				continue
-			}
-
-			label := vuln.Title
-			if label == "" {
-				label = formatRuleID(vuln.RuleID)
-			}
-			if label == "" {
-				label = "injection"
-			}
-
-			description := vuln.Repository
-			if vulnNeedsDispatch(vuln) {
-				if m.hasDispatchCredential() {
-					description += " | dispatch ready"
-				} else {
-					description += " | needs pivot"
-				}
-			}
-
-			m.suggestions = append(m.suggestions, SuggestedAction{
-				Label:       label,
-				Description: description,
-				Command:     "use " + vuln.ID,
-				Priority:    count + 1,
-				VulnIndex:   vulnIdx,
-			})
-			count++
-		}
+		seen := make(map[int]bool)
+		count := m.appendIdleVulnerabilitySuggestions(ranked, seen, 0, true)
+		count = m.appendIdleVulnerabilitySuggestions(ranked, seen, count, false)
 		if count > 0 {
 			return
 		}
@@ -480,6 +446,69 @@ func (m *Model) generateIdleSuggestions() {
 			VulnIndex:   -1,
 		})
 	}
+}
+
+func (m *Model) appendIdleVulnerabilitySuggestions(ranked []int, seen map[int]bool, count int, requireAutomatic bool) int {
+	for _, vulnIdx := range ranked {
+		if count >= 5 {
+			break
+		}
+		if seen[vulnIdx] {
+			continue
+		}
+
+		vuln := m.vulnerabilities[vulnIdx]
+		if !vulnerabilitySupportsExploit(&vuln) {
+			continue
+		}
+		if vulnerabilityHasAutomaticDelivery(&vuln) != requireAutomatic {
+			continue
+		}
+
+		label := vuln.Title
+		if label == "" {
+			label = formatRuleID(vuln.RuleID)
+		}
+		if label == "" {
+			label = "injection"
+		}
+
+		description := vuln.Repository
+		if vulnNeedsDispatch(vuln) {
+			if m.hasDispatchCredential() {
+				description += " | dispatch ready"
+			} else {
+				description += " | needs pivot"
+			}
+		}
+
+		m.suggestions = append(m.suggestions, SuggestedAction{
+			Label:       label,
+			Description: description,
+			Command:     "use " + vuln.ID,
+			Priority:    count + 1,
+			VulnIndex:   vulnIdx,
+		})
+		seen[vulnIdx] = true
+		count++
+	}
+	return count
+}
+
+func vulnerabilityHasAutomaticDelivery(v *Vulnerability) bool {
+	if v == nil {
+		return false
+	}
+	for _, method := range ApplicableDeliveryMethods(v) {
+		switch method {
+		case DeliveryCopyOnly, DeliveryManualSteps:
+			continue
+		}
+		if deliveryMethodBlockReason(v, method) == "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) ExecuteSuggestion(index int) string {

@@ -233,6 +233,13 @@ func (m Model) wizardCapabilityStatus(capability string) (state, reason string) 
 }
 
 func (m Model) deliveryMethodStatus(method DeliveryMethod) (state, reason string) {
+	var selectedVuln *Vulnerability
+	if m.wizard != nil {
+		selectedVuln = m.wizard.SelectedVuln
+	}
+	if reason = deliveryMethodBlockReason(selectedVuln, method); reason != "" {
+		return deployStateFail, reason
+	}
 	switch method {
 	case DeliveryCopyOnly, DeliveryManualSteps:
 		return deployStatePass, ""
