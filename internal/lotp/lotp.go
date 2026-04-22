@@ -5,6 +5,8 @@
 // Based on https://boostsecurityio.github.io/lotp/
 package lotp
 
+import "strings"
+
 // Technique represents a Living Off The Pipeline technique.
 type Technique struct {
 	Name        string   // Tool/technique name
@@ -251,6 +253,80 @@ var Catalog = map[string]Technique{
 			"https://typicode.github.io/husky/",
 		},
 	},
+}
+
+var autoDeployAliases = map[string]string{
+	"actions/setup-node":   "npm",
+	"setup-node":           "npm",
+	"actions/setup-python": "pip",
+	"setup-python":         "pip",
+	"actions/setup-go":     "go",
+	"setup-go":             "go",
+	"ruby/setup-ruby":      "bundler",
+	"setup-ruby":           "bundler",
+}
+
+var autoDeploySupportedTechniques = map[string]bool{
+	"bash":       true,
+	"powershell": true,
+	"python":     true,
+	"npm":        true,
+	"pip":        true,
+	"yarn":       true,
+	"cargo":      true,
+	"make":       true,
+}
+
+type AutoDeployStatus struct {
+	Technique string
+	Supported bool
+	Reason    string
+}
+
+func NormalizeTechnique(name string) string {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if normalized == "" {
+		return ""
+	}
+	if at := strings.IndexByte(normalized, '@'); at >= 0 {
+		normalized = normalized[:at]
+	}
+	if alias, ok := autoDeployAliases[normalized]; ok {
+		return alias
+	}
+	return normalized
+}
+
+func ResolveTechnique(tool, action string) string {
+	if technique := NormalizeTechnique(tool); technique != "" {
+		return technique
+	}
+	return NormalizeTechnique(action)
+}
+
+func AutoDeployStatusFor(tool, action string) AutoDeployStatus {
+	technique := ResolveTechnique(tool, action)
+	if technique == "" {
+		return AutoDeployStatus{
+			Supported: false,
+			Reason:    "Automatic LOTP generation is not available for this finding",
+		}
+	}
+	if autoDeploySupportedTechniques[technique] {
+		return AutoDeployStatus{
+			Technique: technique,
+			Supported: true,
+		}
+	}
+	label := strings.TrimSpace(tool)
+	if label == "" {
+		label = strings.TrimSpace(action)
+	}
+	return AutoDeployStatus{
+		Technique: technique,
+		Supported: false,
+		Reason:    "Automatic LOTP generation is not implemented yet for " + label,
+	}
 }
 
 // Hook types for npm/yarn/etc package.json scripts.

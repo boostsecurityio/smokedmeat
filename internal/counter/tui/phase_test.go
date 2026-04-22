@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPhase_CanSelectVuln(t *testing.T) {
@@ -479,6 +480,37 @@ func TestApplicableDeliveryMethods_LOTP(t *testing.T) {
 			assert.True(t, hasMethod(methods, DeliveryManualSteps))
 		})
 	}
+}
+
+func TestDeliveryMethodStatus_LOTPUnsupportedAutoGenerationBlocked(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.tokenInfo = &TokenInfo{Value: "ghp_test", Type: TokenTypeClassicPAT}
+	m.wizard = &WizardState{
+		SelectedVuln: &Vulnerability{
+			RuleID:     "untrusted_checkout_exec",
+			Workflow:   ".github/workflows/pr.yml",
+			LOTPAction: "actions/setup-go",
+		},
+	}
+
+	state, reason := m.deliveryMethodStatus(DeliveryLOTP)
+
+	assert.Equal(t, deployStateFail, state)
+	assert.Contains(t, reason, "actions/setup-go")
+}
+
+func TestOpenWizard_PwnRequestDefaultsToManualWhenLOTPAutoGenerationBlocked(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.tokenInfo = &TokenInfo{Value: "ghp_test", Type: TokenTypeClassicPAT}
+
+	vuln := &Vulnerability{
+		RuleID:     "untrusted_checkout_exec",
+		Workflow:   ".github/workflows/pr.yml",
+		LOTPAction: "actions/setup-go",
+	}
+
+	require.NoError(t, m.OpenWizard(vuln))
+	assert.Equal(t, DeliveryManualSteps, m.wizard.DeliveryMethod)
 }
 
 func TestVulnerabilitySupportsExploit(t *testing.T) {

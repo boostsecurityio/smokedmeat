@@ -361,6 +361,64 @@ func TestGenerateSuggestions_DoesNotTreatScopeLessPATAsDispatchReady(t *testing.
 	assert.NotContains(t, m.suggestions[0].Description, "dispatch ready")
 }
 
+func TestGenerateSuggestions_PrefersAutomaticDeliveryOverManualOnlyLOTP(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.target = "acme/manual-only"
+	m.targetType = "repo"
+	m.vulnerabilities = []Vulnerability{
+		{
+			ID:         "V001",
+			Repository: "acme/manual-only",
+			Workflow:   ".github/workflows/pr.yml",
+			Job:        "verify",
+			Line:       10,
+			RuleID:     "untrusted_checkout_exec",
+			Trigger:    "pull_request_target",
+			Context:    "bash_run",
+			LOTPAction: "actions/setup-go",
+		},
+		{
+			ID:         "V002",
+			Repository: "acme/auto-ready",
+			Workflow:   ".github/workflows/comment.yml",
+			Job:        "comment",
+			Line:       20,
+			RuleID:     "injection",
+			Trigger:    "issue_comment",
+			Context:    "issue_comment",
+		},
+	}
+
+	m.GenerateSuggestions()
+
+	require.NotEmpty(t, m.suggestions)
+	require.GreaterOrEqual(t, m.suggestions[0].VulnIndex, 0)
+	assert.Equal(t, "V002", m.vulnerabilities[m.suggestions[0].VulnIndex].ID)
+}
+
+func TestGenerateSuggestions_FallsBackToManualOnlyLOTPWhenNoAutomaticDeliveryExists(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.vulnerabilities = []Vulnerability{
+		{
+			ID:         "V001",
+			Repository: "acme/manual-only",
+			Workflow:   ".github/workflows/pr.yml",
+			Job:        "verify",
+			Line:       10,
+			RuleID:     "untrusted_checkout_exec",
+			Trigger:    "pull_request_target",
+			Context:    "bash_run",
+			LOTPAction: "actions/setup-go",
+		},
+	}
+
+	m.GenerateSuggestions()
+
+	require.Len(t, m.suggestions, 1)
+	require.GreaterOrEqual(t, m.suggestions[0].VulnIndex, 0)
+	assert.Equal(t, "V001", m.vulnerabilities[m.suggestions[0].VulnIndex].ID)
+}
+
 func TestSwapActiveToken_RecalculatesSuggestions(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhaseRecon

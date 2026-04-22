@@ -276,3 +276,23 @@ func TestMatchCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeTechnique_VersionedActionRef(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"actions/setup-node@v4", "npm"},
+		{"actions/setup-node@v3.1.0", "npm"},
+		{"actions/setup-python@v5", "pip"},
+		{"actions/setup-python@main", "pip"},
+		{"actions/setup-node", "npm"},
+		{"npm", "npm"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.expected, NormalizeTechnique(tt.input))
+		})
+	}
+}

