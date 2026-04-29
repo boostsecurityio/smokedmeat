@@ -28,6 +28,7 @@ const (
 	deployCapabilityCommentPR    = "delivery.comment.pr"
 	deployCapabilityCommentStub  = "delivery.comment.stub_pr"
 	deployCapabilityPR           = "delivery.pr"
+	deployCapabilityWorkflowPush = "delivery.workflow_push"
 	deployCapabilityLOTP         = "delivery.lotp"
 	deployCapabilityDispatch     = "delivery.dispatch"
 
@@ -362,6 +363,22 @@ func (e deployPreflightEvidence) dispatchCapability(repoPrivate bool) DeployPref
 	return DeployPreflightCapability{State: deployStateUnknown, Reason: "Workflow dispatch access could not be pre-verified"}
 }
 
+func (e deployPreflightEvidence) workflowPushCapability(repoPrivate bool) DeployPreflightCapability {
+	if e.permissionAllowsWrite("contents") && e.permissionAllowsWrite("workflows") {
+		return DeployPreflightCapability{State: deployStatePass}
+	}
+	if e.hasRepoWrite(repoPrivate) && e.hasScope("workflow") {
+		return DeployPreflightCapability{State: deployStatePass}
+	}
+	if len(e.knownPermissions) > 0 && (e.tokenType == "fine_grained_pat" || e.tokenType == "install_app" || e.tokenType == "actions") {
+		return DeployPreflightCapability{State: deployStateFail, Reason: "token lacks workflow-file write permission"}
+	}
+	if e.tokenType == "classic_pat" && len(e.scopes) > 0 && e.hasRepoWrite(repoPrivate) && !e.hasScope("workflow") {
+		return DeployPreflightCapability{State: deployStateFail, Reason: "token lacks workflow scope for writing .github/workflows files"}
+	}
+	return DeployPreflightCapability{State: deployStateUnknown, Reason: "Workflow-file write access could not be pre-verified"}
+}
+
 func newDeployCheck(name, state, reason string) DeployPreflightCheck {
 	return DeployPreflightCheck{Name: name, State: state, Reason: reason}
 }
@@ -601,6 +618,7 @@ func buildDeployPreflightCapabilities(req DeployPreflightRequest, signals deploy
 		capabilities[deployCapabilityCommentStub] = DeployPreflightCapability{State: deployStateFail, Reason: reason}
 		capabilities[deployCapabilityCommentAny] = DeployPreflightCapability{State: deployStateFail, Reason: reason}
 		capabilities[deployCapabilityPR] = DeployPreflightCapability{State: deployStateFail, Reason: reason}
+		capabilities[deployCapabilityWorkflowPush] = DeployPreflightCapability{State: deployStateFail, Reason: reason}
 		capabilities[deployCapabilityLOTP] = DeployPreflightCapability{State: deployStateFail, Reason: reason}
 		capabilities[deployCapabilityDispatch] = DeployPreflightCapability{State: deployStateFail, Reason: reason}
 		return capabilities
@@ -639,6 +657,7 @@ func buildDeployPreflightCapabilities(req DeployPreflightRequest, signals deploy
 	capabilities[deployCapabilityCommentAny] = mergeCommentAny(commentIssue, commentPR, commentStub)
 
 	capabilities[deployCapabilityPR] = applyForkingCapability(req, evidence, signals, capabilityFromChecks(evidence.pullRequestCapability(signals.repoPrivate), prsCheck))
+	capabilities[deployCapabilityWorkflowPush] = capabilityFromChecks(evidence.workflowPushCapability(signals.repoPrivate))
 	capabilities[deployCapabilityLOTP] = applyForkingCapability(req, evidence, signals, capabilityFromChecks(evidence.pullRequestCapability(signals.repoPrivate), prsCheck))
 	capabilities[deployCapabilityDispatch] = capabilityFromChecks(evidence.dispatchCapability(signals.repoPrivate), workflowCheck)
 

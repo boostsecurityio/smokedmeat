@@ -141,6 +141,53 @@ func (d DeliveryMethod) String() string {
 	}
 }
 
+type WizardKind int
+
+const (
+	WizardKindVulnerability WizardKind = iota
+	WizardKindRunnerTarget
+)
+
+func (k WizardKind) String() string {
+	switch k {
+	case WizardKindRunnerTarget:
+		return "runner_target"
+	default:
+		return "vulnerability"
+	}
+}
+
+type RunnerTargetAction int
+
+const (
+	RunnerTargetActionPassiveDetails RunnerTargetAction = iota
+	RunnerTargetActionAutoWorkflowPush
+	RunnerTargetActionCopyWorkflow
+)
+
+func (a RunnerTargetAction) String() string {
+	switch a {
+	case RunnerTargetActionAutoWorkflowPush:
+		return "Auto workflow push"
+	case RunnerTargetActionCopyWorkflow:
+		return "Copy workflow"
+	default:
+		return "Observed details"
+	}
+}
+
+type RunnerTargetSelection struct {
+	ID                    string
+	Repository            string
+	RepositoryID          string
+	LabelDisplay          string
+	LabelSet              []string
+	DynamicLabelSet       []string
+	ObservedWorkflowPaths []string
+	ObservedJobNames      []string
+	PreferredPath         string
+}
+
 type CommentTarget int
 
 const (
@@ -273,8 +320,11 @@ func ApplicableDeliveryMethods(v *Vulnerability) []DeliveryMethod {
 }
 
 type WizardState struct {
+	Kind                   WizardKind
 	Step                   int
 	SelectedVuln           *Vulnerability
+	SelectedRunnerTarget   *RunnerTargetSelection
+	RunnerTargetAction     RunnerTargetAction
 	DeliveryMethod         DeliveryMethod
 	CommentTarget          CommentTarget
 	StagerID               string
@@ -289,6 +339,7 @@ type WizardState struct {
 	CachePoisonEnabled     bool
 	CachePoisonReplace     bool
 	CachePoisonVictimIndex int
+	PersistenceAttempt     bool
 	PreflightKey           string
 	PreflightLoading       bool
 	PreflightError         string
@@ -296,8 +347,11 @@ type WizardState struct {
 }
 
 func (w *WizardState) Reset() {
+	w.Kind = WizardKindVulnerability
 	w.Step = 1
 	w.SelectedVuln = nil
+	w.SelectedRunnerTarget = nil
+	w.RunnerTargetAction = RunnerTargetActionPassiveDetails
 	w.DeliveryMethod = DeliveryIssue
 	w.CommentTarget = CommentTargetIssue
 	w.StagerID = ""
@@ -312,6 +366,7 @@ func (w *WizardState) Reset() {
 	w.CachePoisonEnabled = false
 	w.CachePoisonReplace = false
 	w.CachePoisonVictimIndex = 0
+	w.PersistenceAttempt = false
 	w.PreflightKey = ""
 	w.PreflightLoading = false
 	w.PreflightError = ""
@@ -376,7 +431,8 @@ type CachePoisonWaitingState struct {
 }
 
 type CallbackModalState struct {
-	Cursor int
+	Cursor      int
+	PreferredID string
 }
 
 type CallbackAgentLink struct {
@@ -387,12 +443,19 @@ type CallbackAgentLink struct {
 	SecretHits int
 }
 
+const (
+	agentModeExpress  = "express"
+	agentModeDwell    = "dwell"
+	agentModeResident = "resident"
+)
+
 type AgentState struct {
 	ID        string
 	Runner    string
 	Repo      string
 	Workflow  string
 	Job       string
+	Mode      string
 	EntryVuln string
 	StartTime time.Time
 }

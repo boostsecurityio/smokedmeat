@@ -14,6 +14,7 @@ import (
 // Config holds Counter configuration.
 type Config struct {
 	KitchenURL               string `yaml:"kitchen_url"`
+	SessionID                string `yaml:"session_id,omitempty"`
 	Operator                 string `yaml:"operator"`
 	KeyComment               string `yaml:"key_comment,omitempty"`
 	Token                    string `yaml:"token,omitempty"`

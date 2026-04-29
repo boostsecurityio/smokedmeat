@@ -563,16 +563,8 @@ func (m *Model) renderNewHeader() string {
 	var rightParts []string
 
 	if m.phase.HasActiveAgent() && m.activeAgent != nil {
-		remaining := time.Until(m.jobDeadline)
-		if remaining <= 0 || m.jobDeadline.IsZero() {
-			if m.dwellMode {
-				rightParts = append(rightParts, mutedColor.Render("✓ Dwell complete"))
-			} else {
-				rightParts = append(rightParts, mutedColor.Render("✓ Express complete"))
-			}
-		} else {
-			rightParts = append(rightParts, warningColor.Render("⏱ "+formatCountdown(remaining)))
-		}
+		statusText, remaining, countdown := m.activeAgentStatus()
+		rightParts = append(rightParts, renderAgentStatus(statusText, remaining, countdown))
 	}
 
 	if m.config.Operator != "" {
@@ -699,14 +691,30 @@ func (m *Model) renderNewStatusBar() string {
 					helpKeyStyle.Render("Esc") + helpDescStyle.Render(":cancel")
 			case 2:
 				optCount := len(ApplicableDeliveryMethods(m.wizard.SelectedVuln))
+				enterAction := ":confirm "
+				if m.wizard.Kind == WizardKindRunnerTarget {
+					optCount = 3
+					enterAction = ":continue "
+				}
 				keyHints = helpKeyStyle.Render(fmt.Sprintf("1-%d", optCount)) + helpDescStyle.Render(":select ") +
-					helpKeyStyle.Render("Enter") + helpDescStyle.Render(":confirm ") +
+					helpKeyStyle.Render("Enter") + helpDescStyle.Render(enterAction) +
 					helpKeyStyle.Render("Esc") + helpDescStyle.Render(":back")
 			case 3:
 				action := ":deploy "
-				switch m.wizard.DeliveryMethod {
-				case DeliveryCopyOnly, DeliveryManualSteps:
-					action = ":copy "
+				if m.wizard.Kind == WizardKindRunnerTarget {
+					switch m.wizard.RunnerTargetAction {
+					case RunnerTargetActionPassiveDetails:
+						action = ":done "
+					case RunnerTargetActionAutoWorkflowPush:
+						action = ":deploy "
+					case RunnerTargetActionCopyWorkflow:
+						action = ":arm "
+					}
+				} else {
+					switch m.wizard.DeliveryMethod {
+					case DeliveryCopyOnly, DeliveryManualSteps:
+						action = ":copy "
+					}
 				}
 				keyHints = helpKeyStyle.Render("Enter") + helpDescStyle.Render(action) +
 					helpKeyStyle.Render("Esc") + helpDescStyle.Render(":back")
@@ -867,11 +875,16 @@ func (m *Model) contextStatusHints() string {
 		if spec := m.selectedTreeTargetSpec(); spec != "" {
 			hints += helpKeyStyle.Render("s") + helpDescStyle.Render(":target ")
 		}
-		if node := m.SelectedTreeNode(); node != nil && node.Type == TreeNodeVuln {
-			if vulnerabilitySupportsExploit(m.vulnerabilityForNode(node)) {
+		if node := m.SelectedTreeNode(); node != nil {
+			if node.Type == TreeNodeVuln && vulnerabilitySupportsExploit(m.vulnerabilityForNode(node)) {
 				hints += helpKeyStyle.Render("x") + helpDescStyle.Render(":exploit ")
 			}
-			hints += helpKeyStyle.Render("K") + helpDescStyle.Render(":chain ")
+			if node.Type == TreeNodeSelfHostedRunner && m.runnerTargetActionable(node) {
+				hints += helpKeyStyle.Render("x") + helpDescStyle.Render(":act ")
+			}
+			if node.Type == TreeNodeVuln {
+				hints += helpKeyStyle.Render("K") + helpDescStyle.Render(":chain ")
+			}
 		}
 	case PaneFocusMenu:
 		hints += navHint
@@ -1463,8 +1476,11 @@ func (m *Model) buildWizardModal(width, height int) []string {
 	// Title bar with red background (like header)
 	stepInfo := fmt.Sprintf("Step %d/3", m.wizard.Step)
 	title := " PAYLOAD WIZARD"
+	if m.wizard.Kind == WizardKindRunnerTarget {
+		title = " RUNNER TARGET WIZARD"
+	}
 	innerWidth := width - 2
-	spacing := innerWidth - len(title) - len(stepInfo) - 1
+	spacing := innerWidth - lipgloss.Width(title) - lipgloss.Width(stepInfo) - 1
 	if spacing < 1 {
 		spacing = 1
 	}
@@ -1485,11 +1501,15 @@ func (m *Model) buildWizardModal(width, height int) []string {
 	case 3:
 		contentLines = m.buildWizardStep3Content(width)
 	}
-	for _, line := range contentLines {
-		if len(lines) >= height-3 {
-			break
+contentLoop:
+	for _, block := range contentLines {
+		for _, line := range strings.Split(block, "\n") {
+			if len(lines) >= height-3 {
+				break contentLoop
+			}
+			trimmed := truncateForWidth(line, width-2)
+			lines = append(lines, bLeft+padRight(trimmed, width-2)+bRight)
 		}
-		lines = append(lines, bLeft+line+bRight)
 	}
 
 	for len(lines) < height-3 {
@@ -1504,6 +1524,9 @@ func (m *Model) buildWizardModal(width, height int) []string {
 			helpKeyStyle.Render("Esc") + helpDescStyle.Render(":cancel")
 	case 2:
 		optCount := len(ApplicableDeliveryMethods(m.wizard.SelectedVuln))
+		if m.wizard.Kind == WizardKindRunnerTarget {
+			optCount = 3
+		}
 		hints = helpKeyStyle.Render(fmt.Sprintf("1-%d", optCount)) + helpDescStyle.Render(":select  ") +
 			helpKeyStyle.Render("Enter") + helpDescStyle.Render(":continue  ") +
 			helpKeyStyle.Render("Esc") + helpDescStyle.Render(":back")
@@ -1513,9 +1536,32 @@ func (m *Model) buildWizardModal(width, height int) []string {
 		case DeliveryCopyOnly, DeliveryManualSteps:
 			action = ":copy  "
 		}
-		dwellHint := helpKeyStyle.Render("d") + helpDescStyle.Render(":dwell  ")
-		hints = helpKeyStyle.Render("Enter") + helpDescStyle.Render(action) + dwellHint +
-			helpKeyStyle.Render("Esc") + helpDescStyle.Render(":back")
+		if m.wizard.Kind == WizardKindRunnerTarget {
+			switch m.wizard.RunnerTargetAction {
+			case RunnerTargetActionPassiveDetails:
+				action = ":done  "
+			case RunnerTargetActionAutoWorkflowPush:
+				action = ":deploy  "
+			case RunnerTargetActionCopyWorkflow:
+				action = ":arm  "
+			}
+		}
+		dwellHint := helpKeyStyle.Render("d") + helpDescStyle.Render(":mode  ")
+		callbackHint := helpKeyStyle.Render("b") + helpDescStyle.Render(":hits  ")
+		hints = helpKeyStyle.Render("Enter") + helpDescStyle.Render(action)
+		if m.wizard.Kind == WizardKindRunnerTarget && (m.wizard.RunnerTargetAction == RunnerTargetActionAutoWorkflowPush || m.wizard.RunnerTargetAction == RunnerTargetActionCopyWorkflow) {
+			if m.wizard.PersistenceAttempt {
+				hints += helpKeyStyle.Render("p") + helpDescStyle.Render(":resident  ")
+			} else {
+				hints += dwellHint + callbackHint + helpKeyStyle.Render("p") + helpDescStyle.Render(":resident  ")
+			}
+		} else if m.wizard.Kind != WizardKindRunnerTarget {
+			hints += dwellHint
+			if m.wizardCanAttemptPersistence() {
+				hints += helpKeyStyle.Render("p") + helpDescStyle.Render(":persist  ")
+			}
+		}
+		hints += helpKeyStyle.Render("Esc") + helpDescStyle.Render(":back")
 	}
 	hintsWidth := lipgloss.Width(hints)
 	hintsPadding := width - 4 - hintsWidth
@@ -1537,6 +1583,10 @@ func (m *Model) buildWizardModal(width, height int) []string {
 }
 
 func (m *Model) buildWizardStep1Content(width int) []string {
+	if m.wizard != nil && m.wizard.Kind == WizardKindRunnerTarget {
+		return m.buildRunnerTargetStep1Content(width)
+	}
+
 	var lines []string
 	innerWidth := width - 2
 	pad := "  "
@@ -1617,6 +1667,10 @@ func (m *Model) buildWizardStep1Content(width int) []string {
 }
 
 func (m *Model) buildWizardStep2Content(width int) []string {
+	if m.wizard != nil && m.wizard.Kind == WizardKindRunnerTarget {
+		return m.buildRunnerTargetStep2Content(width)
+	}
+
 	var lines []string
 	innerWidth := width - 2
 	pad := "  "
@@ -1758,6 +1812,10 @@ func (m *Model) lotpDeliveryOption() deliveryOption {
 }
 
 func (m *Model) buildWizardStep3Content(width int) []string {
+	if m.wizard != nil && m.wizard.Kind == WizardKindRunnerTarget {
+		return m.buildRunnerTargetStep3Content(width)
+	}
+
 	var lines []string
 	innerWidth := width - 2
 	pad := "  "
@@ -1980,6 +2038,10 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 		)
 	}
 
+	if m.wizardCanAttemptPersistence() {
+		lines = append(lines, m.renderPersistenceOption(pad, innerWidth)...)
+	}
+
 	if m.wizard.DeliveryMethod != DeliveryLOTP {
 		statusState, statusReason := m.deliveryMethodStatus(m.wizard.DeliveryMethod)
 		switch statusState {
@@ -2040,6 +2102,248 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 	return lines
 }
 
+func (m *Model) buildRunnerTargetStep1Content(width int) []string {
+	var lines []string
+	innerWidth := width - 2
+	pad := "  "
+	emptyLine := strings.Repeat(" ", innerWidth)
+	target := m.wizard.SelectedRunnerTarget
+	if target == nil {
+		return []string{emptyLine}
+	}
+
+	lines = append(lines,
+		formatWizardContent(pad, "", warningColor.Render("[SH-RUNNER] "+target.LabelDisplay), innerWidth),
+		formatWizardContent(pad, "Repository:", mutedColor.Render(target.Repository), innerWidth),
+		formatWizardContent(pad, "Labels:", mutedColor.Render(strings.Join(target.LabelSet, ", ")), innerWidth),
+	)
+	if len(target.DynamicLabelSet) > 0 {
+		lines = append(lines, formatWizardContent(pad, "Dynamic:", mutedColor.Render(strings.Join(target.DynamicLabelSet, ", ")), innerWidth))
+	}
+	if len(target.ObservedWorkflowPaths) > 0 {
+		lines = append(lines, formatWizardContent(pad, "Observed in:", mutedColor.Render(strings.Join(target.ObservedWorkflowPaths, ", ")), innerWidth))
+	}
+	if len(target.ObservedJobNames) > 0 {
+		lines = append(lines, formatWizardContent(pad, "Jobs:", mutedColor.Render(strings.Join(target.ObservedJobNames, ", ")), innerWidth))
+	}
+	lines = append(lines, emptyLine)
+	if target.PreferredPath != "" {
+		lines = append(
+			lines,
+			formatWizardContent(pad, "Recommended:", warningColor.Render("prefer existing vuln path "+target.PreferredPath), innerWidth),
+			emptyLine,
+		)
+	}
+	lines = append(lines, formatWizardContent(pad, "", mutedColor.Render("This target is observed from workflow usage. It is useful even without a first-class vuln."), innerWidth))
+	return lines
+}
+
+func (m *Model) buildRunnerTargetStep2Content(width int) []string {
+	var lines []string
+	innerWidth := width - 2
+	pad := "  "
+	emptyLine := strings.Repeat(" ", innerWidth)
+
+	lines = append(lines,
+		formatWizardContent(pad, "", "What do you want to do with this observed runner target?", innerWidth),
+		emptyLine,
+		formatWizardContent(pad, "", warningColor.Render("⚠️  Proceed only if authorized. This will create real artifacts."), innerWidth),
+		emptyLine,
+	)
+
+	options := []struct {
+		action RunnerTargetAction
+		label  string
+		desc   string
+	}{
+		{RunnerTargetActionPassiveDetails, "Observed details", "Review labels, observed workflows, and the preferred path"},
+		{RunnerTargetActionAutoWorkflowPush, "Auto workflow push", "Create a random branch and push a self-hosted callback workflow directly"},
+		{RunnerTargetActionCopyWorkflow, "Copy workflow", "Copy the callback workflow YAML for manual use or a different foothold"},
+	}
+
+	for i, opt := range options {
+		marker := "○"
+		if m.wizard.RunnerTargetAction == opt.action {
+			marker = "●"
+		}
+		state, reason := m.runnerTargetActionStatus(opt.action)
+		label := opt.label
+		desc := opt.desc
+		if opt.action == RunnerTargetActionAutoWorkflowPush && state == deployStatePass {
+			label += " " + successColor.Render("Recommended")
+		}
+		switch state {
+		case deployStateDenied, deployStateFail:
+			label += " " + warningColor.Render("[auto path blocked]")
+			if reason != "" {
+				desc = reason
+			}
+		case deployStateUnknown:
+			if reason != "" {
+				desc = reason
+			}
+		}
+		lines = append(lines,
+			formatWizardContent(pad, fmt.Sprintf("[%d] %s", i+1, marker), label, innerWidth),
+			formatWizardContent(pad, "     ", mutedColor.Render(desc), innerWidth),
+			emptyLine,
+		)
+	}
+
+	if route := m.runnerTargetRouteSummary(); route != "" {
+		lines = append(lines,
+			formatWizardContent(pad, "Route:", mutedColor.Render(route), innerWidth),
+			emptyLine,
+		)
+	}
+
+	return lines
+}
+
+func (m *Model) buildRunnerTargetStep3Content(width int) []string {
+	var lines []string
+	innerWidth := width - 2
+	pad := "  "
+	emptyLine := strings.Repeat(" ", innerWidth)
+	target := m.wizard.SelectedRunnerTarget
+	if target == nil {
+		return []string{emptyLine}
+	}
+
+	switch m.wizard.RunnerTargetAction {
+	case RunnerTargetActionAutoWorkflowPush:
+		state, reason := m.runnerTargetActionStatus(m.wizard.RunnerTargetAction)
+		lines = append(lines,
+			formatWizardContent(pad, "", "Push a random branch automatically with the callback workflow committed for you.", innerWidth),
+			emptyLine,
+			formatWizardContent(pad, "", warningColor.Render("⚠️  Proceed only if authorized. This will push a real branch."), innerWidth),
+			emptyLine,
+		)
+		if reason != "" {
+			statusLabel := successColor.Render("Viable")
+			switch state {
+			case deployStateFail, deployStateDenied:
+				statusLabel = errorColor.Render("Auto path blocked")
+			case deployStateUnknown:
+				statusLabel = warningColor.Render("Needs review")
+			}
+			lines = append(lines,
+				formatWizardContent(pad, "Status:", statusLabel, innerWidth),
+				formatWizardContent(pad, "", mutedColor.Render(reason), innerWidth),
+				emptyLine,
+			)
+		}
+		if route := m.runnerTargetRouteSummary(); route != "" {
+			lines = append(lines,
+				formatWizardContent(pad, "Route:", mutedColor.Render(route), innerWidth),
+				emptyLine,
+			)
+		}
+		lines = append(lines, m.renderRunnerTargetExecutionOptions(pad, innerWidth)...)
+		lines = append(lines,
+			formatWizardContent(pad, "File:", runnerTargetWorkflowPath(), innerWidth),
+			formatWizardContent(pad, "Job:", runnerTargetWorkflowJobName(), innerWidth),
+			formatWizardContent(pad, "Trigger:", "push", innerWidth),
+			formatWizardContent(pad, "Labels:", strings.Join(target.LabelSet, ", "), innerWidth),
+		)
+		if len(target.DynamicLabelSet) > 0 {
+			lines = append(lines,
+				formatWizardContent(pad, "Dynamic:", strings.Join(target.DynamicLabelSet, ", "), innerWidth),
+				formatWizardContent(pad, "", warningColor.Render("Observed runtime labels are optional and omitted from the generated workflow."), innerWidth),
+			)
+		}
+	case RunnerTargetActionCopyWorkflow:
+		state, reason := m.runnerTargetActionStatus(m.wizard.RunnerTargetAction)
+		lines = append(lines,
+			formatWizardContent(pad, "", "Copy a manual callback workflow for this label set.", innerWidth),
+			emptyLine,
+			formatWizardContent(pad, "", warningColor.Render("⚠️  Proceed only if authorized. This creates real workflow content."), innerWidth),
+			emptyLine,
+		)
+		if reason != "" {
+			statusLabel := successColor.Render("Ready")
+			switch state {
+			case deployStateFail, deployStateDenied:
+				statusLabel = warningColor.Render("Use another foothold")
+			case deployStateUnknown:
+				statusLabel = warningColor.Render("Needs review")
+			}
+			lines = append(lines,
+				formatWizardContent(pad, "Status:", statusLabel, innerWidth),
+				formatWizardContent(pad, "", mutedColor.Render(reason), innerWidth),
+				emptyLine,
+			)
+		}
+		if route := m.runnerTargetRouteSummary(); route != "" {
+			lines = append(lines,
+				formatWizardContent(pad, "Route:", mutedColor.Render(route), innerWidth),
+				emptyLine,
+			)
+		}
+		lines = append(lines, m.renderRunnerTargetExecutionOptions(pad, innerWidth)...)
+		lines = append(lines,
+			formatWizardContent(pad, "File:", runnerTargetWorkflowPath(), innerWidth),
+			formatWizardContent(pad, "Job:", runnerTargetWorkflowJobName(), innerWidth),
+			formatWizardContent(pad, "Trigger:", "push", innerWidth),
+			formatWizardContent(pad, "Labels:", strings.Join(target.LabelSet, ", "), innerWidth),
+		)
+		if len(target.DynamicLabelSet) > 0 {
+			lines = append(lines,
+				formatWizardContent(pad, "Dynamic:", strings.Join(target.DynamicLabelSet, ", "), innerWidth),
+				formatWizardContent(pad, "", warningColor.Render("Observed runtime labels are optional and omitted from the generated workflow."), innerWidth),
+			)
+		}
+	default:
+		lines = append(lines,
+			formatWizardContent(pad, "", "Review the observed target details before choosing a noisier path.", innerWidth),
+			emptyLine,
+			formatWizardContent(pad, "Repository:", target.Repository, innerWidth),
+			formatWizardContent(pad, "Labels:", strings.Join(target.LabelSet, ", "), innerWidth),
+		)
+		if len(target.DynamicLabelSet) > 0 {
+			lines = append(lines, formatWizardContent(pad, "Dynamic:", strings.Join(target.DynamicLabelSet, ", "), innerWidth))
+		}
+		if len(target.ObservedWorkflowPaths) > 0 {
+			lines = append(lines, formatWizardContent(pad, "Observed in:", strings.Join(target.ObservedWorkflowPaths, ", "), innerWidth))
+		}
+		if len(target.ObservedJobNames) > 0 {
+			lines = append(lines, formatWizardContent(pad, "Jobs:", strings.Join(target.ObservedJobNames, ", "), innerWidth))
+		}
+		if target.PreferredPath != "" {
+			lines = append(lines, formatWizardContent(pad, "Preferred path:", target.PreferredPath, innerWidth))
+		}
+	}
+
+	lines = append(lines,
+		emptyLine,
+		formatWizardContent(pad, "", mutedColor.Render("Only proceed if you are authorized to test this target."), innerWidth),
+	)
+	return lines
+}
+
+func (m *Model) renderRunnerTargetExecutionOptions(pad string, innerWidth int) []string {
+	emptyLine := strings.Repeat(" ", innerWidth)
+	if m.wizard != nil && m.wizard.PersistenceAttempt {
+		retryPolicy := runnerTargetRetryPolicy(m.config.ExternalURL())
+		return []string{
+			formatWizardContent(pad, "Seed callback:", "Express once to confirm execution", innerWidth),
+			emptyLine,
+			formatWizardContent(pad, "Resident foothold:", "Enabled after job exit "+mutedColor.Render("[p] to toggle"), innerWidth),
+			emptyLine,
+			formatWizardContent(pad, "Retry:", retryPolicy, innerWidth),
+			emptyLine,
+		}
+	}
+
+	lines := m.renderDwellTimeOption(pad, innerWidth)
+	lines = append(lines, m.renderCallbackBudgetOption(pad, innerWidth)...)
+	lines = append(lines,
+		formatWizardContent(pad, "Resident foothold:", "Off "+mutedColor.Render("[p] to toggle"), innerWidth),
+		emptyLine,
+	)
+	return lines
+}
+
 func (m *Model) renderDwellTimeOption(pad string, innerWidth int) []string {
 	emptyLine := strings.Repeat(" ", innerWidth)
 	return []string{
@@ -2060,6 +2364,9 @@ func (m *Model) renderDwellTimeLine(pad string, innerWidth int) string {
 }
 
 func (m *Model) renderCallbackBudgetOption(pad string, innerWidth int) []string {
+	if m.wizard != nil && m.wizard.Kind == WizardKindRunnerTarget && m.wizard.PersistenceAttempt {
+		return nil
+	}
 	line := m.renderCallbackBudgetLine(pad, innerWidth)
 	if line == "" {
 		return nil
@@ -2067,6 +2374,21 @@ func (m *Model) renderCallbackBudgetOption(pad string, innerWidth int) []string 
 	emptyLine := strings.Repeat(" ", innerWidth)
 	return []string{
 		line,
+		emptyLine,
+	}
+}
+
+func (m *Model) renderPersistenceOption(pad string, innerWidth int) []string {
+	if !m.wizardCanAttemptPersistence() {
+		return nil
+	}
+	emptyLine := strings.Repeat(" ", innerWidth)
+	value := "Off"
+	if m.wizard != nil && m.wizard.PersistenceAttempt {
+		value = "Resident foothold after job exit"
+	}
+	return []string{
+		formatWizardContent(pad, "Persistence:", value+" "+mutedColor.Render("[p] to toggle"), innerWidth),
 		emptyLine,
 	}
 }
@@ -2392,23 +2714,27 @@ func formatWizardContent(prefix, label, value string, width int) string {
 		content = value
 	}
 	prefixWidth := lipgloss.Width(prefix)
-	contentWidth := lipgloss.Width(content)
-	padding := width - prefixWidth - contentWidth
-	if padding < 0 {
-		padding = 0
+	availableWidth := width - prefixWidth
+	if availableWidth <= 0 {
+		return prefix
 	}
-	padding += countVS16(content)
-	return prefix + content + strings.Repeat(" ", padding)
-}
-
-func countVS16(s string) int {
-	n := 0
-	for _, r := range stripANSI(s) {
-		if r == '\uFE0F' {
-			n++
+	var lines []string
+	for _, paragraph := range strings.Split(content, "\n") {
+		wrapped := lipgloss.Wrap(paragraph, availableWidth, " ")
+		lines = append(lines, strings.Split(wrapped, "\n")...)
+	}
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	for i, line := range lines {
+		lineWidth := lipgloss.Width(line)
+		padding := availableWidth - lineWidth
+		if padding < 0 {
+			padding = 0
 		}
+		lines[i] = prefix + line + strings.Repeat(" ", padding)
 	}
-	return n
+	return strings.Join(lines, "\n")
 }
 
 func centerText(text string, width int) string {

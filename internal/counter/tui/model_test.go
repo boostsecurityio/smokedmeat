@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/boostsecurityio/smokedmeat/internal/counter"
 	"github.com/boostsecurityio/smokedmeat/internal/models"
 	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 	"github.com/boostsecurityio/smokedmeat/internal/poutine"
@@ -316,6 +317,75 @@ func TestRenderAgentPanel_ShowsCompactProvenanceAndConnectedBack(t *testing.T) {
 	assert.Contains(t, out, "acme/private-infra")
 	assert.Contains(t, out, ".github/workflows/deploy.yml")
 	assert.Contains(t, out, "deploy")
+}
+
+func TestRenderAgentPanel_ResidentFootholdShowsResidentStatus(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+	m.activeAgent = &AgentState{
+		ID:        "agt_resident",
+		Repo:      "whooli/infrastructure-definitions",
+		Workflow:  runnerTargetWorkflowPath(),
+		Job:       runnerTargetWorkflowJobName(),
+		Mode:      agentModeResident,
+		StartTime: time.Now().Add(-time.Minute),
+	}
+	m.dwellMode = true
+
+	out := stripANSI(m.RenderAgentPanel(120, 4))
+
+	assert.Contains(t, out, "Resident foothold online")
+	assert.NotContains(t, out, "Express complete")
+}
+
+func TestRenderNewHeader_ResidentFootholdShowsResidentStatus(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+	m.phase = PhasePostExploit
+	m.activeAgent = &AgentState{
+		ID:   "agt_resident",
+		Mode: agentModeResident,
+	}
+	m.dwellMode = true
+	m.connected = true
+
+	out := stripANSI(m.renderNewHeader())
+
+	assert.Contains(t, out, "Resident foothold online")
+	assert.NotContains(t, out, "Express complete")
+}
+
+func TestStartWaitingForRunnerTarget_AttachesExistingResidentFoothold(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+	m.callbacks = []counter.CallbackPayload{
+		{
+			ID:          "stg-runner-1",
+			Persistent:  true,
+			LastAgentID: "agt-runner",
+			Metadata: map[string]string{
+				"callback_kind":    "self_hosted_runner",
+				"persistence_mode": "resident",
+				"repository":       "whooli/infrastructure-definitions",
+				"workflow":         runnerTargetWorkflowPath(),
+				"job":              runnerTargetWorkflowJobName(),
+			},
+		},
+	}
+	m.sessions = []Session{
+		{
+			AgentID:  "agt-runner",
+			Hostname: "whooli-gh-runner",
+			LastSeen: time.Now(),
+			IsOnline: true,
+		},
+	}
+
+	m.StartWaitingForRunnerTarget("stg-runner-1", &RunnerTargetSelection{Repository: "whooli/infrastructure-definitions"}, "Self-Hosted Workflow Push", 0)
+
+	assert.Equal(t, PhasePostExploit, m.phase)
+	require.NotNil(t, m.activeAgent)
+	assert.Equal(t, "agt-runner", m.activeAgent.ID)
+	assert.Equal(t, agentModeResident, m.activeAgent.Mode)
+	assert.Equal(t, "whooli/infrastructure-definitions", m.activeAgent.Repo)
+	assert.Nil(t, m.waiting)
 }
 
 // =============================================================================
@@ -873,6 +943,46 @@ func TestImportAnalysis_RoundTrip_PreservesAnalyzeOnlySupportReason(t *testing.T
 	require.Len(t, vulns, 1)
 	assert.False(t, vulns[0].ExploitSupported)
 	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", vulns[0].ExploitSupportReason)
+}
+
+func TestImportAnalysisToPantry_CreatesSelfHostedRunnerTargets(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+
+	result := &poutine.AnalysisResult{
+		Success: true,
+		Workflows: []poutine.WorkflowMeta{
+			{
+				Repository: "acme/api",
+				Path:       ".github/workflows/pr.yml",
+				Jobs: []poutine.JobMeta{
+					{
+						ID:         "build",
+						SelfHosted: true,
+						RunsOn:     []string{"x64", "self-hosted", "linux"},
+					},
+				},
+			},
+		},
+		Findings: []poutine.Finding{
+			{
+				Repository: "acme/api",
+				Workflow:   ".github/workflows/pr.yml",
+				Job:        "build",
+				Line:       12,
+				RuleID:     "injection",
+				Severity:   "critical",
+				Context:    "issue_body",
+			},
+		},
+	}
+
+	m.importAnalysisToPantry(result)
+
+	targets := m.pantry.GetAssetsByType(pantry.AssetSelfHostedRunner)
+	require.Len(t, targets, 1)
+	assert.Equal(t, []string{"self-hosted", "linux", "x64"}, targets[0].StringSliceProperty("label_set"))
+	assert.Equal(t, []string{"build"}, targets[0].StringSliceProperty("observed_job_names"))
+	assert.Equal(t, []string{".github/workflows/pr.yml"}, targets[0].StringSliceProperty("observed_workflow_paths"))
 }
 
 func TestImportAnalysis_RoundTrip_QuotedHeredocIsAnalyzeOnly(t *testing.T) {

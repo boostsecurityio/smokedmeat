@@ -487,11 +487,13 @@ func (m Model) finishSetup() tea.Cmd {
 		keyComment = sw.Keys[sw.SelectedKey].Comment
 	}
 
-	cfg := &counter.Config{
-		KitchenURL: sw.KitchenURL,
-		Operator:   sw.OperatorName,
-		KeyComment: keyComment,
+	cfg, _ := counter.LoadConfig()
+	if cfg == nil {
+		cfg = &counter.Config{}
 	}
+	cfg.KitchenURL = sw.KitchenURL
+	cfg.Operator = sw.OperatorName
+	cfg.KeyComment = keyComment
 	_ = counter.SaveConfig(cfg)
 
 	return m.authenticateSSHCmd()

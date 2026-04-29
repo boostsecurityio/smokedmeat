@@ -204,6 +204,10 @@ func (h *Handler) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 			"duration", time.Since(importStarted))
 	}
 
+	if err := h.persistAnalysisLoot(req, result); err != nil {
+		slog.Warn("failed to persist analysis loot", "target", req.Target, "error", err)
+	}
+
 	h.broadcastAnalysisProgress(req, startedAt, analysisPhaseImport, "Persisting attack graph", "", result.ReposAnalyzed, result.ReposAnalyzed, len(result.SecretFindings))
 	saveStarted := time.Now()
 	if err := h.SavePantry(); err != nil {
@@ -598,6 +602,9 @@ func (h *Handler) importAnalysisToPantry(result *poutine.AnalysisResult) int {
 			if jobMeta.SelfHosted {
 				job.SetProperty("self_hosted", true)
 			}
+			if len(jobMeta.RunsOn) > 0 {
+				job.SetProperty("runs_on", pantry.NormalizeSelfHostedRunnerLabels(jobMeta.RunsOn))
+			}
 			if jobMeta.GitHubTokenRW {
 				job.SetProperty("github_token_rw", true)
 			}
@@ -847,6 +854,8 @@ func (h *Handler) importAnalysisToPantry(result *poutine.AnalysisResult) int {
 		}
 	}
 
+	imported += pantry.SyncObservedSelfHostedRunnerTargets(p)
+
 	// Import gitleaks secret findings
 	for _, sf := range result.SecretFindings {
 		repoKey := ""
@@ -1033,16 +1042,84 @@ func collectScanTargets(req AnalyzeRequest, result *poutine.AnalysisResult) []st
 		return []string{req.Target}
 	}
 
-	// For org targets, scan repos that have findings (high-value repos)
 	seen := make(map[string]bool)
 	var repos []string
-	for _, f := range result.Findings {
-		if f.Repository != "" && !seen[f.Repository] {
-			seen[f.Repository] = true
-			repos = append(repos, f.Repository)
+	addRepo := func(repo string) {
+		repo = strings.TrimSpace(repo)
+		if repo == "" || seen[repo] {
+			return
 		}
+		seen[repo] = true
+		repos = append(repos, repo)
+	}
+
+	for _, repo := range result.AnalyzedRepos {
+		addRepo(repo)
+	}
+	if len(repos) > 0 {
+		return repos
+	}
+
+	for _, f := range result.Findings {
+		addRepo(f.Repository)
 	}
 	return repos
+}
+
+func (h *Handler) persistAnalysisLoot(req AnalyzeRequest, result *poutine.AnalysisResult) error {
+	if h.database == nil || result == nil || len(result.SecretFindings) == 0 {
+		return nil
+	}
+
+	lootRepo := db.NewLootRepository(h.database)
+	now := time.Now()
+	for _, sf := range result.SecretFindings {
+		row := &db.LootRow{
+			SessionID:  req.SessionID,
+			Timestamp:  now,
+			Origin:     db.LootOriginAnalysis,
+			Name:       gitleaksFindingName(sf),
+			Value:      sf.Secret,
+			Type:       gitleaksFindingType(sf.RuleID),
+			Source:     gitleaksFindingSource(sf),
+			HighValue:  true,
+			Repository: strings.TrimSpace(sf.Repository),
+			Workflow:   strings.TrimSpace(sf.File),
+		}
+		if err := lootRepo.Upsert(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func gitleaksFindingName(sf poutine.SecretFinding) string {
+	return fmt.Sprintf("%s (%s:%d)", sf.Description, sf.File, sf.StartLine)
+}
+
+func gitleaksFindingType(ruleID string) string {
+	switch ruleID {
+	case "private-key":
+		return "private_key"
+	case "pkcs12-file":
+		return "pkcs12"
+	case "github-pat", "github-fine-grained-pat":
+		return "github_pat"
+	}
+	return ruleID
+}
+
+func gitleaksFindingSource(sf poutine.SecretFinding) string {
+	repo := strings.TrimSpace(sf.Repository)
+	file := strings.TrimSpace(sf.File)
+	switch {
+	case repo != "" && file != "":
+		return fmt.Sprintf("%s:%s:%d", repo, file, sf.StartLine)
+	case file != "":
+		return fmt.Sprintf("%s:%d", file, sf.StartLine)
+	default:
+		return "gitleaks"
+	}
 }
 
 // sanitizeError removes any potentially sensitive information from error messages.

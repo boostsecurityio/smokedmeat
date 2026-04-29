@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -23,6 +24,7 @@ const (
 	deployCapabilityCommentPR    = "delivery.comment.pr"
 	deployCapabilityCommentStub  = "delivery.comment.stub_pr"
 	deployCapabilityPR           = "delivery.pr"
+	deployCapabilityWorkflowPush = "delivery.workflow_push"
 	deployCapabilityLOTP         = "delivery.lotp"
 	deployCapabilityDispatch     = "delivery.dispatch"
 
@@ -115,7 +117,34 @@ func (m Model) currentCommentPRNumber() int {
 }
 
 func (m Model) buildWizardPreflightRequest() (req *counter.DeployPreflightRequest, key string) {
-	if m.wizard == nil || m.wizard.SelectedVuln == nil || m.kitchenClient == nil {
+	if m.wizard == nil || m.kitchenClient == nil {
+		return nil, ""
+	}
+	if m.wizard.Kind == WizardKindRunnerTarget {
+		if m.wizard.SelectedRunnerTarget == nil {
+			return nil, ""
+		}
+		if m.wizard.RunnerTargetAction != RunnerTargetActionAutoWorkflowPush {
+			return nil, ""
+		}
+		secret := m.resolveActiveTokenSecret()
+		if secret == nil || strings.TrimSpace(secret.Value) == "" {
+			return nil, ""
+		}
+		permissions := m.activeTokenPermissionsMap()
+		req = &counter.DeployPreflightRequest{
+			Token:            secret.Value,
+			TokenType:        tokenTypeFromSecret(*secret),
+			TokenOwner:       ownerForSecret(m.tokenInfo, *secret),
+			Scopes:           append([]string(nil), secret.Scopes...),
+			KnownPermissions: cloneStringMap(permissions),
+			Vuln: counter.VulnerabilityInfo{
+				Repository: m.wizard.SelectedRunnerTarget.Repository,
+			},
+		}
+		return req, wizardPreflightKey(req)
+	}
+	if m.wizard.SelectedVuln == nil {
 		return nil, ""
 	}
 	secret, permissions, owner := m.wizardPreflightCredential()
@@ -292,6 +321,87 @@ func (m Model) wizardPreflightBlockForCommentTarget(target CommentTarget) (state
 		return state, reason
 	}
 	return "", ""
+}
+
+func (m Model) runnerTargetActionStatus(action RunnerTargetAction) (state, reason string) {
+	switch action {
+	case RunnerTargetActionPassiveDetails:
+		return deployStatePass, ""
+	case RunnerTargetActionAutoWorkflowPush:
+		if result := m.runnerTargetSSHWriteResult(); result != nil {
+			return deployStateConfirmed, fmt.Sprintf("Active SSH write access is confirmed for %s - direct branch push will use git over SSH", result.Repo)
+		}
+		secret := m.resolveActiveTokenSecret()
+		if secret == nil {
+			return deployStateFail, "No direct branch-write foothold is active - pivot a token or SSH deploy key first"
+		}
+		state, reason = m.wizardCapabilityStatus(deployCapabilityWorkflowPush)
+		if state != "" {
+			return state, reason
+		}
+		if m.wizard != nil && m.wizard.PreflightLoading {
+			return deployStateUnknown, "Checking whether the current token can create a branch and commit a workflow file directly"
+		}
+		if m.wizard != nil && m.wizard.PreflightError != "" {
+			return deployStateUnknown, "GitHub route check is unavailable - direct branch push may still work, or copy the workflow for manual use"
+		}
+		permissions := m.activeTokenPermissionsMap()
+		hasContentsWrite := permissionAllowsWrite(permissions, "contents")
+		hasWorkflowFileWrite := permissionAllowsWorkflowFileWrite(permissions)
+		if len(permissions) > 0 {
+			switch {
+			case !hasContentsWrite:
+				return deployStateDenied, "Current token cannot create a branch or commit workflow content - contents:write is required"
+			case hasContentsWrite && !hasWorkflowFileWrite:
+				return deployStateDenied, "Current token can write repository contents but cannot commit files under .github/workflows - workflows:write is required"
+			default:
+				return deployStateUnknown, "Current token may be able to push the workflow branch directly, but repository routing could not be pre-verified"
+			}
+		}
+		if secretAllowsWorkflowPush(*secret, permissions) {
+			return deployStateUnknown, "Current token may be able to push the workflow branch directly, but repository routing could not be pre-verified"
+		}
+		return deployStateUnknown, "Current token is unlikely to support direct workflow-file writes - SSH deploy-key access may still work"
+	case RunnerTargetActionCopyWorkflow:
+		if result := m.runnerTargetSSHWriteResult(); result != nil {
+			return deployStatePass, fmt.Sprintf("Manual copy is available, and the active SSH foothold can push to %s", result.Repo)
+		}
+		return deployStatePass, "Manual workflow copy is available even if no token or SSH foothold can push it automatically"
+	default:
+		return deployStatePass, ""
+	}
+}
+
+func (m Model) runnerTargetRouteSummary() string {
+	if m.wizard == nil || m.wizard.SelectedRunnerTarget == nil {
+		return ""
+	}
+	if result := m.runnerTargetSSHWriteResult(); result != nil {
+		return fmt.Sprintf("Active SSH foothold can push branches directly to %s.", result.Repo)
+	}
+	secret := m.resolveActiveTokenSecret()
+	if secret == nil {
+		return "No token is set for a route check. The copied workflow is still usable if you can push it through another foothold."
+	}
+	if m.wizard.PreflightLoading {
+		return "Checking whether the current token can create a branch and push the workflow directly."
+	}
+	if m.wizard.PreflightError != "" {
+		return "GitHub route check is unavailable. The copied workflow can still be used manually."
+	}
+
+	pushState, pushReason := m.wizardCapabilityStatus(deployCapabilityWorkflowPush)
+
+	switch {
+	case pushState == deployStateConfirmed || pushState == deployStatePass:
+		return "The current token appears able to create a branch and commit the workflow file directly."
+	case pushState == deployStateFail || pushState == deployStateDenied:
+		return "The current token does not look sufficient for direct workflow-file writes."
+	case pushReason != "":
+		return pushReason
+	default:
+		return ""
+	}
 }
 
 func (m Model) availableCommentTargets() []CommentTarget {

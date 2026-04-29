@@ -19,6 +19,7 @@ type LootRow struct {
 	AgentID   string    `json:"agent_id"`
 	Hostname  string    `json:"hostname,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
+	Origin    string    `json:"origin,omitempty"`
 
 	Name      string `json:"name"`
 	Value     string `json:"value"`
@@ -36,6 +37,11 @@ type LootRow struct {
 type LootRepository struct {
 	db *DB
 }
+
+const (
+	LootOriginExpress  = "express"
+	LootOriginAnalysis = "analysis"
+)
 
 func NewLootRepository(db *DB) *LootRepository {
 	return &LootRepository{db: db}

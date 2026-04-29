@@ -50,6 +50,9 @@ type Session struct {
 	LastSeen  time.Time
 	IsOnline  bool
 	SessionID string
+	Repo      string
+	Workflow  string
+	Job       string
 }
 
 // OutputLine represents a recorded output line
@@ -162,6 +165,7 @@ type Model struct {
 	coleslawCh         chan *models.Coleslaw
 	historyCh          chan counter.HistoryPayload
 	expressDataCh      chan counter.ExpressDataPayload
+	lootSyncCh         chan counter.LootSyncPayload
 	analysisProgressCh chan counter.AnalysisProgressPayload
 	analysisMetadataCh chan counter.AnalysisMetadataSyncPayload
 	authExpiredCh      chan struct{}
@@ -1241,6 +1245,9 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 			if jobMeta.SelfHosted {
 				job.SetProperty("self_hosted", true)
 			}
+			if len(jobMeta.RunsOn) > 0 {
+				job.SetProperty("runs_on", pantry.NormalizeSelfHostedRunnerLabels(jobMeta.RunsOn))
+			}
 			if jobMeta.GitHubTokenRW {
 				job.SetProperty("github_token_rw", true)
 			}
@@ -1284,6 +1291,7 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 
 	if len(result.Findings) == 0 {
 		summary.Total = summary.Orgs + summary.Repos + summary.Workflows + summary.Jobs + summary.Secrets + summary.Tokens
+		summary.Total += pantry.SyncObservedSelfHostedRunnerTargets(m.pantry)
 		return summary
 	}
 
@@ -1456,6 +1464,7 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 	}
 
 	summary.Total = summary.Orgs + summary.Repos + summary.Workflows + summary.Jobs + summary.Vulns + summary.Secrets + summary.Tokens
+	summary.Total += pantry.SyncObservedSelfHostedRunnerTargets(m.pantry)
 	return summary
 }
 
@@ -1545,7 +1554,7 @@ func (m *Model) CanTransitionTo(newPhase Phase) bool {
 	case PhaseRecon:
 		return m.analysisComplete
 	case PhaseWizard:
-		return m.phase.CanSelectVuln() && m.wizard != nil && m.wizard.SelectedVuln != nil
+		return m.wizard != nil && (m.wizard.SelectedVuln != nil || m.wizard.SelectedRunnerTarget != nil)
 	case PhaseWaiting:
 		return m.phase == PhaseWizard && m.waiting != nil
 	case PhasePostExploit:
@@ -1565,6 +1574,7 @@ func (m *Model) OpenWizard(vuln *Vulnerability) error {
 		m.wizard = &WizardState{}
 	}
 	m.wizard.Reset()
+	m.wizard.Kind = WizardKindVulnerability
 	m.wizard.SelectedVuln = vuln
 	m.wizard.Step = 1
 
@@ -1578,6 +1588,25 @@ func (m *Model) OpenWizard(vuln *Vulnerability) error {
 			}
 		}
 	}
+
+	m.prevView = m.view
+	m.prevFocus = m.focus
+	m.TransitionToPhase(PhaseWizard)
+	return nil
+}
+
+func (m *Model) OpenRunnerTargetWizard(target *RunnerTargetSelection) error {
+	if target == nil {
+		return fmt.Errorf("no self-hosted runner target selected")
+	}
+	if m.wizard == nil {
+		m.wizard = &WizardState{}
+	}
+	m.wizard.Reset()
+	m.wizard.Kind = WizardKindRunnerTarget
+	m.wizard.SelectedRunnerTarget = target
+	m.wizard.RunnerTargetAction = RunnerTargetActionAutoWorkflowPush
+	m.wizard.Step = 1
 
 	m.prevView = m.view
 	m.prevFocus = m.focus
@@ -1625,6 +1654,20 @@ func (m *Model) StartWaiting(stagerID, prURL string, vuln *Vulnerability, method
 	m.pendingCachePoison = nil
 	m.waiting.PRURL = prURL
 	m.TransitionToPhase(PhaseWaiting)
+	m.activateWaitingResidentFootholdIfLive()
+}
+
+func (m *Model) StartWaitingForRunnerTarget(stagerID string, target *RunnerTargetSelection, method string, dwellTime time.Duration) {
+	repo := ""
+	workflow := runnerTargetWorkflowPath()
+	job := runnerTargetWorkflowJobName()
+	if target != nil {
+		repo = target.Repository
+	}
+	m.waiting = NewWaitingState(stagerID, repo, "", workflow, job, method, dwellTime)
+	m.pendingCachePoison = nil
+	m.TransitionToPhase(PhaseWaiting)
+	m.activateWaitingResidentFootholdIfLive()
 }
 
 // CancelWaiting exits the waiting state and returns to findings.

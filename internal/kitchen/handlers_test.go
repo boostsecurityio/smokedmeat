@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/boostsecurityio/smokedmeat/internal/kitchen/auth"
 	"github.com/boostsecurityio/smokedmeat/internal/kitchen/db"
 	"github.com/boostsecurityio/smokedmeat/internal/models"
 )
@@ -260,6 +262,49 @@ func TestHandler_Beacon_FailedColeslawMarksOrderFailed(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
+func TestOperatorHub_SendStoredLoot_SendsLootSync(t *testing.T) {
+	database, err := db.Open(db.Config{Path: filepath.Join(t.TempDir(), "loot-sync.db")})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, database.Close())
+	})
+
+	lootRepo := db.NewLootRepository(database)
+	require.NoError(t, lootRepo.Upsert(&db.LootRow{
+		SessionID:  "sess-1",
+		AgentID:    "agent-1234567890",
+		Timestamp:  time.Now(),
+		Origin:     db.LootOriginAnalysis,
+		Name:       "Private Key detected (README.md:12)",
+		Value:      "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----",
+		Type:       "private_key",
+		Source:     "acme/newcleus-core-v3:README.md:12",
+		HighValue:  true,
+		Repository: "acme/newcleus-core-v3",
+		Workflow:   "README.md",
+	}))
+
+	hub := NewOperatorHub(nil, nil, database)
+	op := &OperatorConn{
+		sessionID: "sess-1",
+		send:      make(chan OperatorMessage, 1),
+		hub:       hub,
+	}
+
+	hub.sendStoredLoot(op)
+
+	select {
+	case msg := <-op.send:
+		require.Equal(t, "loot_sync", msg.Type)
+		require.NotNil(t, msg.LootSync)
+		require.Len(t, msg.LootSync.Entries, 1)
+		assert.Equal(t, db.LootOriginAnalysis, msg.LootSync.Entries[0].Origin)
+		assert.Equal(t, "acme/newcleus-core-v3", msg.LootSync.Entries[0].Repository)
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected loot sync message")
+	}
+}
+
 func TestHandler_Beacon_RawBodyPublishesAsBeacon(t *testing.T) {
 	mock := &mockPublisher{}
 	_, mux := newTestHandler(mock, nil)
@@ -371,6 +416,44 @@ func TestHandler_Stager_FanoutPersistsUntilBudgetExhausted(t *testing.T) {
 	rows, err = repo.List()
 	require.NoError(t, err)
 	assert.Empty(t, rows)
+}
+
+func TestHandler_Stager_PersistsAgentTokenForRestart(t *testing.T) {
+	mock := &mockPublisher{}
+	h, mux := newTestHandler(mock, nil)
+	database := newTestDB(t)
+	h.SetDatabase(database)
+
+	authProvider, err := auth.New(auth.Config{
+		StaticToken: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	})
+	require.NoError(t, err)
+	h.SetAuth(authProvider)
+
+	err = h.registerStager(&RegisteredStager{
+		ID:           "resident-cb",
+		ResponseType: "bash",
+		SessionID:    "sess-1",
+		CreatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(time.Hour),
+		Persistent:   true,
+		DefaultMode:  CallbackModeExpress,
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/r/smokedmeat/resident-cb", nil)
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	rows, err := db.NewAgentRepository(database).List()
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.NotEmpty(t, rows[0].AgentToken)
+	assert.Equal(t, "sess-1", rows[0].SessionID)
+	assert.False(t, rows[0].TokenExpiresAt.IsZero())
 }
 
 func TestHandler_Beacon_ResponseFormat(t *testing.T) {

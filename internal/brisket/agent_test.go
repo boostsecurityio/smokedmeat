@@ -73,6 +73,41 @@ func TestGatherEnvironment_ReturnsValidJSON(t *testing.T) {
 	assert.NotNil(t, env["timestamp"])
 }
 
+func TestExecuteOrderInner_OIDCPivotFailureReturnsStructuredResult(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("GITLAB_CI", "")
+	t.Setenv("TF_BUILD", "")
+	t.Setenv("CIRCLECI", "")
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "")
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "")
+	t.Setenv("CI_JOB_JWT", "")
+	t.Setenv("CI_JOB_JWT_V2", "")
+	t.Setenv("SYSTEM_OIDCREQUESTURI", "")
+	t.Setenv("SYSTEM_ACCESSTOKEN", "")
+	t.Setenv("SYSTEM_SERVICECONNECTIONID", "")
+	t.Setenv("CIRCLE_OIDC_TOKEN", "")
+	t.Setenv("CIRCLE_OIDC_TOKEN_V2", "")
+
+	agent := New(DefaultConfig())
+	order := models.NewOrder("session-1", agent.AgentID(), "oidc", []string{"pivot", "gcp"})
+	coleslaw := models.NewColeslaw(order.OrderID, order.SessionID, order.AgentID)
+
+	agent.executeOrderInner(context.Background(), order, coleslaw)
+
+	assert.Equal(t, 1, coleslaw.ExitCode)
+	assert.Empty(t, coleslaw.Error)
+
+	stdout, err := coleslaw.GetStdout()
+	require.NoError(t, err)
+	require.NotEmpty(t, stdout)
+
+	var result models.PivotResult
+	require.NoError(t, json.Unmarshal(stdout, &result))
+	assert.Equal(t, "gcp", result.Provider)
+	assert.False(t, result.Success)
+	assert.NotEmpty(t, result.Errors)
+}
+
 func TestGetCwd_ReturnsCurrentDir(t *testing.T) {
 	cwd := getCwd()
 
@@ -236,6 +271,33 @@ func TestPoll_ReturnsOrder(t *testing.T) {
 	assert.Equal(t, order.OrderID, orders[0].OrderID)
 	assert.Equal(t, "exec", orders[0].Command)
 	assert.Equal(t, []string{"whoami"}, orders[0].Args)
+}
+
+func TestRun_StopsAfterMaxOffline(t *testing.T) {
+	var attempts atomic.Int32
+
+	client := newMockClient(func(req *http.Request) (*http.Response, error) {
+		attempts.Add(1)
+		return nil, fmt.Errorf("connection refused")
+	})
+
+	agent := New(Config{
+		KitchenURL:     "http://test.local",
+		HTTPTimeout:    25 * time.Millisecond,
+		HTTPClient:     client,
+		BeaconInterval: 20 * time.Millisecond,
+		MaxOffline:     70 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err := agent.Run(ctx)
+
+	require.NoError(t, err)
+	assert.Less(t, time.Since(start), 500*time.Millisecond)
+	assert.GreaterOrEqual(t, attempts.Load(), int32(2))
 }
 
 func TestPoll_FailsOnBadJSON(t *testing.T) {

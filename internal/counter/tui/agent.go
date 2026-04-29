@@ -20,6 +20,11 @@ import (
 
 func (m Model) handleBeacon(msg BeaconMsg) (tea.Model, tea.Cmd) {
 	beacon := msg.Beacon
+	callbackMode := strings.TrimSpace(beacon.CallbackMode)
+	if callbackMode == "" && m.callbackIDIsResidentFoothold(beacon.CallbackID) {
+		callbackMode = agentModeResident
+	}
+	beacon.CallbackMode = callbackMode
 
 	if cachePoisonWriterMatches("", m.pendingCachePoison, beacon.CallbackID, beacon.AgentID) {
 		m.pendingCachePoison.WriterAgentID = beacon.AgentID
@@ -60,29 +65,28 @@ func (m Model) handleBeacon(msg BeaconMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case m.phase == PhaseWaiting && m.waiting != nil:
-		if m.waiting.CachePoison != nil {
+		switch {
+		case m.waiting.CachePoison != nil:
 			m.handleCachePoisonBeacon(beacon)
-		} else {
-			m.activeAgent = &AgentState{
-				ID:        beacon.AgentID,
-				Runner:    beacon.Hostname,
-				Repo:      m.waiting.TargetRepo,
-				Workflow:  m.waiting.TargetWorkflow,
-				Job:       m.waiting.TargetJob,
-				EntryVuln: m.waiting.TargetVuln,
-				StartTime: time.Now(),
+		case beacon.CallbackMode == agentModeResident:
+			m.activateWaitingAgentWithMode(beacon.AgentID, beacon.Hostname, beacon.DwellDeadline, beacon.CallbackMode)
+		case beacon.CallbackMode != agentModeDwell && m.callbackIsPersistent(beacon.CallbackID):
+			if m.waiting.PendingAgents == nil {
+				m.waiting.PendingAgents = make(map[string]time.Time)
 			}
-			m.clearDismissedDwellAgent(beacon.AgentID)
-			m.selectSessionByAgentID(beacon.AgentID)
-			m.setBeaconDwellState(beacon.DwellDeadline, m.waiting.DwellTime)
-			m.TransitionToPhase(PhasePostExploit)
-			m.waiting = nil
-			m.activityLog.Add(IconSuccess, fmt.Sprintf("Agent %s connected - entering post-exploit phase", beacon.AgentID[:8]))
+			m.waiting.PendingAgents[beacon.AgentID] = beacon.Timestamp
+		default:
+			m.activateWaitingAgentWithMode(beacon.AgentID, beacon.Hostname, beacon.DwellDeadline, beacon.CallbackMode)
 		}
 	case m.activeAgent == nil && beacon.DwellDeadline != nil && m.restoreDwellAgentAllowed(beacon.AgentID):
+		repo, workflow, job := m.sessionContext(beacon.AgentID)
 		m.activeAgent = &AgentState{
 			ID:        beacon.AgentID,
 			Runner:    beacon.Hostname,
+			Repo:      repo,
+			Workflow:  workflow,
+			Job:       job,
+			Mode:      agentModeDwell,
 			StartTime: time.Now(),
 		}
 		m.clearDismissedDwellAgent(beacon.AgentID)
@@ -224,12 +228,13 @@ func (m *Model) activateCachePoisonVictim(agentID, hostname string, dwellDeadlin
 		Repo:      repo,
 		Workflow:  workflow,
 		Job:       job,
+		Mode:      m.normalizeActiveAgentMode(agentModeDwell, dwellDeadline, waiting.DwellTime),
 		EntryVuln: waiting.TargetVuln,
 		StartTime: time.Now(),
 	}
 	m.clearDismissedDwellAgent(agentID)
 	m.selectSessionByAgentID(agentID)
-	m.setBeaconDwellState(dwellDeadline, waiting.DwellTime)
+	m.setActiveAgentTiming(m.activeAgent.Mode, dwellDeadline, waiting.DwellTime)
 	m.TransitionToPhase(PhasePostExploit)
 	m.waiting = nil
 	m.activityLog.Add(IconSuccess, fmt.Sprintf("Cache victim %s connected - entering post-exploit phase", agentID[:8]))
@@ -272,7 +277,45 @@ func cachePoisonVictimTarget(waiting *WaitingState) (repo, workflow, job string)
 	return
 }
 
-func (m *Model) setBeaconDwellState(deadline *time.Time, fallback time.Duration) {
+func (m *Model) activateWaitingAgentWithMode(agentID, hostname string, dwellDeadline *time.Time, callbackMode string) {
+	waiting := m.waiting
+	if waiting == nil {
+		return
+	}
+	m.activeAgent = &AgentState{
+		ID:        agentID,
+		Runner:    hostname,
+		Repo:      waiting.TargetRepo,
+		Workflow:  waiting.TargetWorkflow,
+		Job:       waiting.TargetJob,
+		Mode:      m.normalizeActiveAgentMode(callbackMode, dwellDeadline, waiting.DwellTime),
+		EntryVuln: waiting.TargetVuln,
+		StartTime: time.Now(),
+	}
+	m.clearDismissedDwellAgent(agentID)
+	m.selectSessionByAgentID(agentID)
+	m.setActiveAgentTiming(m.activeAgent.Mode, dwellDeadline, waiting.DwellTime)
+	m.TransitionToPhase(PhasePostExploit)
+	m.waiting = nil
+	m.activityLog.Add(IconSuccess, fmt.Sprintf("Agent %s connected - entering post-exploit phase", agentID[:8]))
+}
+
+func waitingMatchesExpressData(waiting *WaitingState, data counter.ExpressDataPayload) bool {
+	if waiting == nil || waiting.CachePoison != nil {
+		return false
+	}
+	if waiting.StagerID == "" || data.CallbackID == "" {
+		return false
+	}
+	return data.CallbackID == waiting.StagerID
+}
+
+func (m *Model) setActiveAgentTiming(mode string, deadline *time.Time, fallback time.Duration) {
+	if strings.TrimSpace(mode) == agentModeResident {
+		m.jobDeadline = time.Time{}
+		m.dwellMode = true
+		return
+	}
 	switch {
 	case deadline != nil:
 		m.jobDeadline = *deadline
@@ -282,6 +325,26 @@ func (m *Model) setBeaconDwellState(deadline *time.Time, fallback time.Duration)
 		m.dwellMode = true
 	default:
 		m.dwellMode = false
+		m.jobDeadline = time.Time{}
+	}
+}
+
+func (m *Model) normalizeActiveAgentMode(callbackMode string, deadline *time.Time, fallback time.Duration) string {
+	switch strings.TrimSpace(callbackMode) {
+	case agentModeResident:
+		return agentModeResident
+	case agentModeDwell:
+		return agentModeDwell
+	case agentModeExpress:
+		return agentModeExpress
+	}
+	switch {
+	case deadline != nil:
+		return agentModeDwell
+	case fallback > 0:
+		return agentModeDwell
+	default:
+		return agentModeExpress
 	}
 }
 
@@ -371,6 +434,18 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 			job = m.waiting.TargetJob
 		} else if m.activeAgent != nil {
 			job = m.activeAgent.Job
+		}
+	}
+	m.updateSessionContext(data.AgentID, repo, workflow, job)
+	if m.activeAgent != nil && m.activeAgent.ID == data.AgentID {
+		if repo != "" {
+			m.activeAgent.Repo = repo
+		}
+		if workflow != "" {
+			m.activeAgent.Workflow = workflow
+		}
+		if job != "" {
+			m.activeAgent.Job = job
 		}
 	}
 
@@ -488,6 +563,28 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 			m.AddOutput("info", fmt.Sprintf("Persistent callback hit in express mode: %s", data.AgentID))
 			m.AddOutput("info", "Arm the next implant with dwell from the implants modal when you want an interactive foothold")
 			m.activityLog.Add(IconInfo, fmt.Sprintf("Express victim %s connected", agentShort))
+		}
+	}
+
+	if waitingMatchesExpressData(m.waiting, data) {
+		if m.waiting.PendingAgents == nil {
+			m.waiting.PendingAgents = make(map[string]time.Time)
+		}
+		m.waiting.PendingAgents[data.AgentID] = data.Timestamp
+		switch {
+		case data.CallbackMode == "resident":
+			m.activateWaitingAgentWithMode(data.AgentID, data.Hostname, nil, data.CallbackMode)
+		case data.CallbackMode == "dwell":
+			m.activateWaitingAgentWithMode(data.AgentID, data.Hostname, nil, data.CallbackMode)
+		case m.callbackIsPersistent(data.CallbackID):
+			if m.callbackIDIsResidentFoothold(data.CallbackID) {
+				m.AddOutput("info", fmt.Sprintf("Resident foothold seed hit in express mode: %s", data.AgentID))
+				m.AddOutput("info", "Waiting for the resident beacon to come back on the same foothold")
+			} else {
+				m.AddOutput("info", fmt.Sprintf("Persistent callback hit in express mode: %s", data.AgentID))
+				m.AddOutput("info", "Arm the next implant with dwell from the implants modal when you want an interactive foothold")
+			}
+			m.activityLog.Add(IconInfo, fmt.Sprintf("Express callback %s connected", agentShort))
 		}
 	}
 
@@ -1153,4 +1250,38 @@ func (m *Model) pairGitHubAppCredentials() {
 		}
 	}
 	m.lootStashDirty = true
+}
+
+func (m *Model) updateSessionContext(agentID, repo, workflow, job string) {
+	if agentID == "" {
+		return
+	}
+	for i := range m.sessions {
+		if m.sessions[i].AgentID != agentID {
+			continue
+		}
+		if repo != "" {
+			m.sessions[i].Repo = repo
+		}
+		if workflow != "" {
+			m.sessions[i].Workflow = workflow
+		}
+		if job != "" {
+			m.sessions[i].Job = job
+		}
+		return
+	}
+}
+
+func (m Model) sessionContext(agentID string) (repo, workflow, job string) {
+	if agentID == "" {
+		return "", "", ""
+	}
+	for _, session := range m.sessions {
+		if session.AgentID != agentID {
+			continue
+		}
+		return session.Repo, session.Workflow, session.Job
+	}
+	return "", "", ""
 }

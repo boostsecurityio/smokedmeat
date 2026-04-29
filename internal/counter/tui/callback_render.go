@@ -78,11 +78,19 @@ func (m *Model) buildCallbacksModal(width, height int) string {
 	}
 
 	hints := helpKeyStyle.Render("j/k") + helpDescStyle.Render(":select ") +
-		helpKeyStyle.Render("e") + helpDescStyle.Render(":express ") +
-		helpKeyStyle.Render("d") + helpDescStyle.Render(":default dwell ") +
-		helpKeyStyle.Render("n") + helpDescStyle.Render(":next dwell ") +
-		helpKeyStyle.Render("x") + helpDescStyle.Render(":clear ") +
-		helpKeyStyle.Render("r") + helpDescStyle.Render(":revoke ") +
+		helpKeyStyle.Render("Enter") + helpDescStyle.Render(":attach ")
+	if callback := m.selectedCallback(); callback != nil {
+		if m.callbackIsResidentFoothold(callback) {
+			hints += helpKeyStyle.Render("c") + helpDescStyle.Render(":copy handle ") +
+				helpKeyStyle.Render("t") + helpDescStyle.Render(":retrigger ")
+		} else {
+			hints += helpKeyStyle.Render("e") + helpDescStyle.Render(":express ") +
+				helpKeyStyle.Render("d") + helpDescStyle.Render(":default dwell ") +
+				helpKeyStyle.Render("n") + helpDescStyle.Render(":next dwell ") +
+				helpKeyStyle.Render("x") + helpDescStyle.Render(":clear ")
+		}
+	}
+	hints += helpKeyStyle.Render("r") + helpDescStyle.Render(":revoke ") +
 		helpKeyStyle.Render("Esc") + helpDescStyle.Render(":close")
 
 	lines := []string{title, ""}
@@ -150,6 +158,63 @@ func (m *Model) buildCallbackDetailLines(width, height int) []string {
 		state = "revoked"
 	} else if callback.NextMode != "" {
 		state += " -> next " + callback.NextMode
+	}
+
+	if m.callbackIsResidentFoothold(callback) {
+		lines := []string{
+			padRight(lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render(truncate(callbackDetailLabel(*callback), width)), width),
+			padRight("ID: "+truncate(callback.ID, max(width-4, 8)), width),
+			padRight("Repo: "+truncate(orFallback(repo, "unknown"), max(width-6, 8)), width),
+			padRight("Workflow: "+truncate(orFallback(workflow, "unknown"), max(width-10, 8)), width),
+			padRight("Job: "+truncate(orFallback(job, "unknown"), max(width-5, 8)), width),
+		}
+		if branch := callbackMetadataValue(callback, runnerTargetMetadataBranchKey); branch != "" {
+			lines = append(lines, padRight("Branch: "+truncate(branch, max(width-8, 8)), width))
+		}
+		if route := callbackMetadataValue(callback, runnerTargetMetadataRouteKey); route != "" {
+			lines = append(lines, padRight("Route: "+truncate(route, max(width-7, 8)), width))
+		}
+		status := "offline"
+		if callback.RevokedAt != nil {
+			status = "revoked"
+		} else if m.liveSessionForCallback(callback) != nil {
+			status = "online"
+		}
+		retryPolicy := callbackMetadataValue(callback, runnerTargetMetadataRetryKey)
+		if retryPolicy == "" {
+			retryPolicy = "infinite"
+		}
+		lastSeen := "never"
+		if live := m.liveSessionForCallback(callback); live != nil {
+			lastSeen = live.LastSeen.Format(time.RFC3339)
+		} else if callback.CallbackAt != nil {
+			lastSeen = callback.CallbackAt.Format(time.RFC3339)
+		}
+		lines = append(lines,
+			padRight("Foothold: resident runner", width),
+			padRight("Status: "+status, width),
+			padRight("Retry: "+retryPolicy, width),
+			padRight("Last seen: "+truncate(lastSeen, max(width-10, 8)), width),
+			padRight("Last agent: "+truncate(orFallback(callback.LastAgentID, "none"), max(width-12, 8)), width),
+			padRight("Recovery: c copies handle, t copies retrigger recipe", width),
+			"",
+			padRight(mutedColor.Render("Recent agents"), width),
+		)
+		for _, link := range m.callbackAgents[callback.ID] {
+			status := m.callbackAgentStatus(link.AgentID)
+			line := fmt.Sprintf("%s  %s  %s", truncate(link.AgentID, 12), status, link.Mode)
+			if link.Hostname != "" {
+				line += "  " + truncate(link.Hostname, 16)
+			}
+			lines = append(lines, padRight(truncate(line, width), width))
+			if len(lines) == height {
+				break
+			}
+		}
+		for len(lines) < height {
+			lines = append(lines, strings.Repeat(" ", width))
+		}
+		return lines
 	}
 
 	lines := []string{

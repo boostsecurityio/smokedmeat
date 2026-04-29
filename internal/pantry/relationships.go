@@ -8,7 +8,8 @@ type RelationshipType string
 
 const (
 	// Structural relationships
-	RelContains RelationshipType = "contains" // repo contains workflow
+	RelContains   RelationshipType = "contains" // repo contains workflow
+	RelObservedOn RelationshipType = "observed_on"
 
 	// Exposure relationships
 	RelExposes      RelationshipType = "exposes"       // workflow exposes secret
@@ -61,6 +62,10 @@ func (r Relationship) WithProperty(key string, value any) Relationship {
 // Contains creates a "contains" relationship.
 func Contains() Relationship {
 	return NewRelationship(RelContains)
+}
+
+func ObservedOn() Relationship {
+	return NewRelationship(RelObservedOn)
 }
 
 // Exposes creates an "exposes" relationship with optional context.

@@ -11,6 +11,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/boostsecurityio/smokedmeat/internal/counter"
 )
 
 func (m *Model) RenderLootStash(width, height int) string {
@@ -287,14 +289,84 @@ func shouldReplaceCollectedSecret(existing, incoming CollectedSecret) bool {
 }
 
 func (m *Model) AddToSessionLoot(secret CollectedSecret) {
+	if m.addToSessionLootNoSave(secret) {
+		m.RebuildLootTree()
+	}
+}
+
+func (m *Model) addToSessionLootNoSave(secret CollectedSecret) bool {
 	for i, existing := range m.sessionLoot {
 		if existing.Name == secret.Name {
 			mergeCollectedSecretMetadataPreferIncomingOrigin(&m.sessionLoot[i], secret)
-			return
+			return false
 		}
 	}
 	m.sessionLoot = append(m.sessionLoot, secret)
-	m.RebuildLootTree()
+	return true
+}
+
+func (m Model) handleLootSync(msg LootSyncMsg) (tea.Model, tea.Cmd) {
+	changed := false
+	for _, entry := range msg.Sync.Entries {
+		secret := collectedSecretFromLootSyncEntry(entry)
+		if secret.Name == "" && secret.Value == "" {
+			continue
+		}
+		if secret.IsEphemeral() && secret.ExpressMode {
+			if m.addToSessionLootNoSave(secret) {
+				changed = true
+			}
+		} else if m.addToLootStashNoSave(secret) {
+			changed = true
+		}
+		if (secret.Name == "GITHUB_TOKEN" || secret.Type == "github_token") && len(entry.TokenPermissions) > 0 {
+			m.storeTokenDisplayPermissions(secret, entry.TokenPermissions)
+		}
+	}
+	if changed {
+		m.pairGitHubAppCredentials()
+		m.RebuildLootTree()
+	}
+	return m, m.listenForLootSync()
+}
+
+func collectedSecretFromLootSyncEntry(entry counter.LootSyncEntry) CollectedSecret {
+	origin := strings.TrimSpace(entry.Origin)
+	expressOrigin := origin == "" || origin == "express"
+	agentID := strings.TrimSpace(entry.AgentID)
+	if expressOrigin && len(agentID) > 8 {
+		agentID = agentID[:8]
+	}
+
+	source := strings.TrimSpace(entry.Source)
+	if expressOrigin && agentID != "" {
+		if source != "" {
+			source = "agent:" + agentID + ":" + source
+		} else {
+			source = "agent:" + agentID
+		}
+	}
+
+	secret := CollectedSecret{
+		Name:        entry.Name,
+		Value:       entry.Value,
+		Source:      source,
+		Ephemeral:   expressOrigin && !entry.HighValue,
+		CollectedAt: entry.Timestamp,
+		Type:        entry.Type,
+		Repository:  entry.Repository,
+		Workflow:    entry.Workflow,
+		Job:         entry.Job,
+		AgentID:     agentID,
+		ExpressMode: expressOrigin && !entry.HighValue,
+	}
+	if secret.IsEphemeral() && secret.Repository != "" {
+		secret.BoundToRepo = secret.Repository
+	}
+	if secret.Type == "private_key" {
+		secret.KeyType, secret.KeyFingerprint, _ = sshPrivateKeyMetadata(secret.Value)
+	}
+	return secret
 }
 
 func permissionHeading(secret CollectedSecret) string {

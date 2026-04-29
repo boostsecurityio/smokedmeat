@@ -8,6 +8,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/boostsecurityio/smokedmeat/internal/kitchen/auth"
+	"github.com/boostsecurityio/smokedmeat/internal/kitchen/db"
 )
 
 // =============================================================================
@@ -74,6 +78,40 @@ func TestNew_InitialState(t *testing.T) {
 	assert.Nil(t, server.store)
 	assert.Nil(t, server.consumer)
 	assert.Nil(t, server.cancelFunc)
+}
+
+func TestRestoreFromDB_RestoresAgentToken(t *testing.T) {
+	database := newTestDB(t)
+	now := time.Now().UTC()
+	token := "agt_restoretest"
+
+	err := db.NewAgentRepository(database).Upsert(&db.AgentRow{
+		AgentID:        "agt-1",
+		SessionID:      "sess-1",
+		AgentToken:     token,
+		TokenCreatedAt: now,
+		TokenExpiresAt: now.Add(time.Hour),
+	})
+	require.NoError(t, err)
+
+	authProvider, err := auth.New(auth.Config{
+		StaticToken: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	})
+	require.NoError(t, err)
+
+	server := New(DefaultConfig())
+	server.auth = authProvider
+	server.database = database
+	server.sessions = NewSessionRegistry(DefaultSessionRegistryConfig())
+	server.store = NewOrderStore(DefaultOrderStoreConfig())
+	server.handler = NewHandler(nil, server.store, server.sessions)
+
+	server.restoreFromDB()
+
+	claims, err := server.auth.ValidateAgentToken(token)
+	require.NoError(t, err)
+	assert.Equal(t, "agt-1", claims.AgentID)
+	assert.Equal(t, "sess-1", claims.SessionID)
 }
 
 // =============================================================================

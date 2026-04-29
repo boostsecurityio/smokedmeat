@@ -79,6 +79,7 @@ var (
 	treeRepoStyle            lipgloss.Style
 	treePrivateRepoStyle     lipgloss.Style
 	treeWorkflowStyle        lipgloss.Style
+	treeRunnerStyle          lipgloss.Style
 	treeJobStyle             lipgloss.Style
 	treeSecretStyle          lipgloss.Style
 	treeVulnStyle            lipgloss.Style

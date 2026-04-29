@@ -164,6 +164,54 @@ func TestAnalysisRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestCollectScanTargets_UsesAnalyzedReposForOrg(t *testing.T) {
+	repos := collectScanTargets(AnalyzeRequest{Target: "acme", TargetType: "org"}, &poutine.AnalysisResult{
+		AnalyzedRepos: []string{"acme/newcleus-core-v3", "acme/worker"},
+		Findings: []poutine.Finding{
+			{Repository: "acme/newcleus-core-v3"},
+		},
+	})
+
+	assert.Equal(t, []string{"acme/newcleus-core-v3", "acme/worker"}, repos)
+}
+
+func TestHandler_PersistAnalysisLoot(t *testing.T) {
+	mock := &mockPublisher{}
+	h, _ := newTestHandler(mock, nil)
+
+	database, err := db.Open(db.Config{Path: filepath.Join(t.TempDir(), "analysis-loot.db")})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, database.Close())
+	})
+	h.SetDatabase(database)
+
+	err = h.persistAnalysisLoot(AnalyzeRequest{SessionID: "sess-1"}, &poutine.AnalysisResult{
+		SecretFindings: []poutine.SecretFinding{
+			{
+				RuleID:      "private-key",
+				Description: "Private Key detected",
+				Repository:  "acme/newcleus-core-v3",
+				File:        "README.md",
+				StartLine:   12,
+				Secret:      "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	rows, err := db.NewLootRepository(database).List()
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, db.LootOriginAnalysis, rows[0].Origin)
+	assert.Equal(t, "sess-1", rows[0].SessionID)
+	assert.Equal(t, "Private Key detected (README.md:12)", rows[0].Name)
+	assert.Equal(t, "private_key", rows[0].Type)
+	assert.Equal(t, "acme/newcleus-core-v3:README.md:12", rows[0].Source)
+	assert.Equal(t, "acme/newcleus-core-v3", rows[0].Repository)
+	assert.Equal(t, "README.md", rows[0].Workflow)
+}
+
 func TestHandler_GetAnalyzeResult_ReturnsStatuses(t *testing.T) {
 	mock := &mockPublisher{}
 	h, mux := newTestHandler(mock, nil)
@@ -1095,6 +1143,44 @@ func TestImportAnalysisToPantry_SetsExploitSupportMetadata(t *testing.T) {
 	require.Len(t, vulns, 1)
 	assert.Equal(t, false, vulns[0].Properties["exploit_supported"])
 	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", vulns[0].Properties["exploit_support_reason"])
+}
+
+func TestImportAnalysisToPantry_CreatesSelfHostedRunnerTargets(t *testing.T) {
+	h := NewHandlerWithPublisher(&mockPublisher{}, nil)
+	result := &poutine.AnalysisResult{
+		Success: true,
+		Workflows: []poutine.WorkflowMeta{
+			{
+				Repository: "acme/api",
+				Path:       ".github/workflows/pr.yml",
+				Jobs: []poutine.JobMeta{
+					{
+						ID:         "build",
+						SelfHosted: true,
+						RunsOn:     []string{"self-hosted", "linux", "x64"},
+					},
+				},
+			},
+		},
+		Findings: []poutine.Finding{
+			{
+				Repository: "acme/api",
+				Workflow:   ".github/workflows/pr.yml",
+				Job:        "build",
+				Line:       12,
+				RuleID:     "injection",
+				Severity:   "critical",
+				Context:    "issue_body",
+			},
+		},
+	}
+
+	h.importAnalysisToPantry(result)
+
+	targets := h.Pantry().GetAssetsByType(pantry.AssetSelfHostedRunner)
+	require.Len(t, targets, 1)
+	assert.Equal(t, []string{"self-hosted", "linux", "x64"}, targets[0].StringSliceProperty("label_set"))
+	assert.Equal(t, []string{"build"}, targets[0].StringSliceProperty("observed_job_names"))
 }
 
 func TestImportAnalysisToPantry_PersistsBashContextBeforeExploitSupport(t *testing.T) {

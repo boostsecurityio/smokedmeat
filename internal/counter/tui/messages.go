@@ -169,6 +169,21 @@ type AutoPRDeploymentFailedMsg struct {
 	Err      error
 }
 
+type RunnerTargetWorkflowPushSuccessMsg struct {
+	StagerID  string
+	Target    *RunnerTargetSelection
+	Branch    string
+	BranchURL string
+	Route     string
+	DwellTime time.Duration
+}
+
+type RunnerTargetWorkflowPushFailedMsg struct {
+	StagerID string
+	Target   *RunnerTargetSelection
+	Err      error
+}
+
 // Issue Deployment messages
 
 type IssueDeploymentSuccessMsg struct {
@@ -268,6 +283,10 @@ type CallbackControlFailedMsg struct {
 // ExpressDataMsg is sent when express mode secrets are received via WebSocket
 type ExpressDataMsg struct {
 	Data counter.ExpressDataPayload
+}
+
+type LootSyncMsg struct {
+	Sync counter.LootSyncPayload
 }
 
 // Setup wizard messages (steps 5-7)

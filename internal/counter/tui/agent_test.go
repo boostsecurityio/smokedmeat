@@ -139,6 +139,37 @@ func TestHandleExpressData_SecretsCollected(t *testing.T) {
 	assert.False(t, model.lootStash[0].ExpressMode)
 }
 
+func TestHandleExpressData_BackfillsActiveAgentContext(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhasePostExploit
+	m.activityLog = NewActivityLog()
+	m.sessions = []Session{{AgentID: "agt-victim"}}
+	m.selectedIndex = 0
+	m.activeAgent = &AgentState{
+		ID:     "agt-victim",
+		Runner: "runner-1",
+	}
+
+	result, _ := m.handleExpressData(ExpressDataMsg{Data: counter.ExpressDataPayload{
+		AgentID:    "agt-victim",
+		Hostname:   "runner-1",
+		Repository: "whooli/infrastructure-definitions",
+		Workflow:   ".github/workflows/deploy.yml",
+		Job:        "sync",
+		Timestamp:  time.Now(),
+	}})
+
+	model := result.(Model)
+	require.NotNil(t, model.activeAgent)
+	assert.Equal(t, "whooli/infrastructure-definitions", model.activeAgent.Repo)
+	assert.Equal(t, ".github/workflows/deploy.yml", model.activeAgent.Workflow)
+	assert.Equal(t, "sync", model.activeAgent.Job)
+	require.NotNil(t, model.SelectedSession())
+	assert.Equal(t, "whooli/infrastructure-definitions", model.SelectedSession().Repo)
+	assert.Equal(t, ".github/workflows/deploy.yml", model.SelectedSession().Workflow)
+	assert.Equal(t, "sync", model.SelectedSession().Job)
+}
+
 func TestHandleExpressData_TokenPermissions(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhasePostExploit
@@ -611,6 +642,197 @@ func TestHandleExpressData_FallsBackToWaitingRepo(t *testing.T) {
 	assert.Equal(t, "waiting-org/waiting-repo", model.sessionLoot[0].Repository)
 }
 
+func TestHandleExpressData_PersistentRunnerTargetExpressHitStaysWaiting(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWaiting
+	m.waiting = NewWaitingState("stg-runner-1", "whooli/infrastructure-definitions", "", runnerTargetWorkflowPath(), runnerTargetWorkflowJobName(), "Self-Hosted Workflow Push", 90*time.Second)
+	m.callbacks = []counter.CallbackPayload{
+		{ID: "stg-runner-1", Persistent: true},
+	}
+
+	data := counter.ExpressDataPayload{
+		AgentID:      "brisket-runner-01",
+		Hostname:     "whooli-gh-runner",
+		Timestamp:    time.Now(),
+		CallbackID:   "stg-runner-1",
+		CallbackMode: "express",
+	}
+
+	result, _ := m.handleExpressData(ExpressDataMsg{Data: data})
+
+	model := result.(Model)
+	assert.Equal(t, PhaseWaiting, model.phase)
+	require.NotNil(t, model.waiting)
+	assert.Nil(t, model.activeAgent)
+	assert.Contains(t, model.waiting.PendingAgents, "brisket-runner-01")
+	require.Len(t, model.output, 3)
+	assert.Equal(t, "info", model.output[0].Type)
+	assert.Contains(t, model.output[0].Content, "Persistent callback hit in express mode")
+	assert.Equal(t, "info", model.output[1].Type)
+	assert.Contains(t, model.output[1].Content, "implants modal")
+}
+
+func TestHandleBeacon_PersistentRunnerTargetExpressHitStaysWaiting(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWaiting
+	m.waiting = NewWaitingState("stg-runner-1", "whooli/infrastructure-definitions", "", runnerTargetWorkflowPath(), runnerTargetWorkflowJobName(), "Self-Hosted Workflow Push", 90*time.Second)
+	m.callbacks = []counter.CallbackPayload{
+		{ID: "stg-runner-1", Persistent: true},
+	}
+
+	beacon := counter.Beacon{
+		AgentID:      "brisket-runner-01",
+		Hostname:     "whooli-gh-runner",
+		OS:           "linux",
+		Arch:         "amd64",
+		Timestamp:    time.Now(),
+		CallbackID:   "stg-runner-1",
+		CallbackMode: "express",
+	}
+
+	result, _ := m.handleBeacon(BeaconMsg{Beacon: beacon})
+
+	model := result.(Model)
+	assert.Equal(t, PhaseWaiting, model.phase)
+	require.NotNil(t, model.waiting)
+	assert.Nil(t, model.activeAgent)
+	assert.Contains(t, model.waiting.PendingAgents, "brisket-runner-01")
+}
+
+func TestHandleBeacon_PersistentRunnerTargetResidentHitTransitionsToPostExploit(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWaiting
+	m.waiting = NewWaitingState("stg-runner-1", "whooli/infrastructure-definitions", "", runnerTargetWorkflowPath(), runnerTargetWorkflowJobName(), "Self-Hosted Workflow Push", 0)
+	m.callbacks = []counter.CallbackPayload{
+		{
+			ID:         "stg-runner-1",
+			Persistent: true,
+			Metadata: map[string]string{
+				"callback_kind":    "self_hosted_runner",
+				"persistence_mode": "resident",
+			},
+		},
+	}
+
+	beacon := counter.Beacon{
+		AgentID:      "brisket-runner-01",
+		Hostname:     "whooli-gh-runner",
+		OS:           "linux",
+		Arch:         "amd64",
+		Timestamp:    time.Now(),
+		CallbackID:   "stg-runner-1",
+		CallbackMode: "resident",
+	}
+
+	result, _ := m.handleBeacon(BeaconMsg{Beacon: beacon})
+
+	model := result.(Model)
+	assert.Equal(t, PhasePostExploit, model.phase)
+	require.NotNil(t, model.activeAgent)
+	assert.Equal(t, "brisket-runner-01", model.activeAgent.ID)
+	assert.Equal(t, "whooli/infrastructure-definitions", model.activeAgent.Repo)
+	assert.Equal(t, runnerTargetWorkflowPath(), model.activeAgent.Workflow)
+	assert.Equal(t, runnerTargetWorkflowJobName(), model.activeAgent.Job)
+	assert.Equal(t, agentModeResident, model.activeAgent.Mode)
+	assert.True(t, model.dwellMode)
+	assert.True(t, model.jobDeadline.IsZero())
+	assert.Nil(t, model.waiting)
+}
+
+func TestHandleBeacon_PersistentRunnerTargetResidentHitWithoutResidentMetadataTransitionsToPostExploit(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWaiting
+	m.waiting = NewWaitingState("stg-runner-1", "whooli/infrastructure-definitions", "", runnerTargetWorkflowPath(), runnerTargetWorkflowJobName(), "Self-Hosted Workflow Push", 0)
+	m.callbacks = []counter.CallbackPayload{
+		{
+			ID:         "stg-runner-1",
+			Persistent: true,
+		},
+	}
+
+	beacon := counter.Beacon{
+		AgentID:      "brisket-runner-01",
+		Hostname:     "whooli-gh-runner",
+		OS:           "linux",
+		Arch:         "amd64",
+		Timestamp:    time.Now(),
+		CallbackID:   "stg-runner-1",
+		CallbackMode: "resident",
+	}
+
+	result, _ := m.handleBeacon(BeaconMsg{Beacon: beacon})
+
+	model := result.(Model)
+	assert.Equal(t, PhasePostExploit, model.phase)
+	require.NotNil(t, model.activeAgent)
+	assert.Equal(t, "brisket-runner-01", model.activeAgent.ID)
+	assert.Equal(t, agentModeResident, model.activeAgent.Mode)
+	assert.True(t, model.dwellMode)
+	assert.True(t, model.jobDeadline.IsZero())
+	assert.Nil(t, model.waiting)
+}
+
+func TestHandleBeacon_PersistentRunnerTargetResidentHitWithoutModeTransitionsToPostExploit(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWaiting
+	m.waiting = NewWaitingState("stg-runner-1", "whooli/infrastructure-definitions", "", runnerTargetWorkflowPath(), runnerTargetWorkflowJobName(), "Self-Hosted Workflow Push", 0)
+	m.callbacks = []counter.CallbackPayload{
+		{
+			ID:         "stg-runner-1",
+			Persistent: true,
+			Metadata: map[string]string{
+				"callback_kind":    "self_hosted_runner",
+				"persistence_mode": "resident",
+			},
+		},
+	}
+
+	beacon := counter.Beacon{
+		AgentID:    "brisket-runner-01",
+		Hostname:   "whooli-gh-runner",
+		OS:         "linux",
+		Arch:       "amd64",
+		Timestamp:  time.Now(),
+		CallbackID: "stg-runner-1",
+	}
+
+	result, _ := m.handleBeacon(BeaconMsg{Beacon: beacon})
+
+	model := result.(Model)
+	assert.Equal(t, PhasePostExploit, model.phase)
+	require.NotNil(t, model.activeAgent)
+	assert.Equal(t, "brisket-runner-01", model.activeAgent.ID)
+	assert.Equal(t, agentModeResident, model.activeAgent.Mode)
+	assert.True(t, model.dwellMode)
+	assert.True(t, model.jobDeadline.IsZero())
+	assert.Nil(t, model.waiting)
+}
+
+func TestHandleExpressData_RunnerTargetDwellHitTransitionsToPostExploit(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWaiting
+	m.waiting = NewWaitingState("stg-runner-1", "whooli/infrastructure-definitions", "", runnerTargetWorkflowPath(), runnerTargetWorkflowJobName(), "Self-Hosted Workflow Push", 2*time.Minute)
+
+	data := counter.ExpressDataPayload{
+		AgentID:      "brisket-runner-01",
+		Hostname:     "whooli-gh-runner",
+		Timestamp:    time.Now(),
+		CallbackID:   "stg-runner-1",
+		CallbackMode: "dwell",
+	}
+
+	result, _ := m.handleExpressData(ExpressDataMsg{Data: data})
+
+	model := result.(Model)
+	assert.Equal(t, PhasePostExploit, model.phase)
+	require.NotNil(t, model.activeAgent)
+	assert.Equal(t, "brisket-runner-01", model.activeAgent.ID)
+	assert.Equal(t, "whooli/infrastructure-definitions", model.activeAgent.Repo)
+	assert.Equal(t, runnerTargetWorkflowPath(), model.activeAgent.Workflow)
+	assert.Equal(t, runnerTargetWorkflowJobName(), model.activeAgent.Job)
+	assert.Nil(t, model.waiting)
+}
+
 func TestHandleExpressData_UpdatesPantryState(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhasePostExploit
@@ -971,7 +1193,7 @@ func TestHandleKeyMsg_XRequiresVulnerabilityTreeNode(t *testing.T) {
 	assert.Equal(t, PhasePostExploit, model.phase)
 	require.NotEmpty(t, model.output)
 	assert.Equal(t, "error", model.output[len(model.output)-1].Type)
-	assert.Equal(t, "Exploit shortcut requires a [VULN] node.", model.output[len(model.output)-1].Content)
+	assert.Equal(t, "Action shortcut requires a [VULN] or [SH-RUNNER] node.", model.output[len(model.output)-1].Content)
 }
 
 func TestHandleKeyMsg_XUsesHighlightedTreeVulnerabilityFromPantryNode(t *testing.T) {
@@ -1074,4 +1296,46 @@ func TestHandleKeyMsg_XRejectsAnalyzeOnlyFinding(t *testing.T) {
 	require.NotEmpty(t, model.output)
 	assert.Equal(t, "error", model.output[len(model.output)-1].Type)
 	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", model.output[len(model.output)-1].Content)
+}
+
+func TestHandleKeyMsg_XUsesRunnerTargetPreferredVulnerability(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhasePostExploit
+	m.view = ViewAgent
+	m.focus = FocusSessions
+	m.paneFocus = PaneFocusFindings
+	m.vulnerabilities = []Vulnerability{
+		{ID: "vuln:injection:.github/workflows/pr.yml:12", Title: "Bash injection", Repository: "acme/xyz", Workflow: ".github/workflows/pr.yml", Job: "build", Line: 12, RuleID: "injection", Context: "issue_body", ExploitSupported: true},
+	}
+
+	root := &TreeNode{ID: "root", Expanded: true}
+	repo := &TreeNode{ID: "repo:acme/xyz", Type: TreeNodeRepo, Label: "acme/xyz", Expanded: true, Parent: root}
+	target := &TreeNode{
+		ID:     "runner:1",
+		Type:   TreeNodeSelfHostedRunner,
+		Label:  "linux-x64",
+		Parent: repo,
+		Properties: map[string]interface{}{
+			"repo_id":                 "github:acme/xyz",
+			"label_display":           "linux-x64",
+			"label_set":               []string{"self-hosted", "linux", "x64"},
+			"observed_workflow_paths": []string{".github/workflows/pr.yml"},
+			"observed_job_names":      []string{"build"},
+		},
+	}
+	root.Children = []*TreeNode{repo}
+	repo.Children = []*TreeNode{target}
+	m.treeRoot = root
+	m.ReflattenTree()
+	require.True(t, m.TreeSelectByID(target.ID))
+
+	result, cmd := m.Update(tea.KeyPressMsg{Text: "x", Code: 'x'})
+
+	require.Nil(t, cmd)
+	model := result.(Model)
+	require.NotNil(t, model.wizard)
+	assert.Equal(t, WizardKindRunnerTarget, model.wizard.Kind)
+	require.NotNil(t, model.wizard.SelectedRunnerTarget)
+	assert.Equal(t, "linux-x64", model.wizard.SelectedRunnerTarget.LabelDisplay)
+	assert.Equal(t, "vuln:injection:.github/workflows/pr.yml:12", model.wizard.SelectedRunnerTarget.PreferredPath)
 }

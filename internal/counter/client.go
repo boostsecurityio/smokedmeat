@@ -41,6 +41,8 @@ type KitchenAPI interface {
 	DeployIssue(ctx context.Context, req DeployIssueRequest) (DeployIssueResponse, error)
 	DeployComment(ctx context.Context, req DeployCommentRequest) (DeployCommentResponse, error)
 	DeployLOTP(ctx context.Context, req DeployLOTPRequest) (DeployLOTPResponse, error)
+	DeploySelfHostedCallbackPR(ctx context.Context, req DeploySelfHostedCallbackPRRequest) (DeploySelfHostedCallbackPRResponse, error)
+	DeploySelfHostedWorkflowPush(ctx context.Context, req DeploySelfHostedWorkflowPushRequest) (DeploySelfHostedWorkflowPushResponse, error)
 	TriggerDispatch(ctx context.Context, req DeployDispatchRequest) error
 	FetchDeployPreflight(ctx context.Context, req DeployPreflightRequest) (*DeployPreflightResponse, error)
 	ListReposWithInfo(ctx context.Context, token string) ([]RepoInfo, error)
@@ -55,6 +57,7 @@ type KitchenAPI interface {
 	SetEventCallback(onEvent func(KitchenEvent))
 	SetHistoryCallback(onHistory func(HistoryPayload))
 	SetExpressDataCallback(onExpressData func(ExpressDataPayload))
+	SetLootSyncCallback(onLootSync func(LootSyncPayload))
 	SetAnalysisProgressCallback(onAnalysisProgress func(AnalysisProgressPayload))
 	SetAnalysisMetadataSyncCallback(onAnalysisMetadataSync func(AnalysisMetadataSyncPayload))
 	SetAuthExpiredCallback(onAuthExpired func())
@@ -86,6 +89,7 @@ type KitchenClient struct {
 	onEvent            func(event KitchenEvent)
 	onHistory          func(history HistoryPayload)
 	onExpressData      func(data ExpressDataPayload)
+	onLootSync         func(sync LootSyncPayload)
 	onAnalysisProgress func(progress AnalysisProgressPayload)
 	onAnalysisMetadata func(sync AnalysisMetadataSyncPayload)
 	onAuthExpired      func()
@@ -130,6 +134,9 @@ type OperatorMessage struct {
 
 	// For "express_data" type (incoming broadcast)
 	ExpressData *ExpressDataPayload `json:"express_data,omitempty"`
+
+	// For "loot_sync" type (incoming broadcast)
+	LootSync *LootSyncPayload `json:"loot_sync,omitempty"`
 
 	// For "analysis_progress" type (incoming broadcast)
 	AnalysisProgress *AnalysisProgressPayload `json:"analysis_progress,omitempty"`
@@ -254,6 +261,30 @@ type ExpressDataPayload struct {
 	CallbackMode     string                    `json:"callback_mode,omitempty"`
 }
 
+type LootSyncPayload struct {
+	Entries []LootSyncEntry `json:"entries"`
+}
+
+type LootSyncEntry struct {
+	SessionID string    `json:"session_id,omitempty"`
+	AgentID   string    `json:"agent_id,omitempty"`
+	Hostname  string    `json:"hostname,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+	Origin    string    `json:"origin,omitempty"`
+
+	Name      string `json:"name"`
+	Value     string `json:"value"`
+	Type      string `json:"type"`
+	Source    string `json:"source"`
+	HighValue bool   `json:"high_value"`
+
+	Repository string `json:"repository,omitempty"`
+	Workflow   string `json:"workflow,omitempty"`
+	Job        string `json:"job,omitempty"`
+
+	TokenPermissions map[string]string `json:"token_permissions,omitempty"`
+}
+
 // KitchenConfig holds configuration for the Kitchen WebSocket client.
 type KitchenConfig struct {
 	URL       string // e.g., "wss://kitchen.example.com/ws" or "ws://localhost:8080/ws"
@@ -302,6 +333,12 @@ func (k *KitchenClient) SetExpressDataCallback(onExpressData func(ExpressDataPay
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.onExpressData = onExpressData
+}
+
+func (k *KitchenClient) SetLootSyncCallback(onLootSync func(LootSyncPayload)) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.onLootSync = onLootSync
 }
 
 func (k *KitchenClient) SetAnalysisProgressCallback(onAnalysisProgress func(AnalysisProgressPayload)) {
@@ -480,6 +517,11 @@ func (k *KitchenClient) handleMessage(msg OperatorMessage) {
 	case "express_data":
 		if msg.ExpressData != nil && k.onExpressData != nil {
 			k.onExpressData(*msg.ExpressData)
+		}
+
+	case "loot_sync":
+		if msg.LootSync != nil && k.onLootSync != nil {
+			k.onLootSync(*msg.LootSync)
 		}
 
 	case "analysis_progress":
@@ -1134,6 +1176,38 @@ type DeployLOTPResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+type DeploySelfHostedCallbackPRRequest struct {
+	Token    string `json:"token"`
+	RepoName string `json:"repo_name"`
+	Path     string `json:"path"`
+	Content  string `json:"content"`
+	Title    string `json:"title,omitempty"`
+	Body     string `json:"body,omitempty"`
+	StagerID string `json:"stager_id,omitempty"`
+	Draft    *bool  `json:"draft,omitempty"`
+}
+
+type DeploySelfHostedCallbackPRResponse struct {
+	PRURL string `json:"pr_url"`
+	Error string `json:"error,omitempty"`
+}
+
+type DeploySelfHostedWorkflowPushRequest struct {
+	Token    string `json:"token"`
+	RepoName string `json:"repo_name"`
+	Branch   string `json:"branch,omitempty"`
+	Path     string `json:"path"`
+	Content  string `json:"content"`
+	Title    string `json:"title,omitempty"`
+	StagerID string `json:"stager_id,omitempty"`
+}
+
+type DeploySelfHostedWorkflowPushResponse struct {
+	Branch    string `json:"branch,omitempty"`
+	BranchURL string `json:"branch_url,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
 type DeployDispatchRequest struct {
 	Token        string                 `json:"token"`
 	Owner        string                 `json:"owner"`
@@ -1329,6 +1403,18 @@ func (k *KitchenClient) DeployComment(ctx context.Context, req DeployCommentRequ
 func (k *KitchenClient) DeployLOTP(ctx context.Context, req DeployLOTPRequest) (DeployLOTPResponse, error) {
 	var resp DeployLOTPResponse
 	err := k.doPostJSON(ctx, "/github/deploy/lotp", req, &resp, 3*time.Minute)
+	return resp, err
+}
+
+func (k *KitchenClient) DeploySelfHostedCallbackPR(ctx context.Context, req DeploySelfHostedCallbackPRRequest) (DeploySelfHostedCallbackPRResponse, error) {
+	var resp DeploySelfHostedCallbackPRResponse
+	err := k.doPostJSON(ctx, "/github/deploy/self-hosted-callback-pr", req, &resp, 3*time.Minute)
+	return resp, err
+}
+
+func (k *KitchenClient) DeploySelfHostedWorkflowPush(ctx context.Context, req DeploySelfHostedWorkflowPushRequest) (DeploySelfHostedWorkflowPushResponse, error) {
+	var resp DeploySelfHostedWorkflowPushResponse
+	err := k.doPostJSON(ctx, "/github/deploy/self-hosted-workflow-push", req, &resp, 3*time.Minute)
 	return resp, err
 }
 

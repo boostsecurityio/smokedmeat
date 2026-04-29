@@ -20,6 +20,7 @@ func TestTreeNodeType_String(t *testing.T) {
 		{TreeNodeOrg, "ORG"},
 		{TreeNodeRepo, "REPO"},
 		{TreeNodeWorkflow, "WORKFLOW"},
+		{TreeNodeSelfHostedRunner, "SH-RUNNER"},
 		{TreeNodeJob, "JOB"},
 		{TreeNodeVuln, "VULN"},
 		{TreeNodeSecret, "SECRET"},

@@ -485,6 +485,30 @@ func secretAllowsDispatch(secret CollectedSecret, permissions map[string]string)
 	return false
 }
 
+func secretAllowsWorkflowPush(secret CollectedSecret, permissions map[string]string) bool {
+	if !secret.CanUseAsToken() {
+		return false
+	}
+	if permissionAllowsWrite(permissions, "contents") && permissionAllowsWorkflowFileWrite(permissions) {
+		return true
+	}
+	hasRepoScope := false
+	hasWorkflowScope := false
+	for _, scope := range secret.Scopes {
+		scope = strings.ToLower(strings.TrimSpace(scope))
+		switch scope {
+		case "repo", "public_repo":
+			hasRepoScope = true
+		case "workflow":
+			hasWorkflowScope = true
+		}
+		if strings.Contains(scope, "workflow") && strings.Contains(scope, "write") {
+			hasWorkflowScope = true
+		}
+	}
+	return hasRepoScope && hasWorkflowScope
+}
+
 func secretHasActionsWrite(secret CollectedSecret) bool {
 	if strings.HasPrefix(secret.Value, "ghp_") {
 		return true
@@ -593,6 +617,10 @@ func permissionAllowsWrite(permissions map[string]string, name string) bool {
 		}
 	}
 	return false
+}
+
+func permissionAllowsWorkflowFileWrite(permissions map[string]string) bool {
+	return permissionAllowsWrite(permissions, "workflows") || permissionAllowsWrite(permissions, "workflow")
 }
 
 func normalizePermissionName(name string) string {

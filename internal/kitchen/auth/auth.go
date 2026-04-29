@@ -467,6 +467,36 @@ func (a *Auth) GenerateAgentToken(agentID, sessionID string) (string, error) {
 	return token, nil
 }
 
+func (a *Auth) AgentTokenExpiry() time.Duration {
+	return a.agentTokenExpiry
+}
+
+func (a *Auth) RestoreAgentToken(token, agentID, sessionID string, createdAt, expiresAt time.Time) bool {
+	if token == "" || agentID == "" || sessionID == "" {
+		return false
+	}
+	if !expiresAt.IsZero() && time.Now().After(expiresAt) {
+		return false
+	}
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	if expiresAt.IsZero() {
+		expiresAt = createdAt.Add(a.agentTokenExpiry)
+	}
+
+	a.mu.Lock()
+	a.agentTokens[token] = &AgentToken{
+		Token:     token,
+		AgentID:   agentID,
+		SessionID: sessionID,
+		CreatedAt: createdAt,
+		ExpiresAt: expiresAt,
+	}
+	a.mu.Unlock()
+	return true
+}
+
 // ValidateAgentToken validates an agent token and returns claims.
 func (a *Auth) ValidateAgentToken(token string) (*AgentClaims, error) {
 	a.mu.RLock()
