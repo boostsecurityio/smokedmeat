@@ -193,6 +193,31 @@ func TestHandler_Beacon_PublishesColeslawJSON(t *testing.T) {
 	assert.Equal(t, "test-agent", mock.coleslaws[0].agentID)
 }
 
+func TestHandler_Beacon_PersistentCallbackStoresNormalizedClientIP(t *testing.T) {
+	mock := &mockPublisher{}
+	h, mux := newTestHandler(mock, nil)
+
+	err := h.stagerStore.Register(&RegisteredStager{
+		ID:         "cb-persist",
+		SessionID:  "sess-1",
+		Persistent: true,
+	})
+	require.NoError(t, err)
+
+	beacon := `{"agent_id":"test-agent","callback_id":"cb-persist"}`
+	req := httptest.NewRequest(http.MethodPost, "/b/test-agent", strings.NewReader(beacon))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "198.51.100.23:45678"
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	callback := h.stagerStore.Get("cb-persist")
+	require.NotNil(t, callback)
+	assert.Equal(t, "198.51.100.23", callback.CallbackIP)
+}
+
 func TestHandler_Beacon_BroadcastsCachePoisonWithoutLoot(t *testing.T) {
 	mock := &mockPublisher{}
 	h, mux := newTestHandler(mock, nil)
@@ -454,6 +479,43 @@ func TestHandler_Stager_PersistsAgentTokenForRestart(t *testing.T) {
 	assert.NotEmpty(t, rows[0].AgentToken)
 	assert.Equal(t, "sess-1", rows[0].SessionID)
 	assert.False(t, rows[0].TokenExpiresAt.IsZero())
+}
+
+func TestHandler_PersistAgentToken_PreservesAgentMetadata(t *testing.T) {
+	database := newTestDB(t)
+	h := NewHandler(nil, nil, nil)
+	h.SetDatabase(database)
+
+	now := time.Now().UTC()
+	deadline := now.Add(30 * time.Minute)
+	agentRepo := db.NewAgentRepository(database)
+	err := agentRepo.Upsert(&db.AgentRow{
+		AgentID:       "agt-1",
+		SessionID:     "sess-1",
+		Hostname:      "runner-1",
+		OS:            "linux",
+		Arch:          "amd64",
+		FirstSeen:     now.Add(-time.Hour),
+		LastSeen:      now.Add(-time.Minute),
+		IsOnline:      true,
+		DwellDeadline: &deadline,
+	})
+	require.NoError(t, err)
+
+	h.persistAgentToken("agt-1", "sess-1", "agt_token", now, now.Add(time.Hour))
+
+	row, err := agentRepo.Get("agt-1")
+	require.NoError(t, err)
+	require.NotNil(t, row)
+	assert.Equal(t, "runner-1", row.Hostname)
+	assert.Equal(t, "linux", row.OS)
+	assert.Equal(t, "amd64", row.Arch)
+	require.NotNil(t, row.DwellDeadline)
+	assert.Equal(t, deadline, *row.DwellDeadline)
+	assert.True(t, row.IsOnline)
+	assert.Equal(t, "agt_token", row.AgentToken)
+	assert.Equal(t, now, row.TokenCreatedAt)
+	assert.Equal(t, now.Add(time.Hour), row.TokenExpiresAt)
 }
 
 func TestHandler_Beacon_ResponseFormat(t *testing.T) {

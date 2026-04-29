@@ -774,7 +774,7 @@ func (h *Handler) handleBeacon(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				if beacon.CallbackID != "" {
-					if callback := h.stagerStore.ObservePersistentBeacon(beacon.CallbackID, r.RemoteAddr, agentID, time.Now()); callback != nil {
+					if callback := h.stagerStore.ObservePersistentBeacon(beacon.CallbackID, extractClientIP(r), agentID, time.Now()); callback != nil {
 						h.persistStager(callback)
 					}
 				}
@@ -1178,6 +1178,21 @@ func (h *Handler) persistAgentToken(agentID, sessionID, token string, createdAt,
 		TokenExpiresAt: expiresAt,
 	}
 	agentRepo := db.NewAgentRepository(h.database)
+	existing, err := agentRepo.Get(agentID)
+	if err != nil {
+		slog.Warn("failed to load existing agent before persisting token", "agent_id", agentID, "error", err)
+	} else if existing != nil {
+		row.Hostname = existing.Hostname
+		row.OS = existing.OS
+		row.Arch = existing.Arch
+		row.FirstSeen = existing.FirstSeen
+		row.LastSeen = existing.LastSeen
+		row.IsOnline = existing.IsOnline
+		row.DwellDeadline = existing.DwellDeadline
+		if row.SessionID == "" {
+			row.SessionID = existing.SessionID
+		}
+	}
 	if err := agentRepo.Upsert(row); err != nil {
 		slog.Warn("failed to persist agent token", "agent_id", agentID, "error", err)
 	}

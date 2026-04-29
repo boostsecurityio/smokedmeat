@@ -242,7 +242,7 @@ func pushRunnerTargetWorkflowViaSSH(ss *SSHState, repo, branchName, workflowPath
 	if err := runGitWithEnv(repoDir, env, "add", workflowPath); err != nil {
 		return "", "", err
 	}
-	if err := runGitWithEnv(repoDir, env, "commit", "-m", commitMessage); err != nil {
+	if err := runGitWithEnv(repoDir, env, gitCommitArgs(commitMessage)...); err != nil {
 		return "", "", err
 	}
 	if err := runGitWithEnv(repoDir, env, "push", "origin", branchName); err != nil {
@@ -251,6 +251,14 @@ func pushRunnerTargetWorkflowViaSSH(ss *SSHState, repo, branchName, workflowPath
 
 	branchURL = fmt.Sprintf("https://github.com/%s/tree/%s", repo, branchName)
 	return branchName, branchURL, nil
+}
+
+func gitCommitArgs(message string) []string {
+	return []string{
+		"-c", "user.name=SmokedMeat Counter",
+		"-c", "user.email=smokedmeat@local.invalid",
+		"commit", "-m", message,
+	}
 }
 
 func runGitWithEnv(dir string, env []string, args ...string) error {

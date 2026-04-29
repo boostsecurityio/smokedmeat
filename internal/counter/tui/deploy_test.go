@@ -93,6 +93,16 @@ func TestMaskCommandToken(t *testing.T) {
 	}
 }
 
+func TestGitCommitArgs(t *testing.T) {
+	args := gitCommitArgs("ship workflow")
+
+	assert.Equal(t, []string{
+		"-c", "user.name=SmokedMeat Counter",
+		"-c", "user.email=smokedmeat@local.invalid",
+		"commit", "-m", "ship workflow",
+	}, args)
+}
+
 func TestModel_Update_CommentDeploymentSuccess(t *testing.T) {
 	m := NewModel(Config{SessionID: "test-session"})
 	m.phase = PhaseWizard
