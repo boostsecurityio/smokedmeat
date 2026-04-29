@@ -117,12 +117,10 @@ func (m *Model) AddToLootStash(secret CollectedSecret) {
 func (m *Model) addToLootStashNoSave(secret CollectedSecret) bool {
 	for i, existing := range m.lootStash {
 		if sameLootValue(existing, secret) {
-			mergeCollectedSecretMetadataPreferIncomingOrigin(&m.lootStash[i], secret)
-			return false
+			return mergeCollectedSecretMetadataPreferIncomingOrigin(&m.lootStash[i], secret)
 		}
 		if existing.Name == secret.Name && existing.Value == secret.Value {
-			mergeCollectedSecretMetadataPreferIncomingOrigin(&m.lootStash[i], secret)
-			return false
+			return mergeCollectedSecretMetadataPreferIncomingOrigin(&m.lootStash[i], secret)
 		}
 		if sameLootOriginSlot(existing, secret) && shouldReplaceCollectedSecret(existing, secret) {
 			replacement := secret
@@ -184,15 +182,16 @@ func containsSource(sources []string, source string) bool {
 	return false
 }
 
-func mergeCollectedSecretMetadata(dst *CollectedSecret, src CollectedSecret) {
-	mergeCollectedSecretMetadataWithPreference(dst, src, false)
+func mergeCollectedSecretMetadata(dst *CollectedSecret, src CollectedSecret) bool {
+	return mergeCollectedSecretMetadataWithPreference(dst, src, false)
 }
 
-func mergeCollectedSecretMetadataPreferIncomingOrigin(dst *CollectedSecret, src CollectedSecret) {
-	mergeCollectedSecretMetadataWithPreference(dst, src, true)
+func mergeCollectedSecretMetadataPreferIncomingOrigin(dst *CollectedSecret, src CollectedSecret) bool {
+	return mergeCollectedSecretMetadataWithPreference(dst, src, true)
 }
 
-func mergeCollectedSecretMetadataWithPreference(dst *CollectedSecret, src CollectedSecret, preferIncomingOrigin bool) {
+func mergeCollectedSecretMetadataWithPreference(dst *CollectedSecret, src CollectedSecret, preferIncomingOrigin bool) bool {
+	before := lootTreePlacementKey(*dst)
 	preferOrigin := preferIncomingOrigin || shouldPreferCollectedSecretOrigin(*dst, src)
 	if src.Name != "" && (dst.Name == "" || preferOrigin) {
 		dst.Name = src.Name
@@ -242,6 +241,7 @@ func mergeCollectedSecretMetadataWithPreference(dst *CollectedSecret, src Collec
 	if src.Source != "" && (dst.Source == "" || preferOrigin) {
 		dst.Source = src.Source
 	}
+	return before != lootTreePlacementKey(*dst)
 }
 
 func shouldPreferCollectedSecretOrigin(existing, incoming CollectedSecret) bool {
@@ -274,6 +274,10 @@ func lootOriginSlotKey(secret CollectedSecret) string {
 	return ""
 }
 
+func lootTreePlacementKey(secret CollectedSecret) string {
+	return strings.Join([]string{secret.Repository, secret.Workflow, secret.Job, secret.Name}, "\x00")
+}
+
 func secretPermissionDisplayKey(secret CollectedSecret) string {
 	if key := lootOriginSlotKey(secret); key != "" {
 		return key
@@ -297,8 +301,7 @@ func (m *Model) AddToSessionLoot(secret CollectedSecret) {
 func (m *Model) addToSessionLootNoSave(secret CollectedSecret) bool {
 	for i, existing := range m.sessionLoot {
 		if existing.Name == secret.Name {
-			mergeCollectedSecretMetadataPreferIncomingOrigin(&m.sessionLoot[i], secret)
-			return false
+			return mergeCollectedSecretMetadataPreferIncomingOrigin(&m.sessionLoot[i], secret)
 		}
 	}
 	m.sessionLoot = append(m.sessionLoot, secret)

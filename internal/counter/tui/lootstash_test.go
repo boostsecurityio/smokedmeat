@@ -126,6 +126,56 @@ func TestModel_AddToSessionLoot(t *testing.T) {
 	assert.Equal(t, "SESSION_KEY", m.sessionLoot[0].Name)
 }
 
+func TestModel_AddToSessionLoot_MergeRebuildsLootTreeWhenPlacementChanges(t *testing.T) {
+	m := NewModel(Config{})
+
+	m.AddToSessionLoot(CollectedSecret{
+		Name:  "GITHUB_TOKEN",
+		Value: "ghs_123",
+		Type:  "github_token",
+	})
+
+	require.NotNil(t, findNodeByID(m.lootTreeRoot, "loot:repo:(unknown)"))
+
+	m.AddToSessionLoot(CollectedSecret{
+		Name:       "GITHUB_TOKEN",
+		Value:      "ghs_123",
+		Type:       "github_token",
+		Repository: "acme/api",
+		Workflow:   ".github/workflows/ci.yml",
+		Job:        "build",
+	})
+
+	require.NotNil(t, findNodeByID(m.lootTreeRoot, "loot:repo:acme/api"))
+	require.NotNil(t, findNodeByID(m.lootTreeRoot, "loot:wf:acme/api:.github/workflows/ci.yml:build"))
+	assert.Nil(t, findNodeByID(m.lootTreeRoot, "loot:repo:(unknown)"))
+}
+
+func TestModel_AddToLootStash_MergeRebuildsLootTreeWhenPlacementChanges(t *testing.T) {
+	m := NewModel(Config{})
+
+	m.AddToLootStash(CollectedSecret{
+		Name:  "PRIVATE_KEY",
+		Value: "pem-data",
+		Type:  "private_key",
+	})
+
+	require.NotNil(t, findNodeByID(m.lootTreeRoot, "loot:repo:(unknown)"))
+
+	m.AddToLootStash(CollectedSecret{
+		Name:       "PRIVATE_KEY",
+		Value:      "pem-data",
+		Type:       "private_key",
+		Repository: "acme/api",
+		Workflow:   "README.md",
+		Job:        "extract",
+	})
+
+	require.NotNil(t, findNodeByID(m.lootTreeRoot, "loot:repo:acme/api"))
+	require.NotNil(t, findNodeByID(m.lootTreeRoot, "loot:wf:acme/api:README.md:extract"))
+	assert.Nil(t, findNodeByID(m.lootTreeRoot, "loot:repo:(unknown)"))
+}
+
 func TestModel_HandleLootSync_RestoresStoredLoot(t *testing.T) {
 	m := NewModel(Config{})
 	key := testSSHPrivateKey(t)
