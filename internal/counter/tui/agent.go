@@ -1273,6 +1273,21 @@ func (m *Model) updateSessionContext(agentID, repo, workflow, job string) {
 	}
 }
 
+func (m *Model) clearSessionContext(agentID string) {
+	if agentID == "" {
+		return
+	}
+	for i := range m.sessions {
+		if m.sessions[i].AgentID != agentID {
+			continue
+		}
+		m.sessions[i].Repo = ""
+		m.sessions[i].Workflow = ""
+		m.sessions[i].Job = ""
+		return
+	}
+}
+
 func (m Model) sessionContext(agentID string) (repo, workflow, job string) {
 	if agentID == "" {
 		return "", "", ""

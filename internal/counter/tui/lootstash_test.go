@@ -183,7 +183,6 @@ func TestModel_HandleLootSync_RestoresStoredLoot(t *testing.T) {
 	result, cmd := m.handleLootSync(LootSyncMsg{Sync: counter.LootSyncPayload{
 		Entries: []counter.LootSyncEntry{
 			{
-				Origin:     "analysis",
 				Timestamp:  time.Now(),
 				Name:       "Private Key detected (README.md:12)",
 				Value:      key,

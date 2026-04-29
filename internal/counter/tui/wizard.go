@@ -6,6 +6,7 @@ package tui
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/boostsecurityio/smokedmeat/internal/rye"
 )
+
+var runnerTargetStaticLabelPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
 func prependGateTriggers(payload string, vuln *Vulnerability) string {
 	if vuln == nil || len(vuln.GateTriggers) == 0 {
@@ -915,6 +918,10 @@ func (m Model) executeRunnerTargetWizardAction() (tea.Model, tea.Cmd) {
 			m.AddOutput("error", reason)
 			return m, nil
 		}
+		if err := validateRunnerTargetWorkflowLabels(target); err != nil {
+			m.AddOutput("error", err.Error())
+			return m, nil
+		}
 		workflowPath := runnerTargetWorkflowPath()
 		branchName := generateRunnerTargetBranchName(time.Now())
 		deployRoute := "token"
@@ -945,6 +952,10 @@ func (m Model) executeRunnerTargetWizardAction() (tea.Model, tea.Cmd) {
 		m.CloseWizard()
 		return m, m.deployRunnerTargetAutoWorkflowPush(target, stager.ID, branchName, workflowPath, workflowYAML, dwellTime, sshState)
 	case RunnerTargetActionCopyWorkflow:
+		if err := validateRunnerTargetWorkflowLabels(target); err != nil {
+			m.AddOutput("error", err.Error())
+			return m, nil
+		}
 		workflowPath := runnerTargetWorkflowPath()
 		stager, script, err := m.prepareRunnerTargetPayload(target, m.runnerTargetCallbackMetadata(target, workflowPath, "", "manual"))
 		if err != nil {
@@ -1082,9 +1093,9 @@ func runnerTargetWorkflowJobName() string {
 }
 
 func buildRunnerTargetCallbackWorkflow(target *RunnerTargetSelection, script string) string {
-	labels := target.LabelSet
-	if len(labels) == 0 {
-		labels = []string{"self-hosted"}
+	labels, err := runnerTargetWorkflowLabels(target)
+	if err != nil {
+		return ""
 	}
 
 	var b strings.Builder
@@ -1095,7 +1106,7 @@ func buildRunnerTargetCallbackWorkflow(target *RunnerTargetSelection, script str
 	b.WriteString("  " + runnerTargetWorkflowJobName() + ":\n")
 	b.WriteString("    runs-on:\n")
 	for _, label := range labels {
-		fmt.Fprintf(&b, "      - %s\n", label)
+		fmt.Fprintf(&b, "      - %s\n", strconv.Quote(label))
 	}
 	b.WriteString("    permissions:\n")
 	b.WriteString("      contents: read\n")
@@ -1115,4 +1126,33 @@ func buildRunnerTargetCallbackWorkflow(target *RunnerTargetSelection, script str
 		b.WriteString("          " + line + "\n")
 	}
 	return b.String()
+}
+
+func validateRunnerTargetWorkflowLabels(target *RunnerTargetSelection) error {
+	_, err := runnerTargetWorkflowLabels(target)
+	return err
+}
+
+func runnerTargetWorkflowLabels(target *RunnerTargetSelection) ([]string, error) {
+	if target == nil {
+		return []string{"self-hosted"}, nil
+	}
+	labels := make([]string, 0, len(target.LabelSet))
+	for _, raw := range target.LabelSet {
+		label := strings.TrimSpace(raw)
+		if label == "" {
+			continue
+		}
+		if !runnerTargetStaticLabelPattern.MatchString(label) {
+			return nil, fmt.Errorf("runner label %q is not safe for generated YAML; copy/edit the workflow manually", label)
+		}
+		labels = append(labels, label)
+	}
+	if len(labels) > 0 {
+		return labels, nil
+	}
+	if len(target.DynamicLabelSet) > 0 {
+		return nil, fmt.Errorf("runner target uses only dynamic labels; copy/edit the workflow manually")
+	}
+	return []string{"self-hosted"}, nil
 }

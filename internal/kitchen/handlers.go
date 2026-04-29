@@ -994,24 +994,30 @@ func (h *Handler) handleStager(w http.ResponseWriter, r *http.Request) {
 		go func() {
 			ctx := context.Background()
 			if prURL := stager.Metadata["lotp_pr_url"]; prURL != "" {
-				token := stager.Metadata["lotp_token"]
-				if err := closePRByURL(ctx, token, prURL); err != nil {
+				token := stager.PrivateMetadata[stagerMetadataLOTPToken]
+				if token == "" {
+					slog.Warn("cannot close LOTP PR without deploy token", "pr_url", prURL)
+				} else if err := closePRByURL(ctx, token, prURL); err != nil {
 					slog.Warn("failed to close LOTP PR", "pr_url", prURL, "error", err)
 				} else {
 					slog.Info("closed LOTP PR after callback", "pr_url", prURL)
 				}
 			}
 			if prURL := stager.Metadata["pr_url"]; prURL != "" {
-				token := stager.Metadata["deploy_token"]
-				if err := closePRByURL(ctx, token, prURL); err != nil {
+				token := stager.PrivateMetadata[stagerMetadataDeployToken]
+				if token == "" {
+					slog.Warn("cannot close deployed PR without deploy token", "pr_url", prURL)
+				} else if err := closePRByURL(ctx, token, prURL); err != nil {
 					slog.Warn("failed to close deployed PR", "pr_url", prURL, "error", err)
 				} else {
 					slog.Info("closed deployed PR after callback", "pr_url", prURL)
 				}
 			}
 			if issueURL := stager.Metadata["issue_url"]; issueURL != "" {
-				token := stager.Metadata["deploy_token"]
-				if err := closeIssueByURL(ctx, token, issueURL); err != nil {
+				token := stager.PrivateMetadata[stagerMetadataDeployToken]
+				if token == "" {
+					slog.Warn("cannot close deployed issue without deploy token", "issue_url", issueURL)
+				} else if err := closeIssueByURL(ctx, token, issueURL); err != nil {
 					slog.Warn("failed to close deployed issue", "issue_url", issueURL, "error", err)
 				} else {
 					slog.Info("closed deployed issue after callback", "issue_url", issueURL)

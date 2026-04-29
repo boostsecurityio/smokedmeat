@@ -5,8 +5,10 @@ package kitchen
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -1176,7 +1178,7 @@ func (c *gitHubClient) deployLOTP(ctx context.Context, vuln *VulnerabilityInfo, 
 	}
 
 	if lotpTool == "" {
-		return "", fmt.Errorf("LOTP tool not specified — select a vulnerability with lotp_tool metadata")
+		return "", fmt.Errorf("LOTP tool not specified - select a vulnerability with lotp_tool metadata")
 	}
 
 	generatedFiles := lotp.GenerateFiles(lotpTool, lotpTargets, callbackURL)
@@ -1329,7 +1331,15 @@ func (c *gitHubClient) deploySelfHostedCallbackPR(ctx context.Context, repoFullN
 }
 
 func generateRunnerTargetBranchName(now time.Time) string {
-	return fmt.Sprintf("smokedmeat-runner-%d", now.Unix())
+	return fmt.Sprintf("smokedmeat-runner-%d-%s", now.Unix(), runnerTargetBranchSuffix(now))
+}
+
+func runnerTargetBranchSuffix(now time.Time) string {
+	var buf [2]byte
+	if _, err := rand.Read(buf[:]); err == nil {
+		return hex.EncodeToString(buf[:])
+	}
+	return fmt.Sprintf("%04x", now.Nanosecond()&0xffff)
 }
 
 func (c *gitHubClient) deploySelfHostedWorkflowPush(ctx context.Context, repoFullName, branchName, path, content, title string) (branchNameOut, branchURL string, err error) {
@@ -1667,10 +1677,11 @@ func (h *Handler) handleGitHubDeployPR(w http.ResponseWriter, r *http.Request) {
 	h.recordObservedCapability(req.Token, req.Vuln.Repository, deployCapabilityPR, nil)
 
 	if req.StagerID != "" && autoClose {
-		stager := h.stagerStore.UpdateMetadata(req.StagerID, map[string]string{
-			"pr_url":       prURL,
-			"deploy_token": req.Token,
-		})
+		stager := h.stagerStore.UpdateMetadataWithPrivate(
+			req.StagerID,
+			map[string]string{"pr_url": prURL},
+			map[string]string{stagerMetadataDeployToken: req.Token},
+		)
 		h.persistStager(stager)
 	}
 
@@ -1704,10 +1715,11 @@ func (h *Handler) handleGitHubDeployIssue(w http.ResponseWriter, r *http.Request
 	h.recordObservedCapability(req.Token, req.Vuln.Repository, deployCapabilityIssue, nil)
 
 	if req.StagerID != "" && autoClose {
-		stager := h.stagerStore.UpdateMetadata(req.StagerID, map[string]string{
-			"issue_url":    issueURL,
-			"deploy_token": req.Token,
-		})
+		stager := h.stagerStore.UpdateMetadataWithPrivate(
+			req.StagerID,
+			map[string]string{"issue_url": issueURL},
+			map[string]string{stagerMetadataDeployToken: req.Token},
+		)
 		h.persistStager(stager)
 	}
 
@@ -1741,16 +1753,18 @@ func (h *Handler) handleGitHubDeployComment(w http.ResponseWriter, r *http.Reque
 	h.recordObservedCapability(req.Token, req.Vuln.Repository, commentObservedCapability(req.Target), nil)
 
 	if req.StagerID != "" && autoClose && (result.CreatedIssueURL != "" || result.CreatedPRURL != "") {
-		metadata := map[string]string{
-			"deploy_token": req.Token,
-		}
+		metadata := map[string]string{}
 		if result.CreatedIssueURL != "" {
 			metadata["issue_url"] = result.CreatedIssueURL
 		}
 		if result.CreatedPRURL != "" {
 			metadata["pr_url"] = result.CreatedPRURL
 		}
-		stager := h.stagerStore.UpdateMetadata(req.StagerID, metadata)
+		stager := h.stagerStore.UpdateMetadataWithPrivate(
+			req.StagerID,
+			metadata,
+			map[string]string{stagerMetadataDeployToken: req.Token},
+		)
 		h.persistStager(stager)
 	}
 
@@ -1795,10 +1809,11 @@ func (h *Handler) handleGitHubDeployLOTP(w http.ResponseWriter, r *http.Request)
 	h.recordObservedCapability(req.Token, repoName, deployCapabilityLOTP, nil)
 
 	if req.StagerID != "" {
-		stager := h.stagerStore.UpdateMetadata(req.StagerID, map[string]string{
-			"lotp_pr_url": prURL,
-			"lotp_token":  req.Token,
-		})
+		stager := h.stagerStore.UpdateMetadataWithPrivate(
+			req.StagerID,
+			map[string]string{"lotp_pr_url": prURL},
+			map[string]string{stagerMetadataLOTPToken: req.Token},
+		)
 		h.persistStager(stager)
 	}
 
@@ -1833,7 +1848,6 @@ func (h *Handler) handleGitHubDeploySelfHostedCallbackPR(w http.ResponseWriter, 
 	if req.StagerID != "" {
 		stager := h.stagerStore.UpdateMetadata(req.StagerID, map[string]string{
 			"workflow_pr_url": prURL,
-			"deploy_token":    req.Token,
 		})
 		h.persistStager(stager)
 	}
@@ -1869,7 +1883,6 @@ func (h *Handler) handleGitHubDeploySelfHostedWorkflowPush(w http.ResponseWriter
 		stager := h.stagerStore.UpdateMetadata(req.StagerID, map[string]string{
 			"workflow_branch":     branchName,
 			"workflow_branch_url": branchURL,
-			"deploy_token":        req.Token,
 		})
 		h.persistStager(stager)
 	}

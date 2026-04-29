@@ -1559,6 +1559,9 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.focus != FocusInput || m.input.Value() == "" {
 			if m.phase == PhasePostExploit {
 				m.dismissKnownDwellAgents()
+				if m.activeAgent != nil {
+					m.clearSessionContext(m.activeAgent.ID)
+				}
 				m.activeAgent = nil
 				m.dwellMode = false
 				m.jobDeadline = time.Time{}

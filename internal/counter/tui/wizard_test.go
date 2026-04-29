@@ -437,6 +437,77 @@ func TestExecuteRunnerTargetWizardAction_AutoWorkflowPushUsesSSHWhenAvailable(t 
 	assert.Empty(t, mock.lastDeploySelfHostedWorkflowReq.RepoName)
 }
 
+func TestBuildRunnerTargetCallbackWorkflow_MixedDynamicLabelsOmitDynamic(t *testing.T) {
+	target := &RunnerTargetSelection{
+		Repository:      "acme/api",
+		LabelSet:        []string{"self-hosted", "linux", "x64"},
+		DynamicLabelSet: []string{"${{ needs.bootstrap.outputs.runner_label }}"},
+	}
+
+	workflow := buildRunnerTargetCallbackWorkflow(target, "echo callback")
+
+	assert.Contains(t, workflow, `      - "self-hosted"`)
+	assert.Contains(t, workflow, `      - "linux"`)
+	assert.Contains(t, workflow, `      - "x64"`)
+	assert.NotContains(t, workflow, "needs.bootstrap.outputs.runner_label")
+}
+
+func TestExecuteRunnerTargetWizardAction_DynamicOnlyLabelsBlockGeneratedWorkflow(t *testing.T) {
+	mock := &mockKitchenClient{
+		registerCallbackResp: &counter.RegisterCallbackResponse{},
+	}
+	m := newModelForWizardDeploy(t, mock)
+	m.wizard.Reset()
+	m.wizard.Kind = WizardKindRunnerTarget
+	m.wizard.Step = 3
+	m.wizard.RunnerTargetAction = RunnerTargetActionAutoWorkflowPush
+	m.tokenInfo = &TokenInfo{Value: "ghp_test", Type: TokenTypeClassicPAT, Scopes: []string{"repo", "workflow"}}
+	m.wizard.Preflight = &counter.DeployPreflightResponse{
+		Capabilities: map[string]counter.DeployPreflightCapability{
+			deployCapabilityWorkflowPush: {State: deployStatePass},
+		},
+	}
+	m.wizard.SelectedRunnerTarget = &RunnerTargetSelection{
+		Repository:      "acme/api",
+		LabelDisplay:    "dynamic",
+		DynamicLabelSet: []string{"${{ needs.bootstrap.outputs.runner_label }}"},
+	}
+
+	result, cmd := m.executeRunnerTargetWizardAction()
+
+	model := result.(Model)
+	assert.Nil(t, cmd)
+	assert.Equal(t, PhaseWizard, model.phase)
+	assert.Empty(t, mock.lastRegisterCallbackID)
+	require.NotEmpty(t, model.output)
+	assert.Contains(t, model.output[len(model.output)-1].Content, "uses only dynamic labels")
+}
+
+func TestExecuteRunnerTargetWizardAction_UnsafeStaticLabelBlocksGeneratedWorkflow(t *testing.T) {
+	mock := &mockKitchenClient{
+		registerCallbackResp: &counter.RegisterCallbackResponse{},
+	}
+	m := newModelForWizardDeploy(t, mock)
+	m.wizard.Reset()
+	m.wizard.Kind = WizardKindRunnerTarget
+	m.wizard.Step = 3
+	m.wizard.RunnerTargetAction = RunnerTargetActionCopyWorkflow
+	m.wizard.SelectedRunnerTarget = &RunnerTargetSelection{
+		Repository:   "acme/api",
+		LabelDisplay: "unsafe",
+		LabelSet:     []string{"self-hosted", "linux: x64"},
+	}
+
+	result, cmd := m.executeRunnerTargetWizardAction()
+
+	model := result.(Model)
+	assert.Nil(t, cmd)
+	assert.Equal(t, PhaseWizard, model.phase)
+	assert.Empty(t, mock.lastRegisterCallbackID)
+	require.NotEmpty(t, model.output)
+	assert.Contains(t, model.output[len(model.output)-1].Content, "not safe for generated YAML")
+}
+
 func TestExecuteWizardDeployment_Comment_InvalidIssueNum(t *testing.T) {
 	mock := &mockKitchenClient{}
 	m := newModelForWizardDeploy(t, mock)

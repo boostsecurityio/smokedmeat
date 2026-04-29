@@ -335,7 +335,7 @@ func (m Model) handleLootSync(msg LootSyncMsg) (tea.Model, tea.Cmd) {
 
 func collectedSecretFromLootSyncEntry(entry counter.LootSyncEntry) CollectedSecret {
 	origin := strings.TrimSpace(entry.Origin)
-	expressOrigin := origin == "" || origin == "express"
+	expressOrigin := origin == "express"
 	agentID := strings.TrimSpace(entry.AgentID)
 	if expressOrigin && len(agentID) > 8 {
 		agentID = agentID[:8]

@@ -163,9 +163,10 @@ func callbackMetadataForVulnerability(vuln *Vulnerability) map[string]string {
 		return nil
 	}
 	return map[string]string{
-		"repository": vuln.Repository,
-		"workflow":   vuln.Workflow,
-		"job":        vuln.Job,
+		"repository":       vuln.Repository,
+		"workflow":         vuln.Workflow,
+		"job":              vuln.Job,
+		"persistence_mode": "resident",
 	}
 }
 

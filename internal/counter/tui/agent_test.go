@@ -170,6 +170,33 @@ func TestHandleExpressData_BackfillsActiveAgentContext(t *testing.T) {
 	assert.Equal(t, "sync", model.SelectedSession().Job)
 }
 
+func TestClearSessionContext_RemovesRepoWorkflowJobForAgent(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.sessions = []Session{
+		{
+			AgentID:  "agt-1",
+			Repo:     "acme/api",
+			Workflow: ".github/workflows/deploy.yml",
+			Job:      "deploy",
+		},
+		{
+			AgentID:  "agt-2",
+			Repo:     "acme/other",
+			Workflow: ".github/workflows/build.yml",
+			Job:      "build",
+		},
+	}
+
+	m.clearSessionContext("agt-1")
+
+	assert.Empty(t, m.sessions[0].Repo)
+	assert.Empty(t, m.sessions[0].Workflow)
+	assert.Empty(t, m.sessions[0].Job)
+	assert.Equal(t, "acme/other", m.sessions[1].Repo)
+	assert.Equal(t, ".github/workflows/build.yml", m.sessions[1].Workflow)
+	assert.Equal(t, "build", m.sessions[1].Job)
+}
+
 func TestHandleExpressData_TokenPermissions(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhasePostExploit

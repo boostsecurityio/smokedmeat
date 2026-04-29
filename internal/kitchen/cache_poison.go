@@ -106,6 +106,7 @@ func (h *Handler) handlePrepareCachePoison(w http.ResponseWriter, r *http.Reques
 			"job":                req.Victim.Job,
 			"cache_poison_stage": "victim",
 			"callback_label":     fmt.Sprintf("Cache poison victim · %s", req.Victim.Workflow),
+			"persistence_mode":   CallbackModeResident,
 		},
 	}
 	if err := h.registerStager(victim); err != nil {
@@ -131,6 +132,7 @@ func (h *Handler) handlePrepareCachePoison(w http.ResponseWriter, r *http.Reques
 			"cache_poison_victim_strategy": req.Victim.Strategy,
 			"cache_poison_victim_consumer": req.Victim.ConsumerLabel,
 			"callback_label":               fmt.Sprintf("Cache poison writer · %s", req.WriterWorkflow),
+			"persistence_mode":             CallbackModeResident,
 		},
 	}
 	if err := h.registerStager(writer); err != nil {

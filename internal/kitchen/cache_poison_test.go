@@ -77,8 +77,12 @@ func TestHandler_PrepareCachePoison_RegistersWriterAndVictim(t *testing.T) {
 	assert.Equal(t, "writer-stg", resp.WriterCallback.ID)
 	assert.True(t, resp.WriterCallback.Persistent)
 	assert.True(t, resp.VictimCallback.Persistent)
-	require.NotNil(t, h.stagerStore.Get("writer-stg"))
-	require.NotNil(t, h.stagerStore.Get(resp.VictimStagerID))
+	writer := h.stagerStore.Get("writer-stg")
+	victim := h.stagerStore.Get(resp.VictimStagerID)
+	require.NotNil(t, writer)
+	require.NotNil(t, victim)
+	assert.Equal(t, CallbackModeResident, writer.Metadata["persistence_mode"])
+	assert.Equal(t, CallbackModeResident, victim.Metadata["persistence_mode"])
 }
 
 func TestHandler_PrepareCachePoison_EncodesDeploymentConfigInKitchen(t *testing.T) {

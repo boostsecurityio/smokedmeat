@@ -148,6 +148,12 @@ func TestParseRepoFullName_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestGenerateRunnerTargetBranchNameIncludesRandomSuffix(t *testing.T) {
+	branch := generateRunnerTargetBranchName(time.Unix(1700000000, 0))
+
+	assert.Regexp(t, `^smokedmeat-runner-1700000000-[0-9a-f]{4}$`, branch)
+}
+
 func TestPurgeActionsCaches_DeletesMatchingPrefixOnDefaultBranch(t *testing.T) {
 	var deletedIDs []int64
 	mux := http.NewServeMux()
@@ -519,7 +525,7 @@ func TestParsePRURL(t *testing.T) {
 			wantNumber: 99,
 		},
 		{
-			name:    "not a PR URL — issues path",
+			name:    "not a PR URL - issues path",
 			url:     "https://github.com/acme/api/issues/42",
 			wantErr: true,
 		},
@@ -579,7 +585,7 @@ func TestParseIssueURL(t *testing.T) {
 			wantNumber: 7,
 		},
 		{
-			name:    "not an issue URL — pull path",
+			name:    "not an issue URL - pull path",
 			url:     "https://github.com/acme/api/pull/42",
 			wantErr: true,
 		},
@@ -1879,7 +1885,11 @@ func TestHandlerDeployPR_StoresStagerMetadata(t *testing.T) {
 	stager := h.stagerStore.Get("stg1")
 	require.NotNil(t, stager)
 	assert.Equal(t, "https://github.com/acme/api/pull/1", stager.Metadata["pr_url"])
-	assert.Equal(t, "ghp_test", stager.Metadata["deploy_token"])
+	assert.Empty(t, stager.Metadata["deploy_token"])
+	assert.Equal(t, "ghp_test", stager.PrivateMetadata["deploy_token"])
+
+	summary := callbackSummary(stager)
+	assert.Empty(t, summary.Metadata["deploy_token"])
 }
 
 func TestHandlerDeployLOTP_Success(t *testing.T) {
