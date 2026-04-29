@@ -1,6 +1,6 @@
 # SmokedMeat Roadmap
 
-Last updated: 2026-04-21
+Last updated: 2026-04-29
 
 ## Planning Rules
 
@@ -82,7 +82,7 @@ The phase breakdown in [tasks/self-hosted-runner-enumeration-and-persistence.md]
 | P4 | Counter / Kitchen boundary refactor | Move client-neutral logic toward Kitchen and tighten shared contracts. | Task: [tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
 | P4 | Shared analysis progress constants and payload contract | Keep the Kitchen to Counter protocol in one place so client and server cannot drift. | Ref: [tasks/counter-kitchen-boundary-refactor.md](tasks/counter-kitchen-boundary-refactor.md) |
 | P4 | Embedded shell mode and native Go E2E | Replace the tmux shell boundary with an in-app shell and stronger native E2E coverage. | Task: [tasks/embedded-shell-and-native-go-e2e.md](tasks/embedded-shell-and-native-go-e2e.md) |
-| P4 | Interactive agent terminal via Kitchen | Move from one-shot exec toward a real PTY-backed shell. | Task: [tasks/interactive-agent-terminal-via-kitchen.md](tasks/interactive-agent-terminal-via-kitchen.md) |
+| P4 | Interactive agent terminal via Kitchen | Move from one-shot exec toward an sshx-like streamed PTY session with attach/detach, resize, reconnect handling, and a future path to read-only observers. | Task: [tasks/interactive-agent-terminal-via-kitchen.md](tasks/interactive-agent-terminal-via-kitchen.md) |
 | P4 | Web operator UI | Add a browser-based operator UI after the backend boundary is cleaner. | Task: [tasks/web-operator-ui-and-kitchen-boundary.md](tasks/web-operator-ui-and-kitchen-boundary.md) |
 | P5 | Walkthrough recording and replay | Follow-on work once embedded shell and native Go E2E are stable. | Ref: [tasks/embedded-shell-and-native-go-e2e.md](tasks/embedded-shell-and-native-go-e2e.md) |
 | P5 | Incremental poutine result streaming | Preserve per-repo `PackageInsights` so Kitchen can surface findings and workflows earlier instead of waiting for finalization. | Idea |
