@@ -996,7 +996,7 @@ func (h *Handler) handleStager(w http.ResponseWriter, r *http.Request) {
 			if prURL := stager.Metadata["lotp_pr_url"]; prURL != "" {
 				token := stager.PrivateMetadata[stagerMetadataLOTPToken]
 				if token == "" {
-					slog.Warn("cannot close LOTP PR without deploy token", "pr_url", prURL)
+					slog.Warn("cannot close LOTP PR without LOTP token", "pr_url", prURL)
 				} else if err := closePRByURL(ctx, token, prURL); err != nil {
 					slog.Warn("failed to close LOTP PR", "pr_url", prURL, "error", err)
 				} else {

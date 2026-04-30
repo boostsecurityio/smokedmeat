@@ -154,6 +154,72 @@ func TestGenerateRunnerTargetBranchNameIncludesRandomSuffix(t *testing.T) {
 	assert.Regexp(t, `^smokedmeat-runner-1700000000-[0-9a-f]{4}$`, branch)
 }
 
+func TestDeploySelfHostedCallbackPR_UsesUniqueRunnerBranchName(t *testing.T) {
+	var branchName string
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /repos/{owner}/{repo}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"full_name":"%s/%s","default_branch":"main","owner":{"login":"%s"},"name":"%s","permissions":{"push":true}}`, r.PathValue("owner"), r.PathValue("repo"), r.PathValue("owner"), r.PathValue("repo"))
+	})
+	mux.HandleFunc("GET /repos/{owner}/{repo}/git/ref/{ref...}", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ref":"refs/heads/main","object":{"sha":"abc123def456","type":"commit"}}`)
+	})
+	mux.HandleFunc("POST /repos/{owner}/{repo}/git/refs", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Ref string `json:"ref"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		require.Regexp(t, `^refs/heads/smokedmeat-runner-\d+-[0-9a-f]{4}$`, body.Ref)
+		branchName = strings.TrimPrefix(body.Ref, "refs/heads/")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintf(w, `{"ref":%q,"object":{"sha":"abc123def456"}}`, body.Ref)
+	})
+	mux.HandleFunc("GET /repos/{owner}/{repo}/contents/{path...}", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"message":"Not Found"}`)
+	})
+	mux.HandleFunc("PUT /repos/{owner}/{repo}/contents/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Branch string `json:"branch"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, branchName, body.Branch)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"content":{"sha":"newsha123"}}`)
+	})
+	mux.HandleFunc("POST /repos/{owner}/{repo}/pulls", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Head string `json:"head"`
+			Base string `json:"base"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, branchName, body.Head)
+		assert.Equal(t, "main", body.Base)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintf(w, `{"html_url":"https://github.com/%s/%s/pull/1","number":1}`, r.PathValue("owner"), r.PathValue("repo"))
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	baseURL, _ := url.Parse(srv.URL + "/")
+	tc := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test-token"}))
+	client := github.NewClient(tc)
+	client.BaseURL = baseURL
+	ghClient := &gitHubClient{client: client, token: "test-token"}
+
+	prURL, err := ghClient.deploySelfHostedCallbackPR(context.Background(), "acme/api", ".github/workflows/smokedmeat-self-hosted.yml", "name: test\n", "ci: test", "body", false)
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://github.com/acme/api/pull/1", prURL)
+	assert.NotEmpty(t, branchName)
+}
+
 func TestPurgeActionsCaches_DeletesMatchingPrefixOnDefaultBranch(t *testing.T) {
 	var deletedIDs []int64
 	mux := http.NewServeMux()

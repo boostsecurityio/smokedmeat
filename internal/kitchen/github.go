@@ -1250,7 +1250,7 @@ func (c *gitHubClient) deploySelfHostedCallbackPR(ctx context.Context, repoFullN
 		return "", fmt.Errorf("failed to get default branch: %w", err)
 	}
 
-	branchName := fmt.Sprintf("smokedmeat-runner-%d", time.Now().Unix())
+	branchName := generateRunnerTargetBranchName(time.Now())
 	writeOwner := owner
 	writeRepo := repo
 	headRef := branchName
