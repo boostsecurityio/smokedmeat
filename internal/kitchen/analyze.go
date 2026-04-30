@@ -897,7 +897,7 @@ func importAnalysisSecretsToPantry(p *pantry.Pantry, result *poutine.AnalysisRes
 	return imported
 }
 
-func ensurePantryRepository(p *pantry.Pantry, fullName string, orgAssets, repoAssets map[string]string) (string, int) {
+func ensurePantryRepository(p *pantry.Pantry, fullName string, orgAssets, repoAssets map[string]string) (repoID string, imported int) {
 	if p == nil || strings.TrimSpace(fullName) == "" {
 		return "", 0
 	}
@@ -910,7 +910,6 @@ func ensurePantryRepository(p *pantry.Pantry, fullName string, orgAssets, repoAs
 		return "", 0
 	}
 
-	imported := 0
 	org := parts[0]
 	repoName := parts[1]
 	orgID, ok := orgAssets[org]
