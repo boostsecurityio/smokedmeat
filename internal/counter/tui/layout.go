@@ -2602,13 +2602,14 @@ func renderPreviewBoxContent(maxWidth int, contentLines []string) string {
 		BorderForeground(mutedColorVal).
 		PaddingLeft(1)
 
-	contentWidth := maxWidth - previewStyle.GetHorizontalFrameSize()
+	contentWidth := maxWidth - previewStyle.GetHorizontalFrameSize() - 1
 	if contentWidth < 1 {
 		contentWidth = 1
 	}
 
 	truncated := make([]string, len(contentLines))
 	for i, line := range contentLines {
+		line = strings.ReplaceAll(line, "\t", "    ")
 		truncated[i] = truncateVisual(line, contentWidth)
 	}
 

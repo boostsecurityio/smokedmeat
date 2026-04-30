@@ -13,6 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/boostsecurityio/smokedmeat/internal/lotp"
 	"github.com/boostsecurityio/smokedmeat/internal/rye"
 )
 
@@ -123,11 +124,22 @@ func (m Model) vulnerabilityCanAttemptPersistence(vuln *Vulnerability) bool {
 	if len(vuln.GateTriggers) > 0 {
 		return false
 	}
+	if vulnerabilitySupportsLOTPPersistence(vuln) {
+		return true
+	}
 	injCtx, ok := payloadInjectionContextForVuln(vuln)
 	if !ok {
 		return false
 	}
 	return injCtx.Language == rye.LangBash
+}
+
+func vulnerabilitySupportsLOTPPersistence(vuln *Vulnerability) bool {
+	if vuln == nil || vuln.RuleID != "untrusted_checkout_exec" {
+		return false
+	}
+	status := lotp.AutoDeployStatusFor(vuln.LOTPTool, vuln.LOTPAction)
+	return status.Supported
 }
 
 func (m *Model) toggleWizardPersistenceAttempt() {

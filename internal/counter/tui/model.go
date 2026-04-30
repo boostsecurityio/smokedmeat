@@ -657,6 +657,9 @@ func (m *Model) extractVulnerabilitiesFromPantry() []Vulnerability {
 	var vulns []Vulnerability
 
 	for _, pv := range pantryVulns {
+		if pantry.IsSelfHostedRunnerAnalyzeOnlyRule(pv.RuleID) {
+			continue
+		}
 		cachePoisonVictims := propertyVictimCandidates(pv.Properties, "cache_poison_victims")
 		exploitSupported, hasExploitSupport := pv.Properties["exploit_supported"].(bool)
 		exploitSupportReason := ""
@@ -1136,6 +1139,18 @@ func (s importSummary) String() string {
 	return strings.Join(parts, ", ")
 }
 
+func (s *importSummary) add(other importSummary) {
+	s.Orgs += other.Orgs
+	s.Repos += other.Repos
+	s.Workflows += other.Workflows
+	s.Jobs += other.Jobs
+	s.Vulns += other.Vulns
+	s.Secrets += other.Secrets
+	s.Tokens += other.Tokens
+	s.Cloud += other.Cloud
+	s.Total += other.Total
+}
+
 func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSummary {
 	summary := importSummary{}
 	if m.pantry == nil {
@@ -1290,8 +1305,9 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 	}
 
 	if len(result.Findings) == 0 {
-		summary.Total = summary.Orgs + summary.Repos + summary.Workflows + summary.Jobs + summary.Secrets + summary.Tokens
 		summary.Total += pantry.SyncObservedSelfHostedRunnerTargets(m.pantry)
+		summary.add(m.importAnalysisSecretsToPantry(result, orgAssets, repoAssets))
+		summary.Total += summary.Orgs + summary.Repos + summary.Workflows + summary.Jobs + summary.Secrets + summary.Tokens
 		return summary
 	}
 
@@ -1387,6 +1403,11 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 			purl = fmt.Sprintf("pkg:github/%s/%s", org, repoName)
 		}
 		vuln := pantry.NewVulnerability(f.RuleID, purl, f.Workflow, f.Line, poutine.FindingVariantDiscriminator(f))
+		if pantry.IsSelfHostedRunnerAnalyzeOnlyRule(f.RuleID) {
+			m.markSelfHostedFindingJob(jobID)
+			_ = m.pantry.RemoveAsset(vuln.ID)
+			continue
+		}
 		vuln.Provider = "github"
 		vuln.State = pantry.StateHighValue
 		vuln.Severity = f.Severity
@@ -1463,9 +1484,104 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 		}
 	}
 
-	summary.Total = summary.Orgs + summary.Repos + summary.Workflows + summary.Jobs + summary.Vulns + summary.Secrets + summary.Tokens
 	summary.Total += pantry.SyncObservedSelfHostedRunnerTargets(m.pantry)
+	summary.add(m.importAnalysisSecretsToPantry(result, orgAssets, repoAssets))
+	summary.Total += summary.Orgs + summary.Repos + summary.Workflows + summary.Jobs + summary.Vulns + summary.Secrets + summary.Tokens
 	return summary
+}
+
+func (m *Model) importAnalysisSecretsToPantry(result *poutine.AnalysisResult, orgAssets, repoAssets map[string]string) importSummary {
+	summary := importSummary{}
+	if result == nil || len(result.SecretFindings) == 0 || m.pantry == nil {
+		return summary
+	}
+	for _, sf := range result.SecretFindings {
+		repoID, created := m.ensurePantryRepository(strings.TrimSpace(sf.Repository), orgAssets, repoAssets)
+		summary.add(created)
+
+		name := fmt.Sprintf("%s (%s:%d)", sf.Description, sf.File, sf.StartLine)
+		secret := pantry.NewSecret(name, repoID, "gitleaks")
+		secret.State = pantry.StateHighValue
+		secret.SetProperty("rule_id", sf.RuleID)
+		secret.SetProperty("description", sf.Description)
+		secret.SetProperty("file", sf.File)
+		secret.SetProperty("line", sf.StartLine)
+		secret.SetProperty("fingerprint", sf.Fingerprint)
+		secret.SetProperty("inferred_type", gitleaksRuleToType(sf.RuleID))
+		secret.SetProperty("source", "gitleaks")
+
+		existed := m.pantry.HasAsset(secret.ID)
+		if err := m.pantry.AddAsset(secret); err != nil {
+			continue
+		}
+		if !existed {
+			summary.Secrets++
+		}
+		if repoID != "" {
+			_ = m.pantry.AddRelationship(repoID, secret.ID, pantry.Exposes("gitleaks", sf.RuleID))
+		}
+	}
+	return summary
+}
+
+func (m *Model) ensurePantryRepository(fullName string, orgAssets, repoAssets map[string]string) (string, importSummary) {
+	summary := importSummary{}
+	fullName = strings.TrimSpace(fullName)
+	if fullName == "" || m.pantry == nil {
+		return "", summary
+	}
+	if repoID, ok := repoAssets[fullName]; ok {
+		return repoID, summary
+	}
+	parts := strings.Split(fullName, "/")
+	if len(parts) < 2 {
+		return "", summary
+	}
+	org := parts[0]
+	repoName := parts[1]
+
+	orgID, ok := orgAssets[org]
+	if !ok {
+		orgAsset := pantry.NewOrganization(org, "github")
+		existed := m.pantry.HasAsset(orgAsset.ID)
+		if err := m.pantry.AddAsset(orgAsset); err == nil {
+			orgID = orgAsset.ID
+			orgAssets[org] = orgID
+			if !existed {
+				summary.Orgs++
+			}
+		}
+	}
+
+	repo := pantry.NewRepository(org, repoName, "github")
+	repo.State = pantry.StateValidated
+	existed := m.pantry.HasAsset(repo.ID)
+	if err := m.pantry.AddAsset(repo); err != nil {
+		return "", summary
+	}
+	repoAssets[fullName] = repo.ID
+	if !existed {
+		summary.Repos++
+	}
+	if orgID != "" {
+		_ = m.pantry.AddRelationship(orgID, repo.ID, pantry.Contains())
+	}
+	return repo.ID, summary
+}
+
+func (m *Model) markSelfHostedFindingJob(jobID string) {
+	if jobID == "" || m.pantry == nil {
+		return
+	}
+	job, err := m.pantry.GetAsset(jobID)
+	if err != nil {
+		return
+	}
+	job.SetProperty("self_hosted", true)
+	if len(job.StringSliceProperty("runs_on")) == 0 {
+		job.SetProperty("runs_on", []string{"self-hosted"})
+	}
+	_ = m.pantry.AddAsset(job)
 }
 
 func (m *Model) importVulnerabilitiesToPantry(vulns []Vulnerability) importSummary {
@@ -1620,6 +1736,7 @@ func (m *Model) CloseWizard() {
 		m.wizard.Reset()
 	}
 	savedFocus := m.prevFocus
+	savedTreeFiltered := m.treeFiltered
 	if m.dwellMode && m.activeAgent != nil {
 		m.TransitionToPhase(PhasePostExploit)
 		m.view = ViewAgent
@@ -1627,6 +1744,10 @@ func (m *Model) CloseWizard() {
 		return
 	}
 	m.TransitionToPhase(PhaseRecon)
+	if m.treeFiltered != savedTreeFiltered {
+		m.treeFiltered = savedTreeFiltered
+		m.RebuildTree()
+	}
 	m.focus = savedFocus
 }
 

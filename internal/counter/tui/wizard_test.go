@@ -32,6 +32,15 @@ func newModelForWizardDeploy(t *testing.T, mock *mockKitchenClient) Model {
 func observedSelfHostedRunnerPantry(t *testing.T) *pantry.Pantry {
 	t.Helper()
 
+	p := observedSelfHostedJobPantry(t)
+	assert.Equal(t, 1, pantry.SyncObservedSelfHostedRunnerTargets(p))
+
+	return p
+}
+
+func observedSelfHostedJobPantry(t *testing.T) *pantry.Pantry {
+	t.Helper()
+
 	p := pantry.New()
 	repo := pantry.NewRepository("acme", "api", "github")
 	workflow := pantry.NewWorkflow(repo.ID, ".github/workflows/pr.yml")
@@ -44,7 +53,6 @@ func observedSelfHostedRunnerPantry(t *testing.T) *pantry.Pantry {
 	require.NoError(t, p.AddAsset(job))
 	require.NoError(t, p.AddRelationship(repo.ID, workflow.ID, pantry.Contains()))
 	require.NoError(t, p.AddRelationship(workflow.ID, job.ID, pantry.Contains()))
-	assert.Equal(t, 1, pantry.SyncObservedSelfHostedRunnerTargets(p))
 
 	return p
 }
@@ -159,6 +167,53 @@ func TestExecuteWizardDeployment_Comment_PrefersBashContext(t *testing.T) {
 func TestVulnerabilityCanAttemptPersistence_SelfHostedBashNoGate(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.pantry = observedSelfHostedRunnerPantry(t)
+
+	vuln := &Vulnerability{
+		Repository:  "acme/api",
+		Workflow:    ".github/workflows/pr.yml",
+		Job:         "build",
+		Context:     "issue_body",
+		BashContext: "bash_unquoted",
+	}
+
+	assert.True(t, m.vulnerabilityCanAttemptPersistence(vuln))
+}
+
+func TestVulnerabilityCanAttemptPersistence_SelfHostedLOTPMake(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.pantry = observedSelfHostedRunnerPantry(t)
+
+	vuln := &Vulnerability{
+		Repository: "acme/api",
+		Workflow:   ".github/workflows/pr.yml",
+		Job:        "build",
+		RuleID:     "untrusted_checkout_exec",
+		Context:    "untrusted_checkout",
+		LOTPTool:   "make",
+	}
+
+	assert.True(t, m.vulnerabilityCanAttemptPersistence(vuln))
+}
+
+func TestVulnerabilityCanAttemptPersistence_LOTPRequiresSelfHostedContext(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.pantry = pantry.New()
+
+	vuln := &Vulnerability{
+		Repository: "acme/api",
+		Workflow:   ".github/workflows/pr.yml",
+		Job:        "build",
+		RuleID:     "untrusted_checkout_exec",
+		Context:    "untrusted_checkout",
+		LOTPTool:   "make",
+	}
+
+	assert.False(t, m.vulnerabilityCanAttemptPersistence(vuln))
+}
+
+func TestVulnerabilityCanAttemptPersistence_UsesSelfHostedJobMetadataFallback(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.pantry = observedSelfHostedJobPantry(t)
 
 	vuln := &Vulnerability{
 		Repository:  "acme/api",
@@ -1023,6 +1078,20 @@ func TestWizardKeyMsg_Esc_Step1_ClosesWizard(t *testing.T) {
 	model := result.(Model)
 	assert.Nil(t, cmd)
 	assert.Equal(t, 1, model.wizard.Step, "Wizard should be reset (step back to 1)")
+}
+
+func TestWizardKeyMsg_Esc_Step1_PreservesTreeFilter(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWizard
+	m.wizard = &WizardState{Step: 1}
+	m.treeFiltered = true
+
+	result, cmd := m.handleWizardKeyMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	model := result.(Model)
+	assert.Nil(t, cmd)
+	assert.Equal(t, PhaseRecon, model.phase)
+	assert.True(t, model.treeFiltered)
 }
 
 func TestWizardKeyMsg_Esc_Step2_GoesBack(t *testing.T) {

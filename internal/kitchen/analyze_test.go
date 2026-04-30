@@ -1131,8 +1131,8 @@ func TestImportAnalysisToPantry_SetsExploitSupportMetadata(t *testing.T) {
 			{
 				Repository: "acme/api",
 				Workflow:   ".github/workflows/pr.yml",
-				RuleID:     "pr_runs_on_self_hosted",
-				Severity:   "critical",
+				RuleID:     "debug_enabled",
+				Severity:   "high",
 			},
 		},
 	}
@@ -1142,7 +1142,30 @@ func TestImportAnalysisToPantry_SetsExploitSupportMetadata(t *testing.T) {
 	vulns := h.Pantry().FindVulnerabilities()
 	require.Len(t, vulns, 1)
 	assert.Equal(t, false, vulns[0].Properties["exploit_supported"])
-	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", vulns[0].Properties["exploit_support_reason"])
+	assert.Equal(t, "This finding is analyze-only in v0.1.0. Exploit actions are only available for injection and pwn-request findings.", vulns[0].Properties["exploit_support_reason"])
+}
+
+func TestImportAnalysisToPantry_SkipsSelfHostedRunnerAnalyzeOnlyVuln(t *testing.T) {
+	h := NewHandlerWithPublisher(&mockPublisher{}, nil)
+	result := &poutine.AnalysisResult{
+		Success: true,
+		Findings: []poutine.Finding{
+			{
+				Repository: "acme/api",
+				Workflow:   ".github/workflows/pr.yml",
+				Job:        "build",
+				RuleID:     "pr_runs_on_self_hosted",
+				Severity:   "critical",
+			},
+		},
+	}
+
+	h.importAnalysisToPantry(result)
+
+	assert.Empty(t, h.Pantry().FindVulnerabilities())
+	targets := h.Pantry().GetAssetsByType(pantry.AssetSelfHostedRunner)
+	require.Len(t, targets, 1)
+	assert.Equal(t, []string{"build"}, targets[0].StringSliceProperty("observed_job_names"))
 }
 
 func TestImportAnalysisToPantry_CreatesSelfHostedRunnerTargets(t *testing.T) {
@@ -1181,6 +1204,40 @@ func TestImportAnalysisToPantry_CreatesSelfHostedRunnerTargets(t *testing.T) {
 	require.Len(t, targets, 1)
 	assert.Equal(t, []string{"self-hosted", "linux", "x64"}, targets[0].StringSliceProperty("label_set"))
 	assert.Equal(t, []string{"build"}, targets[0].StringSliceProperty("observed_job_names"))
+}
+
+func TestImportAnalysisToPantry_AttachesGitleaksSecretsToFindingRepo(t *testing.T) {
+	h := NewHandlerWithPublisher(&mockPublisher{}, nil)
+	result := &poutine.AnalysisResult{
+		Success: true,
+		Workflows: []poutine.WorkflowMeta{
+			{Repository: "acme/worker", Path: ".github/workflows/ci.yml"},
+		},
+		SecretFindings: []poutine.SecretFinding{
+			{
+				RuleID:      "private-key",
+				Description: "Private Key detected",
+				Repository:  "acme/newcleus-core-v3",
+				File:        "README.md",
+				StartLine:   12,
+				Secret:      "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----",
+			},
+		},
+	}
+
+	h.importAnalysisToPantry(result)
+
+	secrets := h.Pantry().GetAssetsByType(pantry.AssetSecret)
+	require.Len(t, secrets, 1)
+	assert.Equal(t, "Private Key detected (README.md:12)", secrets[0].Name)
+	assert.Equal(t, "private_key", secrets[0].Properties["inferred_type"])
+
+	edges := h.Pantry().AllRelationships()
+	assert.Contains(t, edges, pantry.Edge{
+		From:         "github:acme/newcleus-core-v3",
+		To:           secrets[0].ID,
+		Relationship: pantry.Exposes("gitleaks", "private-key"),
+	})
 }
 
 func TestImportAnalysisToPantry_PersistsBashContextBeforeExploitSupport(t *testing.T) {

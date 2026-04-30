@@ -15,6 +15,7 @@ func TestOmniboxKindLabel(t *testing.T) {
 	assert.Equal(t, "ORG", omniboxKindLabel(OmniboxResultOrg))
 	assert.Equal(t, "REPO", omniboxKindLabel(OmniboxResultRepo))
 	assert.Equal(t, "WORK", omniboxKindLabel(OmniboxResultWorkflow))
+	assert.Equal(t, "SH-RUN", omniboxKindLabel(OmniboxResultRunner))
 	assert.Equal(t, "VULN", omniboxKindLabel(OmniboxResultVuln))
 	assert.Equal(t, "LOOT", omniboxKindLabel(OmniboxResultLoot))
 }
@@ -43,6 +44,36 @@ func TestModel_SearchOmnibox_ReturnsRepoAndLootMatches(t *testing.T) {
 	require.Len(t, results, 2)
 	assert.ElementsMatch(t, []OmniboxResultKind{results[0].Kind, results[1].Kind}, []OmniboxResultKind{OmniboxResultRepo, OmniboxResultLoot})
 	assert.ElementsMatch(t, []string{results[0].Label, results[1].Label}, []string{"whooli/banana", "banana"})
+}
+
+func TestModel_SearchOmnibox_ReturnsSelfHostedRunnerMatches(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	root := &TreeNode{ID: "root", Expanded: true}
+	org := &TreeNode{ID: "org:whooli", Label: "whooli", Type: TreeNodeOrg, Expanded: true, Parent: root}
+	repo := &TreeNode{ID: "repo:whooli/newcleus-core-v3", Label: "newcleus-core-v3", Type: TreeNodeRepo, Expanded: true, Parent: org}
+	runner := &TreeNode{
+		ID:     "runner:linux-x64",
+		Label:  "linux-x64",
+		Type:   TreeNodeSelfHostedRunner,
+		Parent: repo,
+		Properties: map[string]interface{}{
+			"label_set":               []string{"self-hosted", "linux", "x64"},
+			"observed_workflow_paths": []string{".github/workflows/build.yml"},
+		},
+	}
+	root.Children = []*TreeNode{org}
+	org.Children = []*TreeNode{repo}
+	repo.Children = []*TreeNode{runner}
+	m.treeRoot = root
+	m.ReflattenTree()
+
+	results := m.searchOmnibox("shrunner linux")
+
+	require.Len(t, results, 1)
+	assert.Equal(t, OmniboxResultRunner, results[0].Kind)
+	assert.Equal(t, "[SH-RUNNER] linux-x64", results[0].Label)
+	assert.Equal(t, runner.ID, results[0].NodeID)
+	assert.Contains(t, results[0].Detail, "whooli/newcleus-core-v3")
 }
 
 func TestModel_SearchOmnibox_EmptyQueryBalancesKinds(t *testing.T) {

@@ -932,8 +932,8 @@ func TestImportAnalysis_RoundTrip_PreservesAnalyzeOnlySupportReason(t *testing.T
 				ID:         "V001",
 				Repository: "acme/api",
 				Workflow:   ".github/workflows/pr.yml",
-				RuleID:     "pr_runs_on_self_hosted",
-				Severity:   "critical",
+				RuleID:     "debug_enabled",
+				Severity:   "high",
 			},
 		},
 	}
@@ -942,7 +942,36 @@ func TestImportAnalysis_RoundTrip_PreservesAnalyzeOnlySupportReason(t *testing.T
 	vulns := m.extractVulnerabilitiesFromPantry()
 	require.Len(t, vulns, 1)
 	assert.False(t, vulns[0].ExploitSupported)
-	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", vulns[0].ExploitSupportReason)
+	assert.Equal(t, "This finding is analyze-only in v0.1.0. Exploit actions are only available for injection and pwn-request findings.", vulns[0].ExploitSupportReason)
+}
+
+func TestImportAnalysis_SkipsSelfHostedRunnerAnalyzeOnlyVuln(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+
+	result := &poutine.AnalysisResult{
+		Success:    true,
+		Target:     "acme/api",
+		TargetType: "repo",
+		Repository: "acme/api",
+		Findings: []poutine.Finding{
+			{
+				ID:         "V001",
+				Repository: "acme/api",
+				Workflow:   ".github/workflows/pr.yml",
+				Job:        "build",
+				RuleID:     "pr_runs_on_self_hosted",
+				Severity:   "critical",
+			},
+		},
+	}
+
+	m.importAnalysisToPantry(result)
+	assert.Empty(t, m.extractVulnerabilitiesFromPantry())
+	assert.Empty(t, m.pantry.FindVulnerabilities())
+
+	targets := m.pantry.GetAssetsByType(pantry.AssetSelfHostedRunner)
+	require.Len(t, targets, 1)
+	assert.Equal(t, []string{"build"}, targets[0].StringSliceProperty("observed_job_names"))
 }
 
 func TestImportAnalysisToPantry_CreatesSelfHostedRunnerTargets(t *testing.T) {

@@ -298,6 +298,12 @@ func BuildTreeFromPantry(p *pantry.Pantry) *TreeNode {
 						attached = true
 						break
 					}
+					if repoNode, exists := repoNodes[parentID]; exists {
+						node.Parent = repoNode
+						repoNode.Children = append(repoNode.Children, node)
+						attached = true
+						break
+					}
 				}
 			}
 			if attached {
@@ -312,6 +318,9 @@ func BuildTreeFromPantry(p *pantry.Pantry) *TreeNode {
 	}
 
 	for _, vuln := range vulns {
+		if pantry.IsSelfHostedRunnerAnalyzeOnlyRule(vuln.RuleID) {
+			continue
+		}
 		node := assetToTreeNode(vuln, 4)
 
 		attached := false

@@ -19,6 +19,7 @@ const (
 	OmniboxResultOrg      OmniboxResultKind = "org"
 	OmniboxResultRepo     OmniboxResultKind = "repo"
 	OmniboxResultWorkflow OmniboxResultKind = "workflow"
+	OmniboxResultRunner   OmniboxResultKind = "runner"
 	OmniboxResultVuln     OmniboxResultKind = "vuln"
 	OmniboxResultLoot     OmniboxResultKind = "loot"
 )
@@ -27,6 +28,7 @@ var omniboxEmptyOrder = []OmniboxResultKind{
 	OmniboxResultOrg,
 	OmniboxResultRepo,
 	OmniboxResultWorkflow,
+	OmniboxResultRunner,
 	OmniboxResultVuln,
 	OmniboxResultLoot,
 }
@@ -289,6 +291,17 @@ func (m *Model) buildOmniboxIndex() []OmniboxResult {
 				SearchText: strings.ToLower(node.Label + " " + repoPath),
 				NodeID:     node.ID,
 			})
+		case TreeNodeSelfHostedRunner:
+			repoPath := nearestTreePath(node, TreeNodeRepo)
+			detail := runnerTargetDetail(node)
+			appendItem(OmniboxResult{
+				Kind:       OmniboxResultRunner,
+				Label:      "[SH-RUNNER] " + node.Label,
+				Detail:     detail,
+				SearchText: strings.ToLower("sh-runner shrunner self-hosted runner " + node.Label + " " + repoPath + " " + detail),
+				NodeID:     node.ID,
+				TargetSpec: "repo:" + repoPath,
+			})
 		case TreeNodeVuln:
 			appendItem(OmniboxResult{
 				Kind:       OmniboxResultVuln,
@@ -368,6 +381,23 @@ func repoDetail(node *TreeNode) string {
 		detail = "private repository"
 	}
 	return detail
+}
+
+func runnerTargetDetail(node *TreeNode) string {
+	var parts []string
+	if repo := nearestTreePath(node, TreeNodeRepo); repo != "" {
+		parts = append(parts, repo)
+	}
+	if labels := nodeStringSliceProperty(node, "label_set"); len(labels) > 0 {
+		parts = append(parts, strings.Join(labels, ", "))
+	}
+	if workflows := nodeStringSliceProperty(node, "observed_workflow_paths"); len(workflows) > 0 {
+		parts = append(parts, strings.Join(workflows, ", "))
+	}
+	if len(parts) == 0 {
+		return "self-hosted runner target"
+	}
+	return strings.Join(parts, " -> ")
 }
 
 func vulnDetail(node *TreeNode) string {
@@ -506,7 +536,7 @@ func (m Model) applyOmniboxSelection() (tea.Model, tea.Cmd) {
 		m.focusPane(PaneFocusFindings)
 		m.TreeSelectByID(result.NodeID)
 		return m, cmd
-	case OmniboxResultWorkflow:
+	case OmniboxResultWorkflow, OmniboxResultRunner:
 		m.focusPane(PaneFocusFindings)
 		m.TreeSelectByID(result.NodeID)
 		return m, nil
@@ -583,6 +613,8 @@ func omniboxKindLabel(kind OmniboxResultKind) string {
 		return "REPO"
 	case OmniboxResultWorkflow:
 		return "WORK"
+	case OmniboxResultRunner:
+		return "SH-RUN"
 	case OmniboxResultVuln:
 		return "VULN"
 	case OmniboxResultLoot:

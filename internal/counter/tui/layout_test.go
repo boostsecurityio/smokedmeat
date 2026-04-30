@@ -402,6 +402,35 @@ func TestBuildWizardModal_LOTPShowsAdvancedOptionsBeforePreview(t *testing.T) {
 	assert.Contains(t, out, "Only proceed if you are authorized")
 }
 
+func TestBuildWizardModal_LOTPShowsPersistenceForSelfHostedOverlap(t *testing.T) {
+	m := NewModel(Config{
+		SessionID:          "test",
+		KitchenExternalURL: "https://thoroughly-control-browsers-linear.trycloudflare.com",
+	})
+	m.pantry = observedSelfHostedRunnerPantry(t)
+	m.wizard = &WizardState{
+		Step: 3,
+		SelectedVuln: &Vulnerability{
+			Repository:  "acme/api",
+			Workflow:    ".github/workflows/pr.yml",
+			Job:         "build",
+			RuleID:      "untrusted_checkout_exec",
+			Context:     "untrusted_checkout",
+			LOTPTool:    "make",
+			LOTPTargets: []string{"Makefile"},
+		},
+		DeliveryMethod: DeliveryLOTP,
+	}
+
+	out := stripANSI(strings.Join(m.buildWizardModal(90, 26), "\n"))
+
+	assert.Contains(t, out, "Persistence:")
+	assert.Contains(t, out, "Off [p] to toggle")
+	assert.Contains(t, out, ":persist")
+	assert.Contains(t, out, "╰")
+	assert.NotContains(t, out, "\t")
+}
+
 func TestBuildRunnerTargetStep3PersistentResidentHidesCallbackBudget(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.wizard = &WizardState{
@@ -519,6 +548,15 @@ func TestRenderPreviewBoxContent_TruncatesLongLinesWithoutWrapping(t *testing.T)
 
 	lines := strings.Split(stripANSI(box), "\n")
 	require.Len(t, lines, 3)
+	assert.Contains(t, lines[1], "...")
+}
+
+func TestRenderPreviewBoxContent_ExpandsTabsBeforeTruncating(t *testing.T) {
+	box := renderPreviewBoxContent(30, []string{"\t@curl -s '" + strings.Repeat("x", 80)})
+
+	lines := strings.Split(stripANSI(box), "\n")
+	require.Len(t, lines, 3)
+	assert.NotContains(t, box, "\t")
 	assert.Contains(t, lines[1], "...")
 }
 

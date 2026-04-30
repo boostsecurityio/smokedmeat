@@ -227,6 +227,10 @@ func VulnerabilityExploitSupportWithBashContext(provider, path, ruleID, bashCont
 	}
 }
 
+func IsSelfHostedRunnerAnalyzeOnlyRule(ruleID string) bool {
+	return strings.TrimSpace(ruleID) == "pr_runs_on_self_hosted"
+}
+
 func SetVulnerabilityExploitSupport(asset *Asset) {
 	if asset == nil {
 		return

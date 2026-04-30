@@ -141,7 +141,69 @@ func (m Model) selfHostedContextForVulnerability(vuln *Vulnerability) *RunnerTar
 		return target
 	}
 
+	return m.selfHostedContextFromWorkflowJob(vuln, repoID)
+}
+
+func (m Model) selfHostedContextFromWorkflowJob(vuln *Vulnerability, repoID string) *RunnerTargetSelection {
+	workflowPath := strings.TrimSpace(vuln.Workflow)
+	if workflowPath == "" || repoID == "" {
+		return nil
+	}
+
+	workflowIDs := make(map[string]string)
+	for _, workflow := range m.pantry.GetAssetsByType(pantry.AssetWorkflow) {
+		if propertyString(workflow.Properties, "repo_id") != repoID {
+			continue
+		}
+		if propertyString(workflow.Properties, "path") != workflowPath {
+			continue
+		}
+		workflowIDs[workflow.ID] = workflowPath
+	}
+	if len(workflowIDs) == 0 {
+		return nil
+	}
+
+	for _, job := range m.pantry.GetAssetsByType(pantry.AssetJob) {
+		workflowID := propertyString(job.Properties, "workflow_id")
+		observedWorkflowPath, ok := workflowIDs[workflowID]
+		if !ok {
+			continue
+		}
+		if vuln.Job != "" && job.Name != vuln.Job {
+			continue
+		}
+		if !propertyBool(job.Properties, "self_hosted") {
+			continue
+		}
+		return m.runnerTargetSelectionFromJob(vuln, repoID, observedWorkflowPath, job)
+	}
+
 	return nil
+}
+
+func (m Model) runnerTargetSelectionFromJob(vuln *Vulnerability, repoID, workflowPath string, job pantry.Asset) *RunnerTargetSelection {
+	labels := pantry.NormalizeSelfHostedRunnerLabels(job.StringSliceProperty("runs_on"))
+	labelSet, dynamicLabelSet := pantry.SplitSelfHostedRunnerLabels(labels)
+	targetAsset := pantry.NewSelfHostedRunnerTarget(repoID, labels)
+	jobNames := []string(nil)
+	if job.Name != "" {
+		jobNames = []string{job.Name}
+	}
+	target := &RunnerTargetSelection{
+		ID:                    targetAsset.ID,
+		Repository:            vuln.Repository,
+		RepositoryID:          repoID,
+		LabelDisplay:          pantry.SelfHostedRunnerLabelDisplay(labels),
+		LabelSet:              labelSet,
+		DynamicLabelSet:       dynamicLabelSet,
+		ObservedWorkflowPaths: []string{workflowPath},
+		ObservedJobNames:      jobNames,
+	}
+	if preferred := m.preferredSelfHostedVulnerabilityForTarget(target); preferred != nil {
+		target.PreferredPath = preferred.ID
+	}
+	return target
 }
 
 func (m Model) runnerTargetSSHWriteResult() *SSHTrialResult {
