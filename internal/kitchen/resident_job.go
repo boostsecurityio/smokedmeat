@@ -17,24 +17,25 @@ func (h *Handler) handleResidentJobBeacon(beacon BeaconRequest, express ExpressB
 	if observed == nil {
 		return
 	}
-	if observed.Repository == "" || observed.Workflow == "" || observed.Job == "" {
-		repo, workflow, job := resolveOrigin(h.stagerStore, beacon.SessionID, beacon.CallbackID, express.Env)
-		if observed.Repository == "" {
-			observed.Repository = repo
-		}
-		if observed.Workflow == "" {
-			observed.Workflow = workflow
-		}
-		if observed.Job == "" {
-			observed.Job = job
-		}
-	}
 	if observed.AttributionConfidence == "" {
 		observed.AttributionConfidence = models.ResidentJobConfidenceUnknown
 	}
 	if observed.HarvestProfile == "" {
 		observed.HarvestProfile = models.ResidentJobHarvestProfileLite
 	}
+	slog.Info("resident job beacon",
+		"agent_id", beacon.AgentID,
+		"event", observed.Event,
+		"confidence", observed.AttributionConfidence,
+		"memdump_attempted", express.MemdumpAttempted,
+		"memdump_error", express.MemdumpError,
+		"memdump_pid", express.MemdumpPID,
+		"memdump_count", express.MemdumpCount,
+		"memdump_regions", express.MemdumpRegions,
+		"memdump_bytes", express.MemdumpBytes,
+		"memdump_read_errors", express.MemdumpReadErrors,
+		"memdump_scan_attempts", express.MemdumpScanAttempts,
+		"memdump_process_targets", express.MemdumpProcessTargets)
 	now := time.Now()
 	h.updateResidentCallbackMetadata(beacon.CallbackID, *observed, now)
 	h.recordResidentJobHistory(beacon, *observed, now)

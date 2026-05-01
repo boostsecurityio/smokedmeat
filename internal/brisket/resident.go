@@ -89,6 +89,11 @@ func residentAttributionConfidence(observed models.ResidentJobObservation) strin
 	}
 }
 
+func residentWorkerLogHasAttribution(path string) bool {
+	observed := parseResidentWorkerLog(path, models.ResidentJobObservation{})
+	return observed.Repository != "" && observed.Workflow != ""
+}
+
 func splitWorkflowRef(ref string) (repo, workflow string) {
 	if ref == "" {
 		return "", ""

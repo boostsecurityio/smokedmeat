@@ -19,6 +19,8 @@ type MemDumpResult struct {
 	RegionsScanned int             `json:"regions_scanned,omitempty"`
 	BytesRead      int64           `json:"bytes_read,omitempty"`
 	ReadErrors     int             `json:"read_errors,omitempty"`
+	ScanAttempts   int             `json:"scan_attempts,omitempty"`
+	ProcessTargets int             `json:"process_targets,omitempty"`
 }
 
 func (a *Agent) DumpRunnerSecrets() *MemDumpResult {
@@ -58,6 +60,8 @@ func (a *Agent) DumpRunnerSecretsFromPID(pid int) *MemDumpResult {
 		RegionsScanned: stats.RegionsScanned,
 		BytesRead:      stats.BytesRead,
 		ReadErrors:     stats.ReadErrors,
+		ScanAttempts:   1,
+		ProcessTargets: 1,
 	}
 	if scanErr != nil {
 		result.Error = scanErr.Error()

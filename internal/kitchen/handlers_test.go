@@ -366,6 +366,64 @@ func TestHandler_Beacon_ResidentHarvestPersistsRunnerMemoryLoot(t *testing.T) {
 	}
 }
 
+func TestHandler_Beacon_ResidentJobDoesNotFallbackToStagerOrigin(t *testing.T) {
+	mock := &mockPublisher{}
+	h, mux := newTestHandler(mock, nil)
+	database := newTestDB(t)
+	h.SetDatabase(database)
+
+	err := h.stagerStore.Register(&RegisteredStager{
+		ID:        "cb-resident",
+		SessionID: "sess-1",
+		Metadata: map[string]string{
+			"repository": "bootstrap/repo",
+			"workflow":   ".github/workflows/bootstrap.yml",
+			"job":        "bootstrap",
+		},
+	})
+	require.NoError(t, err)
+
+	payload := ExpressBeaconRequest{
+		BeaconRequest: BeaconRequest{
+			AgentID:      "test-agent",
+			SessionID:    "sess-1",
+			Hostname:     "runner-1",
+			CallbackID:   "cb-resident",
+			CallbackMode: "resident",
+		},
+		ResidentJob: &models.ResidentJobObservation{
+			Event:                models.ResidentJobEventObserved,
+			JobKey:               "runner-root:123",
+			SignalSource:         "runner_worker_process",
+			WorkerLog:            "/runner/_diag/Worker_current.log",
+			WorkerProcessStarted: "123",
+		},
+	}
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/b/test-agent", strings.NewReader(string(data)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	historyRows, err := db.NewHistoryRepository(database).List(10)
+	require.NoError(t, err)
+	require.Len(t, historyRows, 1)
+	assert.Empty(t, historyRows[0].Repository)
+	assert.Empty(t, historyRows[0].Workflow)
+	assert.Empty(t, historyRows[0].Job)
+
+	callback := h.stagerStore.Get("cb-resident")
+	require.NotNil(t, callback)
+	assert.Empty(t, callback.Metadata["resident_last_repository"])
+	assert.Empty(t, callback.Metadata["resident_last_workflow"])
+	assert.Empty(t, callback.Metadata["resident_last_job"])
+}
+
 func TestHandler_Beacon_FailedColeslawMarksOrderFailed(t *testing.T) {
 	mock := &mockPublisher{}
 	store := NewOrderStore(DefaultOrderStoreConfig())

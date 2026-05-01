@@ -31,7 +31,7 @@ func TestParseResidentWorkerLog_StrongAttribution(t *testing.T) {
     "d": [
       {
         "k": "repository",
-        "v": "fproulx-boostsecurity/public-pinata"
+        "v": "owner/repo"
       },
       {
         "k": "run_id",
@@ -47,7 +47,7 @@ func TestParseResidentWorkerLog_StrongAttribution(t *testing.T) {
       },
       {
         "k": "workflow_ref",
-        "v": "fproulx-boostsecurity/public-pinata/.github/workflows/dispatch.yml@refs/heads/zip-zip"
+        "v": "owner/repo/.github/workflows/dispatch.yml@refs/heads/zip-zip"
       },
       {
         "k": "workflow_sha",
@@ -76,7 +76,7 @@ func TestParseResidentWorkerLog_StrongAttribution(t *testing.T) {
 		ObservedAt: time.Date(2026, 5, 1, 16, 41, 57, 0, time.UTC),
 	})
 
-	assert.Equal(t, "fproulx-boostsecurity/public-pinata", observed.Repository)
+	assert.Equal(t, "owner/repo", observed.Repository)
 	assert.Equal(t, ".github/workflows/dispatch.yml", observed.Workflow)
 	assert.Equal(t, "test", observed.Job)
 	assert.Equal(t, "25223159810", observed.RunID)
@@ -87,6 +87,23 @@ func TestParseResidentWorkerLog_StrongAttribution(t *testing.T) {
 	assert.Equal(t, "77800a3f-badc-5d2f-894f-6254c9b4f6d3", observed.GitHubJobID)
 	assert.Equal(t, models.ResidentJobConfidenceStrong, observed.AttributionConfidence)
 	assert.Contains(t, observed.JobKey, "25223159810")
+}
+
+func TestResidentWorkerLogHasAttribution(t *testing.T) {
+	dir := t.TempDir()
+	incomplete := filepath.Join(dir, "Worker_incomplete.log")
+	complete := filepath.Join(dir, "Worker_complete.log")
+	require.NoError(t, os.WriteFile(incomplete, []byte(`"system.github.job": {"value": "test"}`), 0o600))
+	require.NoError(t, os.WriteFile(complete, []byte(`{
+  "github": {"d": [
+    {"k": "repository", "v": "owner/repo"},
+    {"k": "workflow_ref", "v": "owner/repo/.github/workflows/dispatch.yml@refs/heads/main"}
+  ]},
+  "job": {"d": [{"k": "workflow_file_path", "v": ".github/workflows/dispatch.yml"}]}
+}`), 0o600))
+
+	assert.False(t, residentWorkerLogHasAttribution(incomplete))
+	assert.True(t, residentWorkerLogHasAttribution(complete))
 }
 
 func TestSplitWorkflowRef(t *testing.T) {

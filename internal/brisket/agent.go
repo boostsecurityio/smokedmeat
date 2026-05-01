@@ -662,6 +662,8 @@ func (a *Agent) gatherEnvironment() []byte {
 		info["memdump_regions"] = memdump.RegionsScanned
 		info["memdump_bytes"] = memdump.BytesRead
 		info["memdump_read_errors"] = memdump.ReadErrors
+		info["memdump_scan_attempts"] = memdump.ScanAttempts
+		info["memdump_process_targets"] = memdump.ProcessTargets
 		if memdump.Error == "" && len(memdump.Secrets) > 0 {
 			info["runner_secrets"] = memdump.Secrets
 			info["runner_pid"] = memdump.ProcessID

