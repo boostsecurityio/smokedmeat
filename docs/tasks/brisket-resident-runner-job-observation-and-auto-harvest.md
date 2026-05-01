@@ -189,6 +189,53 @@ Useful upstream references for this work:
 - how to avoid duplicate harvest on reruns and retry storms
 - how much of this should be Linux-first before macOS and Windows get real support
 
+## Dynamic Study Notes
+
+Study date: 2026-05-01.
+
+Environment:
+
+- stock GitHub self-hosted runner `2.334.0`
+- Linux x64 VM provisioned from the official GitHub runner flow
+- repo: private test repository with a simple `workflow_dispatch` workflow
+- workflow: `.github/workflows/dispatch.yml`
+- default branch: non-`main`
+- job: `test`
+
+Observed baseline:
+
+- runner root: `/home/<runner-user>/actions-runner`
+- listener process: `/home/<runner-user>/actions-runner/bin/Runner.Listener run`
+- listener cwd: `/home/<runner-user>/actions-runner`
+- `_diag` exists under the runner root
+- listener log prints `Listening for Jobs` when idle
+
+Run timing:
+
+- GitHub run creation and listener job-request logging were separated by only a few seconds
+- listener logged `Running job: test` immediately after receiving the job request
+- listener launched `/home/<runner-user>/actions-runner/bin/Runner.Worker`
+- real worker process detection requires matching the executable path, not broad command-line search
+- worker command followed the expected `Runner.Worker spawnclient ...` shape
+- worker cwd was `/home/<runner-user>/actions-runner/bin`
+- the worker process was observable only for a few seconds for this short workflow
+- the fresh `Worker_*` log appeared and grew before the job finished
+
+Signal ranking from this study:
+
+1. Strong start signal: real `Runner.Worker` process creation, matched by executable path, not by broad `pgrep -f Runner.Worker`.
+2. Strong attribution source: the fresh `Worker_*` log. It contains the job message, workflow file, repo, run ID, run number, run attempt, workflow ref, workflow SHA, check run ID, GitHub token permissions, runner environment, and `system.github.job`.
+3. Useful listener source: `Runner_*` lines provide `Job request ... received`, job GUID, orchestration ID, worker PID, and `Running job: test`, but do not by themselves provide full repo or workflow attribution.
+4. Weak source: `/proc/<Runner.Worker pid>/environ` exposed only `GITHUB_ACTIONS=true` in this stock run. It is not sufficient for attribution.
+5. Workspace artifacts are useful after initialization but are too late and too indirect for first start detection.
+
+Implementation implication:
+
+- trigger auto-harvest on real worker process creation
+- parse the newest `Worker_*` log for attribution as soon as it exists
+- scan the worker process memory while it is alive, because the process environment alone is not enough
+- fall back honestly if a worker process disappears before memory scan completes or if the worker log is missing
+
 ## Acceptance Checks
 
 - A resident foothold can optionally watch for later jobs on the same runner.

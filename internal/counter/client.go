@@ -164,6 +164,13 @@ type HistoryPayload struct {
 	Outcome     string    `json:"outcome,omitempty"`
 	ErrorDetail string    `json:"error_detail,omitempty"`
 	AgentID     string    `json:"agent_id,omitempty"`
+
+	Workflow              string `json:"workflow,omitempty"`
+	Job                   string `json:"job,omitempty"`
+	RunID                 string `json:"run_id,omitempty"`
+	AttributionConfidence string `json:"attribution_confidence,omitempty"`
+	HarvestProfile        string `json:"harvest_profile,omitempty"`
+	SignalSource          string `json:"signal_source,omitempty"`
 }
 
 type AnalysisProgressPayload struct {
@@ -246,19 +253,20 @@ type ExtractedSecret struct {
 
 // ExpressDataPayload represents extracted secrets from express mode agents.
 type ExpressDataPayload struct {
-	AgentID          string                    `json:"agent_id"`
-	SessionID        string                    `json:"session_id"`
-	Hostname         string                    `json:"hostname"`
-	Secrets          []ExtractedSecret         `json:"secrets"`
-	Vars             map[string]string         `json:"vars,omitempty"`
-	TokenPermissions map[string]string         `json:"token_permissions,omitempty"`
-	CachePoison      *models.CachePoisonStatus `json:"cache_poison,omitempty"`
-	Timestamp        time.Time                 `json:"timestamp"`
-	Repository       string                    `json:"repository,omitempty"`
-	Workflow         string                    `json:"workflow,omitempty"`
-	Job              string                    `json:"job,omitempty"`
-	CallbackID       string                    `json:"callback_id,omitempty"`
-	CallbackMode     string                    `json:"callback_mode,omitempty"`
+	AgentID          string                         `json:"agent_id"`
+	SessionID        string                         `json:"session_id"`
+	Hostname         string                         `json:"hostname"`
+	Secrets          []ExtractedSecret              `json:"secrets"`
+	Vars             map[string]string              `json:"vars,omitempty"`
+	TokenPermissions map[string]string              `json:"token_permissions,omitempty"`
+	CachePoison      *models.CachePoisonStatus      `json:"cache_poison,omitempty"`
+	ResidentJob      *models.ResidentJobObservation `json:"resident_job,omitempty"`
+	Timestamp        time.Time                      `json:"timestamp"`
+	Repository       string                         `json:"repository,omitempty"`
+	Workflow         string                         `json:"workflow,omitempty"`
+	Job              string                         `json:"job,omitempty"`
+	CallbackID       string                         `json:"callback_id,omitempty"`
+	CallbackMode     string                         `json:"callback_mode,omitempty"`
 }
 
 type LootSyncPayload struct {
@@ -283,6 +291,13 @@ type LootSyncEntry struct {
 	Job        string `json:"job,omitempty"`
 
 	TokenPermissions map[string]string `json:"token_permissions,omitempty"`
+
+	ResidentJobKey        string `json:"resident_job_key,omitempty"`
+	RunID                 string `json:"run_id,omitempty"`
+	RunAttempt            string `json:"run_attempt,omitempty"`
+	AttributionConfidence string `json:"attribution_confidence,omitempty"`
+	HarvestProfile        string `json:"harvest_profile,omitempty"`
+	SignalSource          string `json:"signal_source,omitempty"`
 }
 
 // KitchenConfig holds configuration for the Kitchen WebSocket client.

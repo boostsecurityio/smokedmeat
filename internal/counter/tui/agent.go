@@ -410,10 +410,25 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 		agentShort = data.AgentID[:8]
 	}
 	source := fmt.Sprintf("agent:%s", agentShort)
+	if data.ResidentJob != nil {
+		source = fmt.Sprintf("resident:%s:%s", agentShort, data.ResidentJob.SignalSource)
+	}
 
 	repo := data.Repository
 	workflow := data.Workflow
 	job := data.Job
+	if data.ResidentJob != nil {
+		if data.ResidentJob.Repository != "" {
+			repo = data.ResidentJob.Repository
+		}
+		if data.ResidentJob.Workflow != "" {
+			workflow = data.ResidentJob.Workflow
+		}
+		if data.ResidentJob.Job != "" {
+			job = data.ResidentJob.Job
+		}
+		m.noteResidentJob(data.AgentID, data.Hostname, data.ResidentJob)
+	}
 	if repo == "" {
 		repo = m.target
 		if m.waiting != nil && m.waiting.TargetRepo != "" {
@@ -593,6 +608,15 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 	if len(data.Vars) > 0 {
 		varInfo = fmt.Sprintf(", %d vars", len(data.Vars))
 	}
+	if data.ResidentJob != nil {
+		m.activityLog.AddEntry(ActivityEntry{
+			Timestamp: data.Timestamp,
+			Icon:      IconSuccess,
+			Message:   fmt.Sprintf("Resident harvest: %d secrets%s captured from %s", len(data.Secrets), varInfo, data.Hostname),
+		})
+		m.AddOutput("success", fmt.Sprintf("Resident job harvest: %d secrets%s from %s", len(data.Secrets), varInfo, agentShort))
+		return m, m.listenForExpressData()
+	}
 	m.activityLog.AddEntry(ActivityEntry{
 		Timestamp: data.Timestamp,
 		Icon:      IconSuccess,
@@ -601,6 +625,84 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 	m.AddOutput("success", fmt.Sprintf("Express data received: %d secrets%s from %s", len(data.Secrets), varInfo, agentShort))
 
 	return m, m.listenForExpressData()
+}
+
+func (m *Model) noteResidentHistory(entry HistoryEntry) {
+	if !strings.HasPrefix(entry.Type, "resident_job.") {
+		return
+	}
+	observed := &models.ResidentJobObservation{
+		Event:                 strings.TrimPrefix(entry.Type, "resident_job."),
+		SignalSource:          entry.SignalSource,
+		Repository:            entry.Repository,
+		Workflow:              entry.Workflow,
+		Job:                   entry.Job,
+		RunID:                 entry.RunID,
+		AttributionConfidence: entry.AttributionConfidence,
+		HarvestProfile:        entry.HarvestProfile,
+		Error:                 entry.ErrorDetail,
+	}
+	switch entry.Type {
+	case "resident_job.observed":
+		observed.Event = models.ResidentJobEventObserved
+		observed.ObservedAt = entry.Timestamp
+	case "resident_job.harvested":
+		observed.Event = models.ResidentJobEventHarvested
+		observed.HarvestedAt = entry.Timestamp
+	case "resident_job.harvest_failed":
+		observed.Event = models.ResidentJobEventHarvestFailed
+		observed.HarvestedAt = entry.Timestamp
+	}
+	m.noteResidentJob(entry.AgentID, "", observed)
+}
+
+func (m *Model) noteResidentJob(agentID, hostname string, observed *models.ResidentJobObservation) {
+	if observed == nil || strings.TrimSpace(agentID) == "" {
+		return
+	}
+	if m.activeAgent == nil || m.activeAgent.ID != agentID {
+		return
+	}
+	switch observed.Event {
+	case models.ResidentJobEventObserved:
+		m.activeAgent.ResidentWatchStatus = "observed"
+		if !observed.ObservedAt.IsZero() {
+			m.activeAgent.ResidentLastObserved = observed.ObservedAt
+		}
+	case models.ResidentJobEventHarvested:
+		m.activeAgent.ResidentWatchStatus = "harvested"
+		if !observed.HarvestedAt.IsZero() {
+			m.activeAgent.ResidentLastHarvested = observed.HarvestedAt
+		}
+		m.activeAgent.ResidentLastHarvestError = ""
+	case models.ResidentJobEventHarvestFailed:
+		m.activeAgent.ResidentWatchStatus = "failed"
+		if !observed.HarvestedAt.IsZero() {
+			m.activeAgent.ResidentLastHarvested = observed.HarvestedAt
+		}
+		m.activeAgent.ResidentLastHarvestError = observed.Error
+	}
+	if hostname != "" {
+		m.activeAgent.Runner = hostname
+	}
+	if observed.SignalSource != "" {
+		m.activeAgent.ResidentSignalSource = observed.SignalSource
+	}
+	if observed.AttributionConfidence != "" {
+		m.activeAgent.ResidentLastConfidence = observed.AttributionConfidence
+	}
+	if observed.RunID != "" {
+		m.activeAgent.ResidentLastRunID = observed.RunID
+	}
+	if observed.Repository != "" {
+		m.activeAgent.ResidentLastRepository = observed.Repository
+	}
+	if observed.Workflow != "" {
+		m.activeAgent.ResidentLastWorkflow = observed.Workflow
+	}
+	if observed.Job != "" {
+		m.activeAgent.ResidentLastJob = observed.Job
+	}
 }
 
 func (m *Model) handleReconResult(recon *models.ReconResult) {

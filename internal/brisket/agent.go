@@ -140,6 +140,9 @@ func (a *Agent) AgentID() string {
 // Run starts the agent's main loop.
 func (a *Agent) Run(ctx context.Context) error {
 	slog.Info("brisket agent started", "agent_id", a.agentID)
+	stopResidentWatcher := a.startResidentJobWatcher(ctx)
+	defer stopResidentWatcher()
+
 	lastContact := time.Now()
 
 	if err := a.beacon(ctx); err != nil {

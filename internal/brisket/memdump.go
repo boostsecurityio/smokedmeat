@@ -29,6 +29,12 @@ func (a *Agent) DumpRunnerSecrets() *MemDumpResult {
 		return &MemDumpResult{Error: err.Error()}
 	}
 
+	return a.DumpRunnerSecretsFromPID(pid)
+}
+
+func (a *Agent) DumpRunnerSecretsFromPID(pid int) *MemDumpResult {
+	scanner := gump.GetScanner()
+
 	results := make(chan gump.Result, 100)
 	var wg sync.WaitGroup
 	var stats gump.ScanStats

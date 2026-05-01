@@ -1194,19 +1194,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ts = time.Now()
 		}
 		entry := HistoryEntry{
-			Type:        msg.History.Type,
-			Timestamp:   ts,
-			Repository:  msg.History.Repository,
-			Target:      msg.History.Target,
-			TargetType:  msg.History.TargetType,
-			VulnID:      msg.History.VulnID,
-			StagerID:    msg.History.StagerID,
-			PRURL:       msg.History.PRURL,
-			Outcome:     msg.History.Outcome,
-			ErrorDetail: msg.History.ErrorDetail,
-			AgentID:     msg.History.AgentID,
+			Type:                  msg.History.Type,
+			Timestamp:             ts,
+			Repository:            msg.History.Repository,
+			Target:                msg.History.Target,
+			TargetType:            msg.History.TargetType,
+			VulnID:                msg.History.VulnID,
+			StagerID:              msg.History.StagerID,
+			PRURL:                 msg.History.PRURL,
+			Outcome:               msg.History.Outcome,
+			ErrorDetail:           msg.History.ErrorDetail,
+			AgentID:               msg.History.AgentID,
+			Workflow:              msg.History.Workflow,
+			Job:                   msg.History.Job,
+			RunID:                 msg.History.RunID,
+			AttributionConfidence: msg.History.AttributionConfidence,
+			HarvestProfile:        msg.History.HarvestProfile,
+			SignalSource:          msg.History.SignalSource,
 		}
 		m.opHistory.Add(entry)
+		m.noteResidentHistory(entry)
 		if entry.Type != "workflow_dispatch.triggered" {
 			m.activityLog.AddEntry(ActivityEntry{
 				Timestamp: entry.Timestamp,
