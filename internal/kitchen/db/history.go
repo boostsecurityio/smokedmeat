@@ -24,6 +24,9 @@ const (
 	HistoryAgentConnected    HistoryEventType = "agent.connected"
 	HistorySecretExtracted   HistoryEventType = "secret.extracted"
 	HistoryPurgeExecuted     HistoryEventType = "purge.executed"
+	HistoryResidentObserved  HistoryEventType = "resident_job.observed"
+	HistoryResidentHarvested HistoryEventType = "resident_job.harvested"
+	HistoryResidentFailed    HistoryEventType = "resident_job.harvest_failed"
 )
 
 type HistoryRow struct {
@@ -44,6 +47,13 @@ type HistoryRow struct {
 	Outcome     string `json:"outcome,omitempty"`
 	ErrorDetail string `json:"error_detail,omitempty"`
 	AgentID     string `json:"agent_id,omitempty"`
+
+	Workflow              string `json:"workflow,omitempty"`
+	Job                   string `json:"job,omitempty"`
+	RunID                 string `json:"run_id,omitempty"`
+	AttributionConfidence string `json:"attribution_confidence,omitempty"`
+	HarvestProfile        string `json:"harvest_profile,omitempty"`
+	SignalSource          string `json:"signal_source,omitempty"`
 }
 
 type HistoryRepository struct {

@@ -69,6 +69,9 @@ func (m *Model) renderActiveAgent(width, height int) string {
 		m.renderAgentProvenanceLine(agent, width),
 		mutedColor.Render("  Connected back: ")+m.renderAgentConnectedBack(agent),
 	)
+	if agent.Mode == agentModeResident {
+		lines = append(lines, m.renderResidentWatchLines(agent, width)...)
+	}
 
 	if len(lines) > contentHeight {
 		lines = lines[:contentHeight]
@@ -78,6 +81,41 @@ func (m *Model) renderActiveAgent(width, height int) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderResidentWatchLines(agent *AgentState, width int) []string {
+	status := agent.ResidentWatchStatus
+	if status == "" {
+		status = "watching"
+	}
+	lines := []string{mutedColor.Render("  Watch: ") + status}
+	if agent.ResidentSignalSource != "" {
+		lines = append(lines, mutedColor.Render("  Signal: ")+truncate(agent.ResidentSignalSource, max(width-10, 8)))
+	}
+	if agent.ResidentLastObserved.IsZero() {
+		lines = append(lines, mutedColor.Render("  Last job: none observed"))
+	} else {
+		job := strings.TrimSpace(strings.Join([]string{
+			agent.ResidentLastRepository,
+			agent.ResidentLastWorkflow,
+			agent.ResidentLastJob,
+		}, " "))
+		if job == "" {
+			job = "unknown"
+		}
+		lines = append(lines, mutedColor.Render("  Last job: ")+truncate(job, max(width-12, 8)))
+	}
+	if !agent.ResidentLastHarvested.IsZero() {
+		label := agent.ResidentLastHarvested.Format(time.RFC3339)
+		if agent.ResidentLastConfidence != "" {
+			label += " " + agent.ResidentLastConfidence
+		}
+		lines = append(lines, mutedColor.Render("  Harvest: ")+truncate(label, max(width-11, 8)))
+	}
+	if agent.ResidentLastHarvestError != "" {
+		lines = append(lines, errorColor.Render("  Harvest failed: ")+truncate(agent.ResidentLastHarvestError, max(width-18, 8)))
+	}
+	return lines
 }
 
 func (m Model) activeAgentStatus() (string, time.Duration, bool) {

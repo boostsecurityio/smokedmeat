@@ -524,6 +524,12 @@ func TestDefaultBashPayloadForRegisteredStager_SelfHostedResidentTryCloudflare(t
 	assert.Contains(t, payload, `PERSIST_CALLBACK_MODE="resident"`)
 	assert.Contains(t, payload, `PERSIST_RELAUNCH_FLAGS="-interval 5s -max-offline 1h0m0s"`)
 	assert.Contains(t, payload, `if [ -n "${SMOKEDMEAT_PERSIST:-}" ] && [ "$OS" = "linux" ]; then`)
+	assert.Contains(t, payload, `PERSIST_RUN=`)
+	assert.Contains(t, payload, `setsid sh -c "$PERSIST_RUN"`)
+	assert.Contains(t, payload, `nohup sh -c "$PERSIST_RUN"`)
+	assert.Contains(t, payload, `sudo -n -E true`)
+	assert.Contains(t, payload, `sudo -n -E \"$PERSIST_BIN\" -kitchen`)
+	assert.Contains(t, payload, `else \"$PERSIST_BIN\" -kitchen`)
 	assert.Contains(t, payload, `-callback-mode \"$PERSIST_CALLBACK_MODE\" $PERSIST_RELAUNCH_FLAGS`)
 	assert.NotContains(t, payload, `sleep "$SMOKEDMEAT_PERSIST_DELAY"`)
 }
@@ -542,6 +548,7 @@ func TestDefaultBashPayloadForRegisteredStager_ResidentPersistenceDoesNotRequire
 
 	assert.Contains(t, payload, `PERSIST_CALLBACK_MODE="resident"`)
 	assert.Contains(t, payload, `PERSIST_RELAUNCH_FLAGS="-interval 5s"`)
+	assert.Contains(t, payload, `sudo -n -E \"$PERSIST_BIN\" -kitchen`)
 	assert.Contains(t, payload, `-callback-mode \"$PERSIST_CALLBACK_MODE\" $PERSIST_RELAUNCH_FLAGS`)
 	assert.NotContains(t, payload, `-callback-mode \"$PERSIST_CALLBACK_MODE\" -express`)
 }

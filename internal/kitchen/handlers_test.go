@@ -261,6 +261,169 @@ func TestHandler_Beacon_BroadcastsCachePoisonWithoutLoot(t *testing.T) {
 	}
 }
 
+func TestHandler_Beacon_ResidentHarvestPersistsRunnerMemoryLoot(t *testing.T) {
+	mock := &mockPublisher{}
+	h, mux := newTestHandler(mock, nil)
+	database := newTestDB(t)
+	h.SetDatabase(database)
+
+	hub := NewOperatorHub(nil, nil, database)
+	op := &OperatorConn{sessionID: "sess-1", send: make(chan OperatorMessage, 4), hub: hub}
+	hub.operators[op] = true
+	h.SetOperatorHub(hub)
+
+	err := h.stagerStore.Register(&RegisteredStager{
+		ID:         "cb-resident",
+		SessionID:  "sess-1",
+		Persistent: true,
+		Metadata: map[string]string{
+			"repository": "fallback/repo",
+		},
+	})
+	require.NoError(t, err)
+
+	payload := ExpressBeaconRequest{
+		BeaconRequest: BeaconRequest{
+			AgentID:      "test-agent",
+			SessionID:    "sess-1",
+			Hostname:     "runner-1",
+			CallbackID:   "cb-resident",
+			CallbackMode: "resident",
+		},
+		RunnerSecrets: []string{
+			`"GITHUB_TOKEN":{"value":"ghs_abcdefghijklmnopqrstuvwxyz","isSecret":true}`,
+		},
+		ResidentJob: &models.ResidentJobObservation{
+			Event:                 models.ResidentJobEventHarvested,
+			JobKey:                "job-key-1",
+			SignalSource:          "runner_worker_process",
+			Repository:            "acme/public-pinata",
+			Workflow:              ".github/workflows/dispatch.yml",
+			Job:                   "test",
+			RunID:                 "25223159810",
+			RunAttempt:            "1",
+			AttributionConfidence: models.ResidentJobConfidenceStrong,
+			HarvestProfile:        "resident-lite",
+		},
+	}
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/b/test-agent", strings.NewReader(string(data)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	rows, err := db.NewLootRepository(database).List()
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, db.LootOriginResident, rows[0].Origin)
+	assert.Equal(t, "GITHUB_TOKEN", rows[0].Name)
+	assert.Equal(t, "runner_memory", rows[0].Source)
+	assert.Equal(t, "job-key-1", rows[0].ResidentJobKey)
+	assert.Equal(t, "25223159810", rows[0].RunID)
+	assert.Equal(t, models.ResidentJobConfidenceStrong, rows[0].AttributionConfidence)
+
+	historyRows, err := db.NewHistoryRepository(database).List(10)
+	require.NoError(t, err)
+	require.Len(t, historyRows, 1)
+	assert.Equal(t, db.HistoryResidentHarvested, historyRows[0].Type)
+	assert.Equal(t, "acme/public-pinata", historyRows[0].Repository)
+	assert.Equal(t, "runner_worker_process", historyRows[0].SignalSource)
+
+	callback := h.stagerStore.Get("cb-resident")
+	require.NotNil(t, callback)
+	assert.Equal(t, models.ResidentJobEventHarvested, callback.Metadata["resident_watch_status"])
+	assert.Equal(t, "acme/public-pinata", callback.Metadata["resident_last_repository"])
+
+	var sawHistory bool
+	var sawExpress bool
+	timeout := time.After(2 * time.Second)
+	for !sawHistory || !sawExpress {
+		select {
+		case msg := <-op.send:
+			switch msg.Type {
+			case "history":
+				require.NotNil(t, msg.History)
+				if msg.History.Type == string(db.HistoryResidentHarvested) {
+					sawHistory = true
+					assert.Equal(t, "25223159810", msg.History.RunID)
+				}
+			case "express_data":
+				require.NotNil(t, msg.ExpressData)
+				if msg.ExpressData.ResidentJob != nil {
+					sawExpress = true
+					assert.Equal(t, "job-key-1", msg.ExpressData.ResidentJob.JobKey)
+					require.Len(t, msg.ExpressData.Secrets, 1)
+				}
+			}
+		case <-timeout:
+			t.Fatal("expected resident history and express data broadcasts")
+		}
+	}
+}
+
+func TestHandler_Beacon_ResidentJobDoesNotFallbackToStagerOrigin(t *testing.T) {
+	mock := &mockPublisher{}
+	h, mux := newTestHandler(mock, nil)
+	database := newTestDB(t)
+	h.SetDatabase(database)
+
+	err := h.stagerStore.Register(&RegisteredStager{
+		ID:        "cb-resident",
+		SessionID: "sess-1",
+		Metadata: map[string]string{
+			"repository": "bootstrap/repo",
+			"workflow":   ".github/workflows/bootstrap.yml",
+			"job":        "bootstrap",
+		},
+	})
+	require.NoError(t, err)
+
+	payload := ExpressBeaconRequest{
+		BeaconRequest: BeaconRequest{
+			AgentID:      "test-agent",
+			SessionID:    "sess-1",
+			Hostname:     "runner-1",
+			CallbackID:   "cb-resident",
+			CallbackMode: "resident",
+		},
+		ResidentJob: &models.ResidentJobObservation{
+			Event:                models.ResidentJobEventObserved,
+			JobKey:               "runner-root:123",
+			SignalSource:         "runner_worker_process",
+			WorkerLog:            "/runner/_diag/Worker_current.log",
+			WorkerProcessStarted: "123",
+		},
+	}
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/b/test-agent", strings.NewReader(string(data)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	historyRows, err := db.NewHistoryRepository(database).List(10)
+	require.NoError(t, err)
+	require.Len(t, historyRows, 1)
+	assert.Empty(t, historyRows[0].Repository)
+	assert.Empty(t, historyRows[0].Workflow)
+	assert.Empty(t, historyRows[0].Job)
+
+	callback := h.stagerStore.Get("cb-resident")
+	require.NotNil(t, callback)
+	assert.Empty(t, callback.Metadata["resident_last_repository"])
+	assert.Empty(t, callback.Metadata["resident_last_workflow"])
+	assert.Empty(t, callback.Metadata["resident_last_job"])
+}
+
 func TestHandler_Beacon_FailedColeslawMarksOrderFailed(t *testing.T) {
 	mock := &mockPublisher{}
 	store := NewOrderStore(DefaultOrderStoreConfig())

@@ -32,6 +32,13 @@ type LootRow struct {
 	Job        string `json:"job,omitempty"`
 
 	TokenPermissions map[string]string `json:"token_permissions,omitempty"`
+
+	ResidentJobKey        string `json:"resident_job_key,omitempty"`
+	RunID                 string `json:"run_id,omitempty"`
+	RunAttempt            string `json:"run_attempt,omitempty"`
+	AttributionConfidence string `json:"attribution_confidence,omitempty"`
+	HarvestProfile        string `json:"harvest_profile,omitempty"`
+	SignalSource          string `json:"signal_source,omitempty"`
 }
 
 type LootRepository struct {
@@ -41,6 +48,7 @@ type LootRepository struct {
 const (
 	LootOriginExpress  = "express"
 	LootOriginAnalysis = "analysis"
+	LootOriginResident = "resident_job"
 )
 
 func NewLootRepository(db *DB) *LootRepository {
@@ -132,6 +140,16 @@ func lootStableID(entry *LootRow) string {
 func lootLogicalKey(entry *LootRow) string {
 	if entry == nil {
 		return "loot:-"
+	}
+	if entry.Origin == LootOriginResident {
+		return strings.Join([]string{
+			"loot",
+			"resident",
+			normalizeLootKeyPart(entry.ResidentJobKey),
+			normalizeLootKeyPart(entry.RunID),
+			normalizeLootKeyPart(entry.RunAttempt),
+			normalizeLootKeyPart(entry.Name),
+		}, ":")
 	}
 	if entry.Repository != "" || entry.Workflow != "" || entry.Job != "" {
 		return strings.Join([]string{

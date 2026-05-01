@@ -358,21 +358,26 @@ func (m Model) handleLootSync(msg LootSyncMsg) (tea.Model, tea.Cmd) {
 func collectedSecretFromLootSyncEntry(entry counter.LootSyncEntry) CollectedSecret {
 	origin := strings.TrimSpace(entry.Origin)
 	expressOrigin := origin == "express"
+	residentOrigin := origin == "resident_job"
 	agentID := strings.TrimSpace(entry.AgentID)
-	if expressOrigin && len(agentID) > 8 {
+	if (expressOrigin || residentOrigin) && len(agentID) > 8 {
 		agentID = agentID[:8]
 	}
 
 	source := strings.TrimSpace(entry.Source)
-	if expressOrigin && agentID != "" {
+	if (expressOrigin || residentOrigin) && agentID != "" {
+		prefix := "agent:"
+		if residentOrigin {
+			prefix = "resident:"
+		}
 		if source != "" {
-			source = "agent:" + agentID + ":" + source
+			source = prefix + agentID + ":" + source
 		} else {
-			source = "agent:" + agentID
+			source = prefix + agentID
 		}
 	}
 
-	ephemeral := expressOrigin && (!entry.HighValue || isEphemeralSecretName(entry.Name))
+	ephemeral := (expressOrigin || residentOrigin) && (!entry.HighValue || isEphemeralSecretName(entry.Name))
 	secret := CollectedSecret{
 		Name:        entry.Name,
 		Value:       entry.Value,
