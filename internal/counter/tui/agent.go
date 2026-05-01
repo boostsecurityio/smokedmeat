@@ -462,18 +462,19 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 		if es.Job != "" {
 			secretJob = es.Job
 		}
+		ephemeral := !es.HighValue || isEphemeralSecretName(es.Name)
 		secret := CollectedSecret{
 			Name:        es.Name,
 			Value:       es.Value,
 			Source:      source + ":" + es.Source,
-			Ephemeral:   !es.HighValue,
+			Ephemeral:   ephemeral,
 			CollectedAt: data.Timestamp,
 			Type:        es.Type,
 			Repository:  secretRepo,
 			Workflow:    secretWorkflow,
 			Job:         secretJob,
 			AgentID:     agentShort,
-			ExpressMode: !es.HighValue,
+			ExpressMode: ephemeral,
 		}
 		if structuralType, ok := m.workflowSecretTypes[es.Name]; ok {
 			secret.Type = structuralType
@@ -1100,6 +1101,13 @@ func (m *Model) openSelectedVulnerabilityWizard(query string) (tea.Cmd, error) {
 		var err error
 		index, err = m.findVulnerabilityIndex(query)
 		if err != nil {
+			target, dispatchErr := m.workflowDispatchTargetForQuery(query)
+			if dispatchErr == nil {
+				if openErr := m.OpenWorkflowDispatchWizard(target); openErr != nil {
+					return nil, openErr
+				}
+				return nil, nil
+			}
 			return nil, err
 		}
 	}

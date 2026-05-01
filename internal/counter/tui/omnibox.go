@@ -16,17 +16,19 @@ import (
 type OmniboxResultKind string
 
 const (
-	OmniboxResultOrg      OmniboxResultKind = "org"
-	OmniboxResultRepo     OmniboxResultKind = "repo"
-	OmniboxResultWorkflow OmniboxResultKind = "workflow"
-	OmniboxResultRunner   OmniboxResultKind = "runner"
-	OmniboxResultVuln     OmniboxResultKind = "vuln"
-	OmniboxResultLoot     OmniboxResultKind = "loot"
+	OmniboxResultOrg              OmniboxResultKind = "org"
+	OmniboxResultRepo             OmniboxResultKind = "repo"
+	OmniboxResultDispatchWorkflow OmniboxResultKind = "dispatch_workflow"
+	OmniboxResultWorkflow         OmniboxResultKind = "workflow"
+	OmniboxResultRunner           OmniboxResultKind = "runner"
+	OmniboxResultVuln             OmniboxResultKind = "vuln"
+	OmniboxResultLoot             OmniboxResultKind = "loot"
 )
 
 var omniboxEmptyOrder = []OmniboxResultKind{
 	OmniboxResultOrg,
 	OmniboxResultRepo,
+	OmniboxResultDispatchWorkflow,
 	OmniboxResultWorkflow,
 	OmniboxResultRunner,
 	OmniboxResultVuln,
@@ -284,11 +286,23 @@ func (m *Model) buildOmniboxIndex() []OmniboxResult {
 			})
 		case TreeNodeWorkflow:
 			repoPath := nearestTreePath(node, TreeNodeRepo)
+			kind := OmniboxResultWorkflow
+			detail := repoPath
+			searchText := node.Label + " " + repoPath
+			if workflowNodeDispatchable(node) {
+				kind = OmniboxResultDispatchWorkflow
+				detailParts := []string{"workflow_dispatch", "x:exploit"}
+				if repoPath != "" {
+					detailParts = append([]string{repoPath}, detailParts...)
+				}
+				detail = strings.Join(detailParts, " | ")
+				searchText += " dispatch dispatchable workflow_dispatch x exploit"
+			}
 			appendItem(OmniboxResult{
-				Kind:       OmniboxResultWorkflow,
+				Kind:       kind,
 				Label:      node.Label,
-				Detail:     repoPath,
-				SearchText: strings.ToLower(node.Label + " " + repoPath),
+				Detail:     detail,
+				SearchText: strings.ToLower(searchText),
 				NodeID:     node.ID,
 			})
 		case TreeNodeSelfHostedRunner:
@@ -536,7 +550,7 @@ func (m Model) applyOmniboxSelection() (tea.Model, tea.Cmd) {
 		m.focusPane(PaneFocusFindings)
 		m.TreeSelectByID(result.NodeID)
 		return m, cmd
-	case OmniboxResultWorkflow, OmniboxResultRunner:
+	case OmniboxResultDispatchWorkflow, OmniboxResultWorkflow, OmniboxResultRunner:
 		m.focusPane(PaneFocusFindings)
 		m.TreeSelectByID(result.NodeID)
 		return m, nil
@@ -611,6 +625,8 @@ func omniboxKindLabel(kind OmniboxResultKind) string {
 		return "ORG"
 	case OmniboxResultRepo:
 		return "REPO"
+	case OmniboxResultDispatchWorkflow:
+		return "DISPATCH"
 	case OmniboxResultWorkflow:
 		return "WORK"
 	case OmniboxResultRunner:

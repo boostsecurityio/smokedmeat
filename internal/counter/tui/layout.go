@@ -876,6 +876,9 @@ func (m *Model) contextStatusHints() string {
 			hints += helpKeyStyle.Render("s") + helpDescStyle.Render(":target ")
 		}
 		if node := m.SelectedTreeNode(); node != nil {
+			if node.Type == TreeNodeWorkflow && workflowNodeDispatchable(node) {
+				hints += helpKeyStyle.Render("x") + helpDescStyle.Render(":exploit ")
+			}
 			if node.Type == TreeNodeVuln && vulnerabilitySupportsExploit(m.vulnerabilityForNode(node)) {
 				hints += helpKeyStyle.Render("x") + helpDescStyle.Render(":exploit ")
 			}
@@ -1474,10 +1477,17 @@ func (m *Model) buildWizardModal(width, height int) []string {
 	lines = append(lines, bTop)
 
 	// Title bar with red background (like header)
-	stepInfo := fmt.Sprintf("Step %d/3", m.wizard.Step)
+	totalSteps := 3
+	if m.wizard.Kind == WizardKindWorkflowDispatch {
+		totalSteps = 1
+	}
+	stepInfo := fmt.Sprintf("Step %d/%d", m.wizard.Step, totalSteps)
 	title := " PAYLOAD WIZARD"
-	if m.wizard.Kind == WizardKindRunnerTarget {
+	switch m.wizard.Kind {
+	case WizardKindRunnerTarget:
 		title = " RUNNER TARGET WIZARD"
+	case WizardKindWorkflowDispatch:
+		title = " WORKFLOW DISPATCH"
 	}
 	innerWidth := width - 2
 	spacing := innerWidth - lipgloss.Width(title) - lipgloss.Width(stepInfo) - 1
@@ -1493,13 +1503,17 @@ func (m *Model) buildWizardModal(width, height int) []string {
 
 	// Content lines need yellow borders
 	var contentLines []string
-	switch m.wizard.Step {
-	case 1:
-		contentLines = m.buildWizardStep1Content(width)
-	case 2:
-		contentLines = m.buildWizardStep2Content(width)
-	case 3:
-		contentLines = m.buildWizardStep3Content(width)
+	if m.wizard.Kind == WizardKindWorkflowDispatch {
+		contentLines = m.buildWorkflowDispatchWizardContent(width)
+	} else {
+		switch m.wizard.Step {
+		case 1:
+			contentLines = m.buildWizardStep1Content(width)
+		case 2:
+			contentLines = m.buildWizardStep2Content(width)
+		case 3:
+			contentLines = m.buildWizardStep3Content(width)
+		}
 	}
 contentLoop:
 	for _, block := range contentLines {
@@ -1518,50 +1532,57 @@ contentLoop:
 
 	// Navigation hints footer
 	var hints string
-	switch m.wizard.Step {
-	case 1:
-		hints = helpKeyStyle.Render("Enter") + helpDescStyle.Render(":continue  ") +
+	if m.wizard.Kind == WizardKindWorkflowDispatch {
+		hints = helpKeyStyle.Render("Enter") + helpDescStyle.Render(":trigger  ") +
+			helpKeyStyle.Render("jk") + helpDescStyle.Render(":inputs  ") +
+			helpKeyStyle.Render("hl") + helpDescStyle.Render(":choice  ") +
 			helpKeyStyle.Render("Esc") + helpDescStyle.Render(":cancel")
-	case 2:
-		optCount := len(ApplicableDeliveryMethods(m.wizard.SelectedVuln))
-		if m.wizard.Kind == WizardKindRunnerTarget {
-			optCount = 3
-		}
-		hints = helpKeyStyle.Render(fmt.Sprintf("1-%d", optCount)) + helpDescStyle.Render(":select  ") +
-			helpKeyStyle.Render("Enter") + helpDescStyle.Render(":continue  ") +
-			helpKeyStyle.Render("Esc") + helpDescStyle.Render(":back")
-	case 3:
-		action := ":deploy  "
-		switch m.wizard.DeliveryMethod {
-		case DeliveryCopyOnly, DeliveryManualSteps:
-			action = ":copy  "
-		}
-		if m.wizard.Kind == WizardKindRunnerTarget {
-			switch m.wizard.RunnerTargetAction {
-			case RunnerTargetActionPassiveDetails:
-				action = ":done  "
-			case RunnerTargetActionAutoWorkflowPush:
-				action = ":deploy  "
-			case RunnerTargetActionCopyWorkflow:
-				action = ":arm  "
+	} else {
+		switch m.wizard.Step {
+		case 1:
+			hints = helpKeyStyle.Render("Enter") + helpDescStyle.Render(":continue  ") +
+				helpKeyStyle.Render("Esc") + helpDescStyle.Render(":cancel")
+		case 2:
+			optCount := len(ApplicableDeliveryMethods(m.wizard.SelectedVuln))
+			if m.wizard.Kind == WizardKindRunnerTarget {
+				optCount = 3
 			}
-		}
-		dwellHint := helpKeyStyle.Render("d") + helpDescStyle.Render(":mode  ")
-		callbackHint := helpKeyStyle.Render("b") + helpDescStyle.Render(":hits  ")
-		hints = helpKeyStyle.Render("Enter") + helpDescStyle.Render(action)
-		if m.wizard.Kind == WizardKindRunnerTarget && (m.wizard.RunnerTargetAction == RunnerTargetActionAutoWorkflowPush || m.wizard.RunnerTargetAction == RunnerTargetActionCopyWorkflow) {
-			if m.wizard.PersistenceAttempt {
-				hints += helpKeyStyle.Render("p") + helpDescStyle.Render(":resident  ")
-			} else {
-				hints += dwellHint + callbackHint + helpKeyStyle.Render("p") + helpDescStyle.Render(":resident  ")
+			hints = helpKeyStyle.Render(fmt.Sprintf("1-%d", optCount)) + helpDescStyle.Render(":select  ") +
+				helpKeyStyle.Render("Enter") + helpDescStyle.Render(":continue  ") +
+				helpKeyStyle.Render("Esc") + helpDescStyle.Render(":back")
+		case 3:
+			action := ":deploy  "
+			switch m.wizard.DeliveryMethod {
+			case DeliveryCopyOnly, DeliveryManualSteps:
+				action = ":copy  "
 			}
-		} else if m.wizard.Kind != WizardKindRunnerTarget {
-			hints += dwellHint
-			if m.wizardCanAttemptPersistence() {
-				hints += helpKeyStyle.Render("p") + helpDescStyle.Render(":persist  ")
+			if m.wizard.Kind == WizardKindRunnerTarget {
+				switch m.wizard.RunnerTargetAction {
+				case RunnerTargetActionPassiveDetails:
+					action = ":done  "
+				case RunnerTargetActionAutoWorkflowPush:
+					action = ":deploy  "
+				case RunnerTargetActionCopyWorkflow:
+					action = ":arm  "
+				}
 			}
+			dwellHint := helpKeyStyle.Render("d") + helpDescStyle.Render(":mode  ")
+			callbackHint := helpKeyStyle.Render("b") + helpDescStyle.Render(":hits  ")
+			hints = helpKeyStyle.Render("Enter") + helpDescStyle.Render(action)
+			if m.wizard.Kind == WizardKindRunnerTarget && (m.wizard.RunnerTargetAction == RunnerTargetActionAutoWorkflowPush || m.wizard.RunnerTargetAction == RunnerTargetActionCopyWorkflow) {
+				if m.wizard.PersistenceAttempt {
+					hints += helpKeyStyle.Render("p") + helpDescStyle.Render(":resident  ")
+				} else {
+					hints += dwellHint + callbackHint + helpKeyStyle.Render("p") + helpDescStyle.Render(":resident  ")
+				}
+			} else if m.wizard.Kind != WizardKindRunnerTarget {
+				hints += dwellHint
+				if m.wizardCanAttemptPersistence() {
+					hints += helpKeyStyle.Render("p") + helpDescStyle.Render(":persist  ")
+				}
+			}
+			hints += helpKeyStyle.Render("Esc") + helpDescStyle.Render(":back")
 		}
-		hints += helpKeyStyle.Render("Esc") + helpDescStyle.Render(":back")
 	}
 	hintsWidth := lipgloss.Width(hints)
 	hintsPadding := width - 4 - hintsWidth
@@ -1579,6 +1600,71 @@ contentLoop:
 		lines[i] = padRight(line, width)
 	}
 
+	return lines
+}
+
+func (m *Model) buildWorkflowDispatchWizardContent(width int) []string {
+	innerWidth := width - 2
+	pad := "  "
+	emptyLine := strings.Repeat(" ", innerWidth)
+	target := m.wizard.SelectedDispatch
+	if target == nil {
+		return []string{formatWizardContent(pad, "", errorColor.Render("No workflow_dispatch target selected"), innerWidth)}
+	}
+
+	lines := []string{
+		formatWizardContent(pad, "", secondaryColorStyle.Render("workflow_dispatch"), innerWidth),
+		formatWizardContent(pad, "Repo:", target.Repository, innerWidth),
+		formatWizardContent(pad, "Workflow:", target.Workflow, innerWidth),
+	}
+	if target.Ref != "" {
+		lines = append(lines, formatWizardContent(pad, "Ref:", target.Ref, innerWidth))
+	}
+	lines = append(lines, emptyLine)
+
+	if m.dispatchCredential() == nil {
+		lines = append(lines,
+			formatWizardContent(pad, "", errorColor.Render("No token with workflow_dispatch permission is ready"), innerWidth),
+			formatWizardContent(pad, "", mutedColor.Render("Use a live GITHUB_TOKEN, App token, or PAT with repo/actions:write"), innerWidth),
+		)
+		return lines
+	}
+
+	if len(target.Inputs) == 0 {
+		lines = append(lines, formatWizardContent(pad, "Inputs:", mutedColor.Render("none"), innerWidth))
+		return lines
+	}
+
+	lines = append(lines, formatWizardContent(pad, "Inputs:", "edit values before triggering", innerWidth))
+	for i, input := range target.Inputs {
+		marker := " "
+		if i == target.Cursor {
+			marker = ">"
+		}
+		required := ""
+		if input.Required {
+			required = " *"
+		}
+		value := target.Values[input.Name]
+		if i == target.Cursor {
+			value = m.wizardInput.View()
+		}
+		if value == "" {
+			value = mutedColor.Render("(empty)")
+		}
+		name := marker + " " + input.Name + required
+		meta := input.Type
+		if len(input.Options) > 0 {
+			meta = strings.Join(input.Options, "/")
+		}
+		if meta != "" {
+			name += " [" + meta + "]"
+		}
+		lines = append(lines, formatWizardContent(pad, name+":", value, innerWidth))
+		if i == target.Cursor && input.Description != "" {
+			lines = append(lines, formatWizardContent(pad, "", mutedColor.Render(input.Description), innerWidth))
+		}
+	}
 	return lines
 }
 
@@ -1651,7 +1737,7 @@ func (m *Model) buildWizardStep1Content(width int) []string {
 			lines = append(lines, emptyLine)
 			if v.GateUnsolvable != "" {
 				lines = append(lines,
-					formatWizardContent(pad, "Gate:", warningColor.Render("manual — "+v.GateUnsolvable), innerWidth),
+					formatWizardContent(pad, "Gate:", warningColor.Render("manual - "+v.GateUnsolvable), innerWidth),
 					formatWizardContent(pad, "", mutedColor.Render(truncateForWidth(v.GateRaw, innerWidth-4)), innerWidth),
 				)
 			} else if len(v.GateTriggers) > 0 {

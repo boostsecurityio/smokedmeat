@@ -14,6 +14,7 @@ import (
 func TestOmniboxKindLabel(t *testing.T) {
 	assert.Equal(t, "ORG", omniboxKindLabel(OmniboxResultOrg))
 	assert.Equal(t, "REPO", omniboxKindLabel(OmniboxResultRepo))
+	assert.Equal(t, "DISPATCH", omniboxKindLabel(OmniboxResultDispatchWorkflow))
 	assert.Equal(t, "WORK", omniboxKindLabel(OmniboxResultWorkflow))
 	assert.Equal(t, "SH-RUN", omniboxKindLabel(OmniboxResultRunner))
 	assert.Equal(t, "VULN", omniboxKindLabel(OmniboxResultVuln))
@@ -74,6 +75,40 @@ func TestModel_SearchOmnibox_ReturnsSelfHostedRunnerMatches(t *testing.T) {
 	assert.Equal(t, "[SH-RUNNER] linux-x64", results[0].Label)
 	assert.Equal(t, runner.ID, results[0].NodeID)
 	assert.Contains(t, results[0].Detail, "whooli/newcleus-core-v3")
+}
+
+func TestModel_SearchOmnibox_MarksDispatchableWorkflow(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	root := &TreeNode{ID: "root", Expanded: true}
+	org := &TreeNode{ID: "org:whooli", Label: "whooli", Type: TreeNodeOrg, Expanded: true, Parent: root}
+	repo := &TreeNode{ID: "repo:whooli/infrastructure-definitions", Label: "infrastructure-definitions", Type: TreeNodeRepo, Expanded: true, Parent: org}
+	workflow := &TreeNode{
+		ID:     "wf:deploy",
+		Label:  ".github/workflows/deploy.yml",
+		Type:   TreeNodeWorkflow,
+		Parent: repo,
+		Properties: map[string]interface{}{
+			"event_triggers": []string{"push", "workflow_dispatch"},
+		},
+	}
+	root.Children = []*TreeNode{org}
+	org.Children = []*TreeNode{repo}
+	repo.Children = []*TreeNode{workflow}
+	m.treeRoot = root
+	m.ReflattenTree()
+
+	results := m.searchOmnibox("dispatch deploy")
+
+	require.Len(t, results, 1)
+	assert.Equal(t, OmniboxResultDispatchWorkflow, results[0].Kind)
+	assert.Equal(t, ".github/workflows/deploy.yml", results[0].Label)
+	assert.Contains(t, results[0].Detail, "workflow_dispatch")
+	assert.Contains(t, results[0].Detail, "x:exploit")
+
+	labelLine, detailLine := renderOmniboxResult(results[0], false, 120)
+	rendered := stripANSI(labelLine + "\n" + detailLine)
+	assert.Contains(t, rendered, "DISPATCH")
+	assert.Contains(t, rendered, "x:exploit")
 }
 
 func TestModel_SearchOmnibox_EmptyQueryBalancesKinds(t *testing.T) {
@@ -417,7 +452,7 @@ func TestLootTreeSelectByID_ExpandsCollapsedAncestors(t *testing.T) {
 		}
 	}
 	require.NotEmpty(t, nodeID)
-	require.GreaterOrEqual(t, len(m.lootTreeNodes), 3)
+	require.GreaterOrEqual(t, len(m.lootTreeNodes), 2)
 	m.lootTreeRoot.Children[0].Expanded = false
 	m.ReflattenLootTree()
 

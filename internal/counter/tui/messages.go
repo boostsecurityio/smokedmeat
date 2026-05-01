@@ -227,10 +227,12 @@ type LOTPDeploymentFailedMsg struct {
 }
 
 type AutoDispatchSuccessMsg struct {
-	StagerID  string
-	Vuln      *Vulnerability
-	InputName string
-	DwellTime time.Duration
+	StagerID   string
+	Vuln       *Vulnerability
+	Repository string
+	Workflow   string
+	InputName  string
+	DwellTime  time.Duration
 }
 
 type AutoDispatchFailedMsg struct {

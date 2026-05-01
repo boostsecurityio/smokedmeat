@@ -565,6 +565,74 @@ func TestModel_Update_AnalysisCompleted_DeduplicatesByFingerprint(t *testing.T) 
 	assert.Equal(t, "V001", model.vulnerabilities[0].ID)
 }
 
+func TestModel_Update_AnalysisCompleted_ReplacesSameRepoFindings(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	first := &poutine.AnalysisResult{
+		Success:       true,
+		ReposAnalyzed: 1,
+		AnalyzedRepos: []string{"acme/api"},
+		Findings: []poutine.Finding{{
+			Fingerprint: "fp-old",
+			Repository:  "acme/api",
+			Workflow:    ".github/workflows/old.yml",
+			Job:         "build",
+			Line:        10,
+			RuleID:      "injection",
+			Severity:    "high",
+		}},
+	}
+	second := &poutine.AnalysisResult{
+		Success:       true,
+		ReposAnalyzed: 1,
+		AnalyzedRepos: []string{"acme/api"},
+		Findings: []poutine.Finding{{
+			Fingerprint: "fp-new",
+			Repository:  "acme/api",
+			Workflow:    ".github/workflows/new.yml",
+			Job:         "build",
+			Line:        20,
+			RuleID:      "injection",
+			Severity:    "high",
+		}},
+	}
+
+	result, _ := m.Update(AnalysisCompletedMsg{Result: first})
+	model := result.(Model)
+	result, _ = model.Update(AnalysisCompletedMsg{Result: second})
+	model = result.(Model)
+
+	require.Len(t, model.vulnerabilities, 1)
+	assert.Equal(t, ".github/workflows/new.yml", model.vulnerabilities[0].Workflow)
+}
+
+func TestModel_Update_AnalysisCompleted_PrunesSameRepoWhenNoFindings(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.vulnerabilities = []Vulnerability{
+		{
+			ID:         "V001",
+			Repository: "acme/api",
+			Workflow:   ".github/workflows/old.yml",
+			RuleID:     "injection",
+		},
+		{
+			ID:         "V002",
+			Repository: "acme/other",
+			Workflow:   ".github/workflows/ci.yml",
+			RuleID:     "injection",
+		},
+	}
+
+	result, _ := m.Update(AnalysisCompletedMsg{Result: &poutine.AnalysisResult{
+		Success:       true,
+		ReposAnalyzed: 1,
+		AnalyzedRepos: []string{"acme/api"},
+	}})
+	model := result.(Model)
+
+	require.Len(t, model.vulnerabilities, 1)
+	assert.Equal(t, "V002", model.vulnerabilities[0].ID)
+}
+
 func TestPivotResult_AutoTriggersAnalysis(t *testing.T) {
 	m := NewModel(Config{SessionID: "test", KitchenURL: "http://localhost:8080"})
 	m.phase = PhasePostExploit

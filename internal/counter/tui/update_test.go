@@ -661,6 +661,45 @@ func TestModel_Update_AutoDispatchSuccess_WithoutStagerStaysOutOfWaiting(t *test
 	assert.NotNil(t, cmd)
 }
 
+func TestModel_Update_AutoDispatchSuccess_WithoutStagerRecordsDispatchHistory(t *testing.T) {
+	m := newModelWithMockClient(&mockKitchenClient{})
+	m.phase = PhaseRecon
+
+	result, cmd := m.Update(AutoDispatchSuccessMsg{
+		Repository: "org/repo",
+		Workflow:   ".github/workflows/deploy.yml",
+	})
+	model := result.(Model)
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	assert.Nil(t, msg)
+	require.Len(t, model.kitchenClient.(*mockKitchenClient).recordedHistory, 1)
+	history := model.kitchenClient.(*mockKitchenClient).recordedHistory[0]
+	assert.Equal(t, "workflow_dispatch.triggered", history.Type)
+	assert.Equal(t, "org/repo", history.Repository)
+	assert.Equal(t, ".github/workflows/deploy.yml", history.Target)
+	assert.Equal(t, "workflow", history.TargetType)
+}
+
+func TestModel_Update_HistoryReceived_WorkflowDispatchDoesNotDuplicateActivity(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+
+	result, cmd := m.Update(HistoryReceivedMsg{
+		History: counter.HistoryPayload{
+			Type:       "workflow_dispatch.triggered",
+			Repository: "org/repo",
+			Target:     ".github/workflows/deploy.yml",
+			Outcome:    "pending",
+		},
+	})
+
+	model := result.(Model)
+	require.Len(t, model.opHistory.entries, 1)
+	assert.Empty(t, model.activityLog.entries)
+	assert.NotNil(t, cmd)
+}
+
 func TestModel_Update_PivotResultSuccess_CloudOIDC(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhasePostExploit
@@ -693,7 +732,7 @@ func TestModel_Update_PivotResultSuccess_GitHubApp(t *testing.T) {
 	})
 
 	model := result.(Model)
-	assert.Empty(t, model.lootStash, "installation token should not be added to loot stash — it's regenerable from PEM")
+	assert.Empty(t, model.lootStash, "installation token should not be added to loot stash - it's regenerable from PEM")
 	require.NotEmpty(t, model.output)
 	assert.Contains(t, model.output[len(model.output)-1].Content, "installation token")
 	assert.Equal(t, "ghs_test123", model.tokenInfo.Value, "should swap to pivoted token")

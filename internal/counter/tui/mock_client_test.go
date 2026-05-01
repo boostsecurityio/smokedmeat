@@ -66,7 +66,7 @@ type mockKitchenClient struct {
 
 	listReposWithInfoResp []counter.RepoInfo
 	listReposWithInfoErr  error
-	listWorkflowsResp     []string
+	listWorkflowsResp     []counter.DispatchableWorkflow
 	listWorkflowsErr      error
 
 	getAuthUserResp    counter.GetUserResponse
@@ -181,7 +181,7 @@ func (m *mockKitchenClient) ListReposWithInfo(_ context.Context, _ string) ([]co
 	return m.listReposWithInfoResp, m.listReposWithInfoErr
 }
 
-func (m *mockKitchenClient) ListWorkflowsWithDispatch(_ context.Context, _, _, _ string) ([]string, error) {
+func (m *mockKitchenClient) ListWorkflowsWithDispatch(_ context.Context, _, _, _ string) ([]counter.DispatchableWorkflow, error) {
 	return m.listWorkflowsResp, m.listWorkflowsErr
 }
 

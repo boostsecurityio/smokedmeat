@@ -563,6 +563,15 @@ func (h *Handler) importAnalysisToPantry(result *poutine.AnalysisResult) int {
 				}
 				wf := pantry.NewWorkflow(parentID, wfMeta.Path)
 				wf.State = pantry.StateValidated
+				if wfMeta.DefaultBranch != "" {
+					wf.SetProperty("default_branch", wfMeta.DefaultBranch)
+				}
+				if len(wfMeta.EventTriggers) > 0 {
+					wf.SetProperty("event_triggers", wfMeta.EventTriggers)
+				}
+				if len(wfMeta.DispatchInputs) > 0 {
+					wf.SetProperty("dispatch_inputs", wfMeta.DispatchInputs)
+				}
 				if wfMeta.HasOIDC {
 					wf.SetProperty("has_oidc", true)
 				}
@@ -1149,7 +1158,9 @@ func (h *Handler) persistAnalysisLoot(req AnalyzeRequest, result *poutine.Analys
 			Source:     gitleaksFindingSource(sf),
 			HighValue:  true,
 			Repository: strings.TrimSpace(sf.Repository),
-			Workflow:   strings.TrimSpace(sf.File),
+		}
+		if strings.HasPrefix(strings.TrimSpace(sf.File), ".github/workflows/") {
+			row.Workflow = strings.TrimSpace(sf.File)
 		}
 		if err := lootRepo.Upsert(row); err != nil {
 			return err

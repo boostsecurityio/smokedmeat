@@ -46,7 +46,7 @@ type KitchenAPI interface {
 	TriggerDispatch(ctx context.Context, req DeployDispatchRequest) error
 	FetchDeployPreflight(ctx context.Context, req DeployPreflightRequest) (*DeployPreflightResponse, error)
 	ListReposWithInfo(ctx context.Context, token string) ([]RepoInfo, error)
-	ListWorkflowsWithDispatch(ctx context.Context, token, owner, repo string) ([]string, error)
+	ListWorkflowsWithDispatch(ctx context.Context, token, owner, repo string) ([]DispatchableWorkflow, error)
 	GetAuthenticatedUser(ctx context.Context, token string) (GetUserResponse, error)
 	FetchTokenInfo(ctx context.Context, token, source string) (*FetchTokenInfoResponse, error)
 	ListAppInstallations(ctx context.Context, pem, appID string) ([]AppInstallation, error)
@@ -1273,9 +1273,24 @@ type ListWorkflowsRequest struct {
 	Repo  string `json:"repo"`
 }
 
+type WorkflowDispatchInput struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Required    bool     `json:"required,omitempty"`
+	Default     string   `json:"default,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	Options     []string `json:"options,omitempty"`
+}
+
+type DispatchableWorkflow struct {
+	Path   string                  `json:"path"`
+	Ref    string                  `json:"ref,omitempty"`
+	Inputs []WorkflowDispatchInput `json:"inputs,omitempty"`
+}
+
 type ListWorkflowsResponse struct {
-	Workflows []string `json:"workflows"`
-	Error     string   `json:"error,omitempty"`
+	Workflows []DispatchableWorkflow `json:"workflows"`
+	Error     string                 `json:"error,omitempty"`
 }
 
 type GetUserRequest struct {
@@ -1437,7 +1452,7 @@ func (k *KitchenClient) ListReposWithInfo(ctx context.Context, token string) ([]
 	return resp.Repos, err
 }
 
-func (k *KitchenClient) ListWorkflowsWithDispatch(ctx context.Context, token, owner, repo string) ([]string, error) {
+func (k *KitchenClient) ListWorkflowsWithDispatch(ctx context.Context, token, owner, repo string) ([]DispatchableWorkflow, error) {
 	var resp ListWorkflowsResponse
 	err := k.doPostJSON(ctx, "/github/workflows", ListWorkflowsRequest{Token: token, Owner: owner, Repo: repo}, &resp, 60*time.Second)
 	return resp.Workflows, err

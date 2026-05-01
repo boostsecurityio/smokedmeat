@@ -72,6 +72,8 @@ func iconForHistoryType(t string) string {
 		return IconSuccess
 	case "exploit.failed":
 		return IconError
+	case "workflow_dispatch.triggered":
+		return IconSuccess
 	case "agent.connected":
 		return IconAgent
 	case "secret.extracted":
@@ -102,11 +104,23 @@ func messageForHistoryEntry(e HistoryEntry) string {
 	case "analysis.failed":
 		return "Analysis failed: " + e.ErrorDetail
 	case "exploit.attempted":
-		target := e.VulnID
-		if e.Repository != "" {
-			target += " @ " + e.Repository
+		if e.VulnID != "" {
+			target := e.VulnID
+			if e.Repository != "" {
+				target += " @ " + e.Repository
+			}
+			return "Exploit " + target
 		}
-		return "Exploit " + target
+		if e.Repository != "" {
+			return "Exploit attempted @ " + e.Repository
+		}
+		return "Exploit attempted"
+	case "workflow_dispatch.triggered":
+		msg := "Workflow dispatch"
+		if e.Repository != "" {
+			msg += " @ " + e.Repository
+		}
+		return msg
 	case "exploit.succeeded":
 		msg := "Success"
 		if e.VulnID != "" {

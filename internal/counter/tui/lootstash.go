@@ -278,6 +278,14 @@ func lootTreePlacementKey(secret CollectedSecret) string {
 	return strings.Join([]string{secret.Repository, secret.Workflow, secret.Job, secret.Name}, "\x00")
 }
 
+func lootWorkflowPath(workflow string) string {
+	workflow = strings.TrimSpace(workflow)
+	if strings.HasPrefix(workflow, ".github/workflows/") {
+		return workflow
+	}
+	return ""
+}
+
 func secretPermissionDisplayKey(secret CollectedSecret) string {
 	if key := lootOriginSlotKey(secret); key != "" {
 		return key
@@ -300,7 +308,21 @@ func (m *Model) AddToSessionLoot(secret CollectedSecret) {
 
 func (m *Model) addToSessionLootNoSave(secret CollectedSecret) bool {
 	for i, existing := range m.sessionLoot {
-		if existing.Name == secret.Name {
+		if sameLootOriginSlot(existing, secret) {
+			if shouldReplaceCollectedSecret(existing, secret) {
+				replacement := secret
+				mergeCollectedSecretMetadata(&replacement, existing)
+				m.sessionLoot[i] = replacement
+				return true
+			}
+			return mergeCollectedSecretMetadataPreferIncomingOrigin(&m.sessionLoot[i], secret)
+		}
+		existingSlot := lootOriginSlotKey(existing)
+		secretSlot := lootOriginSlotKey(secret)
+		if (existingSlot == "" || secretSlot == "") && sameLootValue(existing, secret) {
+			return mergeCollectedSecretMetadataPreferIncomingOrigin(&m.sessionLoot[i], secret)
+		}
+		if existingSlot == "" && secretSlot == "" && existing.Name == secret.Name {
 			return mergeCollectedSecretMetadataPreferIncomingOrigin(&m.sessionLoot[i], secret)
 		}
 	}
@@ -350,18 +372,19 @@ func collectedSecretFromLootSyncEntry(entry counter.LootSyncEntry) CollectedSecr
 		}
 	}
 
+	ephemeral := expressOrigin && (!entry.HighValue || isEphemeralSecretName(entry.Name))
 	secret := CollectedSecret{
 		Name:        entry.Name,
 		Value:       entry.Value,
 		Source:      source,
-		Ephemeral:   expressOrigin && !entry.HighValue,
+		Ephemeral:   ephemeral,
 		CollectedAt: entry.Timestamp,
 		Type:        entry.Type,
 		Repository:  entry.Repository,
 		Workflow:    entry.Workflow,
 		Job:         entry.Job,
 		AgentID:     agentID,
-		ExpressMode: expressOrigin && !entry.HighValue,
+		ExpressMode: ephemeral,
 	}
 	if secret.IsEphemeral() && secret.Repository != "" {
 		secret.BoundToRepo = secret.Repository
@@ -451,8 +474,8 @@ func (m *Model) renderSelectedLootDetail(secret CollectedSecret) []string {
 		if secret.Repository != "" {
 			lines = append(lines, "  Repo: "+hyperlinkOrText(GitHubRepoURL(secret.Repository), secret.Repository))
 		}
-		if secret.Workflow != "" {
-			lines = append(lines, "  Workflow: "+hyperlinkOrText(GitHubFileURL(secret.Repository, secret.Workflow), secret.Workflow))
+		if workflow := lootWorkflowPath(secret.Workflow); workflow != "" {
+			lines = append(lines, "  Workflow: "+hyperlinkOrText(GitHubFileURL(secret.Repository, workflow), workflow))
 		}
 		if secret.Job != "" {
 			lines = append(lines, "  Job: "+secret.Job)
@@ -748,7 +771,12 @@ func (m *Model) BuildLootTree() *TreeNode {
 		type sourceKey struct{ workflow, job string }
 		bySource := make(map[sourceKey][]*CollectedSecret)
 		for _, s := range secrets {
-			bySource[sourceKey{s.Workflow, s.Job}] = append(bySource[sourceKey{s.Workflow, s.Job}], s)
+			workflow := lootWorkflowPath(s.Workflow)
+			job := s.Job
+			if workflow == "" {
+				job = ""
+			}
+			bySource[sourceKey{workflow, job}] = append(bySource[sourceKey{workflow, job}], s)
 		}
 
 		sourceKeys := make([]sourceKey, 0, len(bySource))
@@ -764,6 +792,25 @@ func (m *Model) BuildLootTree() *TreeNode {
 
 		for _, key := range sourceKeys {
 			srcSecrets := bySource[key]
+			if key.workflow == "" && key.job == "" {
+				for _, secret := range srcSecrets {
+					secretNode := &TreeNode{
+						ID:     "loot:secret:" + secret.Name + ":" + secret.Repository,
+						Label:  secret.Name,
+						Type:   TreeNodeSecret,
+						Depth:  1,
+						Parent: repoNode,
+						Properties: map[string]interface{}{
+							"secret": secret,
+						},
+					}
+					if secret.IsEphemeral() {
+						secretNode.State = TreeStateEphemeral
+					}
+					repoNode.Children = append(repoNode.Children, secretNode)
+				}
+				continue
+			}
 			var label, nodeID string
 			nodeType := TreeNodeWorkflow
 			switch {

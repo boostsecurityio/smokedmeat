@@ -61,6 +61,7 @@ func TestIconForHistoryType(t *testing.T) {
 		{"exploit.attempted", IconPivot},
 		{"exploit.succeeded", IconSuccess},
 		{"exploit.failed", IconError},
+		{"workflow_dispatch.triggered", IconSuccess},
 		{"agent.connected", IconAgent},
 		{"secret.extracted", IconSecret},
 		{"purge.executed", IconWarning},
@@ -121,6 +122,11 @@ func TestMessageForHistoryEntry(t *testing.T) {
 			"Exploit V002",
 		},
 		{
+			"exploit attempted repo only",
+			HistoryEntry{Type: "exploit.attempted", Repository: "acme/app"},
+			"Exploit attempted @ acme/app",
+		},
+		{
 			"exploit succeeded with vuln",
 			HistoryEntry{Type: "exploit.succeeded", VulnID: "V001"},
 			"Success V001",
@@ -134,6 +140,11 @@ func TestMessageForHistoryEntry(t *testing.T) {
 			"exploit failed",
 			HistoryEntry{Type: "exploit.failed", ErrorDetail: "PR rejected"},
 			"Failed: PR rejected",
+		},
+		{
+			"workflow dispatch triggered",
+			HistoryEntry{Type: "workflow_dispatch.triggered", Repository: "acme/app"},
+			"Workflow dispatch @ acme/app",
 		},
 		{
 			"agent connected",

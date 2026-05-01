@@ -125,7 +125,7 @@ func (m Model) handleAnalyzeForTarget(target, targetType string, deep, selection
 	m.AddOutput("info", "")
 	if deep {
 		m.AddOutput("info", fmt.Sprintf("Starting deep analysis (poutine + gitleaks) via Kitchen (%s)...", m.config.KitchenURL))
-		m.AddOutput("info", "Scanning for private keys and secrets — this may take longer than 'analyze'.")
+		m.AddOutput("info", "Scanning for private keys and secrets - this may take longer than 'analyze'.")
 		switch targetType {
 		case "repo":
 			m.AddOutput("info", fmt.Sprintf("Repo target: %s", target))
@@ -509,6 +509,11 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 		}
 	}
 
+	analyzedRepos := analyzedRepositorySet(result)
+	m.prunePantryVulnerabilitiesForRepos(analyzedRepos)
+	if len(analyzedRepos) > 0 {
+		m.vulnerabilities = filterVulnerabilitiesOutsideRepos(m.vulnerabilities, analyzedRepos)
+	}
 	summary := m.importAnalysisToPantry(result)
 	if summary.Total > 0 {
 		m.activityLog.Add(IconScan, "Imported "+summary.String())
@@ -613,9 +618,11 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 				Value:       sf.Secret,
 				Source:      analysisSecretSource(sf),
 				Repository:  sf.Repository,
-				Workflow:    sf.File,
 				Type:        gitleaksRuleToType(sf.RuleID),
 				CollectedAt: time.Now(),
+			}
+			if strings.HasPrefix(strings.TrimSpace(sf.File), ".github/workflows/") {
+				secret.Workflow = sf.File
 			}
 			if secret.Type == "private_key" {
 				secret.KeyType, secret.KeyFingerprint, _ = sshPrivateKeyMetadata(secret.Value)
@@ -655,6 +662,57 @@ func findingDedupKey(f poutine.Finding) string {
 		return fp
 	}
 	return fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s", f.Repository, f.Workflow, f.Job, f.Step, f.Line, f.RuleID, f.Context, f.Expression)
+}
+
+func analyzedRepositorySet(result *poutine.AnalysisResult) map[string]struct{} {
+	repos := make(map[string]struct{})
+	add := func(repo string) {
+		repo = strings.TrimSpace(repo)
+		if repo != "" {
+			repos[repo] = struct{}{}
+		}
+	}
+	for _, repo := range result.AnalyzedRepos {
+		add(repo)
+	}
+	for _, wf := range result.Workflows {
+		add(wf.Repository)
+	}
+	for _, finding := range result.Findings {
+		add(finding.Repository)
+	}
+	for _, finding := range result.SecretFindings {
+		add(finding.Repository)
+	}
+	return repos
+}
+
+func filterVulnerabilitiesOutsideRepos(vulns []Vulnerability, repos map[string]struct{}) []Vulnerability {
+	if len(repos) == 0 || len(vulns) == 0 {
+		return vulns
+	}
+	filtered := vulns[:0]
+	for _, vuln := range vulns {
+		if _, found := repos[vuln.Repository]; !found {
+			filtered = append(filtered, vuln)
+		}
+	}
+	return filtered
+}
+
+func (m *Model) prunePantryVulnerabilitiesForRepos(repos map[string]struct{}) {
+	if m.pantry == nil || len(repos) == 0 {
+		return
+	}
+	for _, asset := range m.pantry.GetAssetsByType(pantry.AssetVulnerability) {
+		_, org, repo := pantry.ParsePurl(asset.Purl)
+		if org == "" || repo == "" {
+			continue
+		}
+		if _, found := repos[org+"/"+repo]; found {
+			_ = m.pantry.RemoveAsset(asset.ID)
+		}
+	}
 }
 
 func filterVisibleFindings(findings []poutine.Finding) []poutine.Finding {

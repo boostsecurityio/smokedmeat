@@ -344,6 +344,9 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.wizard.Kind == WizardKindRunnerTarget {
 		return m.handleRunnerTargetWizardKeyMsg(msg)
 	}
+	if m.wizard.Kind == WizardKindWorkflowDispatch {
+		return m.handleWorkflowDispatchWizardKeyMsg(msg)
+	}
 
 	if m.wizard.Step == 3 && m.wizard.DeliveryMethod == DeliveryComment {
 		m.normalizeCommentTarget()
@@ -531,6 +534,122 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m Model) handleWorkflowDispatchWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.wizard == nil || m.wizard.SelectedDispatch == nil {
+		m.CloseWizard()
+		return m, nil
+	}
+	target := m.wizard.SelectedDispatch
+	saveCurrent := func() {
+		if len(target.Inputs) == 0 {
+			return
+		}
+		if target.Cursor < 0 {
+			target.Cursor = 0
+		}
+		if target.Cursor >= len(target.Inputs) {
+			target.Cursor = len(target.Inputs) - 1
+		}
+		target.Values[target.Inputs[target.Cursor].Name] = m.wizardInput.Value()
+	}
+	loadCurrent := func() {
+		if len(target.Inputs) == 0 {
+			return
+		}
+		m.wizardInput.SetValue(target.Values[target.Inputs[target.Cursor].Name])
+		m.wizardInput.Focus()
+	}
+
+	switch msg.String() {
+	case "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	case "esc":
+		m.CloseWizard()
+		return m, nil
+	case "enter":
+		saveCurrent()
+		if err := validateWorkflowDispatchInputs(target); err != nil {
+			m.AddOutput("error", err.Error())
+			return m, nil
+		}
+		return m.executeWorkflowDispatchWizardAction()
+	case "up", "k":
+		saveCurrent()
+		if target.Cursor > 0 {
+			target.Cursor--
+			loadCurrent()
+		}
+		return m, nil
+	case "down", "j":
+		saveCurrent()
+		if target.Cursor+1 < len(target.Inputs) {
+			target.Cursor++
+			loadCurrent()
+		}
+		return m, nil
+	case "left", "h", "right", "l":
+		saveCurrent()
+		if len(target.Inputs) > 0 {
+			input := target.Inputs[target.Cursor]
+			values := input.Options
+			if input.Type == "boolean" && len(values) == 0 {
+				values = []string{"false", "true"}
+			}
+			if len(values) > 0 {
+				current := target.Values[input.Name]
+				idx := 0
+				for i, value := range values {
+					if value == current {
+						idx = i
+						break
+					}
+				}
+				if msg.String() == "left" || msg.String() == "h" {
+					idx = (idx - 1 + len(values)) % len(values)
+				} else {
+					idx = (idx + 1) % len(values)
+				}
+				target.Values[input.Name] = values[idx]
+				loadCurrent()
+			}
+		}
+		return m, nil
+	default:
+		if len(target.Inputs) == 0 {
+			return m, nil
+		}
+		input := target.Inputs[target.Cursor]
+		if input.Type == "choice" && len(input.Options) > 0 {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.wizardInput, cmd = m.wizardInput.Update(msg)
+		target.Values[input.Name] = m.wizardInput.Value()
+		return m, cmd
+	}
+}
+
+func (m Model) executeWorkflowDispatchWizardAction() (tea.Model, tea.Cmd) {
+	if m.wizard == nil || m.wizard.SelectedDispatch == nil {
+		m.CloseWizard()
+		return m, nil
+	}
+	dispatchToken := m.dispatchCredential()
+	if dispatchToken == nil {
+		m.AddOutput("error", "No token with workflow_dispatch permission is ready")
+		m.AddOutput("info", "Use a live GITHUB_TOKEN, App token, or PAT with repo/actions:write")
+		m.CloseWizard()
+		return m, nil
+	}
+	target := *m.wizard.SelectedDispatch
+	inputs := workflowDispatchInputPayload(&target)
+	m.AddOutput("info", fmt.Sprintf("Triggering workflow_dispatch on %s %s with %s...", target.Repository, target.Workflow, dispatchToken.Name))
+	m.activityLog.Add(IconInfo, "Triggering workflow_dispatch")
+	m.CloseWizard()
+	return m, m.deployWorkflowDispatch(target, "", dispatchToken, inputs, 0)
 }
 
 func (m Model) advanceWizardStep() (tea.Model, tea.Cmd) {

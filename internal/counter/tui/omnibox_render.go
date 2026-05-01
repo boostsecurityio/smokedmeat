@@ -120,6 +120,8 @@ func omniboxKindColors(kind OmniboxResultKind) (fg, bg color.Color) {
 		return fg, purpleColor
 	case OmniboxResultRepo:
 		return fg, secondaryColor
+	case OmniboxResultDispatchWorkflow:
+		return fg, warningColorVal
 	case OmniboxResultWorkflow:
 		return fg, accentColor
 	case OmniboxResultVuln:
