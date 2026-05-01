@@ -860,39 +860,58 @@ func (c *gitHubClient) validateDispatchInputs(ctx context.Context, owner, repo, 
 	path := workflowContentPath(workflowFile)
 	content, _, _, err := c.client.Repositories.GetContents(ctx, owner, repo, path, &github.RepositoryContentGetOptions{Ref: ref})
 	if err != nil {
-		return nil
+		return fmt.Errorf("load workflow content for dispatch validation: %w", err)
+	}
+	if content == nil {
+		return fmt.Errorf("load workflow content for dispatch validation: workflow content not found")
 	}
 	decoded, err := content.GetContent()
 	if err != nil {
-		return nil
+		return fmt.Errorf("decode workflow content for dispatch validation: %w", err)
 	}
 	workflow, ok := parseDispatchableWorkflow(path, ref, decoded)
 	if !ok {
 		return fmt.Errorf("workflow must define workflow_dispatch trigger")
 	}
-	for _, input := range workflow.Inputs {
+	return validateDispatchInputValues(workflow.Inputs, inputs)
+}
+
+func validateDispatchInputValues(definitions []WorkflowDispatchInput, inputs map[string]interface{}) error {
+	for _, input := range definitions {
 		value, exists := inputs[input.Name]
-		if input.Required && input.Default == "" && (!exists || strings.TrimSpace(fmt.Sprint(value)) == "") {
-			return fmt.Errorf("missing required workflow_dispatch input: %s", input.Name)
-		}
-		if exists && len(input.Options) > 0 {
-			valueText := strings.TrimSpace(fmt.Sprint(value))
-			if valueText == "" {
+		valueText := dispatchInputValueText(value)
+		if input.Required {
+			if !exists {
+				if input.Default == "" {
+					return fmt.Errorf("missing required workflow_dispatch input: %s", input.Name)
+				}
 				continue
 			}
-			matched := false
-			for _, option := range input.Options {
-				if valueText == option {
-					matched = true
-					break
-				}
+			if valueText == "" {
+				return fmt.Errorf("missing required workflow_dispatch input: %s", input.Name)
 			}
-			if !matched {
-				return fmt.Errorf("invalid workflow_dispatch input %s: expected one of %s", input.Name, strings.Join(input.Options, ", "))
-			}
+		}
+		if exists && len(input.Options) > 0 && valueText != "" && !stringInList(valueText, input.Options) {
+			return fmt.Errorf("invalid workflow_dispatch input %s: expected one of %s", input.Name, strings.Join(input.Options, ", "))
 		}
 	}
 	return nil
+}
+
+func dispatchInputValueText(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func stringInList(value string, values []string) bool {
+	for _, candidate := range values {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func workflowContentPath(workflowFile string) string {
@@ -987,7 +1006,7 @@ func parseDispatchableWorkflow(path, ref, content string) (DispatchableWorkflow,
 	workflow := DispatchableWorkflow{Path: path, Ref: ref}
 	var root yaml.Node
 	if err := yaml.Unmarshal([]byte(content), &root); err != nil {
-		return workflow, strings.Contains(content, "workflow_dispatch")
+		return workflow, false
 	}
 	if len(root.Content) == 0 {
 		return workflow, false

@@ -1649,7 +1649,7 @@ func fetchTokenInfoFromURL(ctx context.Context, token, apiURL string) (*FetchTok
 // Handler success path tests (with mock GitHub API)
 // =============================================================================
 
-func newGitHubTestHandlerWithMock(t *testing.T) (*Handler, *http.ServeMux, *httptest.Server) {
+func newGitHubTestHandlerWithMock(t *testing.T, configure ...func(*http.ServeMux)) (*Handler, *http.ServeMux, *httptest.Server) {
 	t.Helper()
 	mockGH := http.NewServeMux()
 
@@ -1691,6 +1691,10 @@ func newGitHubTestHandlerWithMock(t *testing.T) (*Handler, *http.ServeMux, *http
 		fmt.Fprint(w, `{"id":1}`)
 	})
 
+	for _, configure := range configure {
+		configure(mockGH)
+	}
+
 	ghSrv := httptest.NewServer(mockGH)
 	t.Cleanup(ghSrv.Close)
 
@@ -1704,7 +1708,13 @@ func newGitHubTestHandlerWithMock(t *testing.T) (*Handler, *http.ServeMux, *http
 }
 
 func TestHandlerDeployDispatch_Success(t *testing.T) {
-	_, mux, ghSrv := newGitHubTestHandlerWithMock(t)
+	_, mux, ghSrv := newGitHubTestHandlerWithMock(t, func(mockGH *http.ServeMux) {
+		mockGH.HandleFunc("GET /repos/{owner}/{repo}/contents/{path...}", func(w http.ResponseWriter, r *http.Request) {
+			content := "on:\n  workflow_dispatch:\n    inputs: {}"
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"content":"%s","encoding":"base64"}`, base64.StdEncoding.EncodeToString([]byte(content)))
+		})
+	})
 
 	origNew := newGitHubClientFunc
 	newGitHubClientFunc = func(token string) *gitHubClient {
@@ -2316,6 +2326,174 @@ func TestParseDispatchableWorkflow_Inputs(t *testing.T) {
 	assert.Equal(t, "prod", workflow.Inputs[0].Default)
 	assert.Equal(t, "choice", workflow.Inputs[0].Type)
 	assert.Equal(t, []string{"dev", "prod"}, workflow.Inputs[0].Options)
+}
+
+func TestParseDispatchableWorkflow_MalformedYAMLDoesNotFallback(t *testing.T) {
+	_, ok := parseDispatchableWorkflow(".github/workflows/deploy.yml", "main", `on:
+  workflow_dispatch: [`)
+
+	assert.False(t, ok)
+}
+
+func TestValidateDispatchInputs(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		inputs  map[string]interface{}
+		wantErr string
+	}{
+		{
+			name: "missing required input",
+			content: `on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: true
+`,
+			wantErr: "missing required workflow_dispatch input: environment",
+		},
+		{
+			name: "required input with default may be omitted",
+			content: `on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: true
+        default: prod
+`,
+		},
+		{
+			name: "required input with default rejects empty value",
+			content: `on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: true
+        default: prod
+`,
+			inputs:  map[string]interface{}{"environment": nil},
+			wantErr: "missing required workflow_dispatch input: environment",
+		},
+		{
+			name: "invalid choice",
+			content: `on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options:
+          - dev
+          - prod
+`,
+			inputs:  map[string]interface{}{"environment": "staging"},
+			wantErr: "invalid workflow_dispatch input environment: expected one of dev, prod",
+		},
+		{
+			name: "nil required input is missing",
+			content: `on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: true
+`,
+			inputs:  map[string]interface{}{"environment": nil},
+			wantErr: "missing required workflow_dispatch input: environment",
+		},
+		{
+			name: "valid choice",
+			content: `on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options:
+          - dev
+          - prod
+`,
+			inputs: map[string]interface{}{"environment": "prod"},
+		},
+		{
+			name: "workflow lacks dispatch",
+			content: `on:
+  push:
+`,
+			wantErr: "workflow must define workflow_dispatch trigger",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ghClient := newGitHubClientWithWorkflowContent(t, http.StatusOK, base64.StdEncoding.EncodeToString([]byte(tt.content)))
+
+			err := ghClient.validateDispatchInputs(context.Background(), "acme", "api", "deploy.yml", "main", tt.inputs)
+
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateDispatchInputs_ContentLoadErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		statusCode    int
+		encodedBody   string
+		wantErrPrefix string
+	}{
+		{
+			name:          "fetch failure",
+			statusCode:    http.StatusInternalServerError,
+			encodedBody:   "",
+			wantErrPrefix: "load workflow content for dispatch validation:",
+		},
+		{
+			name:          "decode failure",
+			statusCode:    http.StatusOK,
+			encodedBody:   "%%%",
+			wantErrPrefix: "decode workflow content for dispatch validation:",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ghClient := newGitHubClientWithWorkflowContent(t, tt.statusCode, tt.encodedBody)
+
+			err := ghClient.validateDispatchInputs(context.Background(), "acme", "api", "deploy.yml", "main", nil)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErrPrefix)
+		})
+	}
+}
+
+func newGitHubClientWithWorkflowContent(t *testing.T, statusCode int, encodedContent string) *gitHubClient {
+	t.Helper()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/{owner}/{repo}/contents/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "acme", r.PathValue("owner"))
+		assert.Equal(t, "api", r.PathValue("repo"))
+		assert.Equal(t, ".github/workflows/deploy.yml", r.PathValue("path"))
+		assert.Equal(t, "main", r.URL.Query().Get("ref"))
+		if statusCode != http.StatusOK {
+			w.WriteHeader(statusCode)
+			fmt.Fprint(w, `{"message":"failed"}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"content":"%s","encoding":"base64"}`, encodedContent)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	baseURL, _ := url.Parse(srv.URL + "/")
+	c := github.NewClient(nil)
+	c.BaseURL = baseURL
+	return &gitHubClient{client: c, token: "test"}
 }
 
 // =============================================================================

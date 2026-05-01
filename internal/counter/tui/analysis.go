@@ -511,6 +511,9 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 
 	analyzedRepos := analyzedRepositorySet(result)
 	m.prunePantryVulnerabilitiesForRepos(analyzedRepos)
+	if len(analyzedRepos) > 0 {
+		m.vulnerabilities = filterVulnerabilitiesOutsideRepos(m.vulnerabilities, analyzedRepos)
+	}
 	summary := m.importAnalysisToPantry(result)
 	if summary.Total > 0 {
 		m.activityLog.Add(IconScan, "Imported "+summary.String())
@@ -556,9 +559,6 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 			m.AddOutput("warning", fmt.Sprintf("Found %d exploitable %s and %d analyze-only %s", supportedCount, vulnNoun, analyzeOnlyCount, findingNoun))
 		}
 
-		if len(analyzedRepos) > 0 {
-			m.vulnerabilities = filterVulnerabilitiesOutsideRepos(m.vulnerabilities, analyzedRepos)
-		}
 		existing := make(map[string]bool, len(m.vulnerabilities))
 		for _, v := range m.vulnerabilities {
 			existing[vulnerabilityDedupKey(v)] = true

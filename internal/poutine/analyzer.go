@@ -88,12 +88,10 @@ type WorkflowMeta struct {
 }
 
 type WorkflowDispatchInput struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	Required    bool     `json:"required,omitempty"`
-	Default     string   `json:"default,omitempty"`
-	Type        string   `json:"type,omitempty"`
-	Options     []string `json:"options,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+	Type        string `json:"type,omitempty"`
 }
 
 // JobMeta contains metadata about a specific job.
