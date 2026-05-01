@@ -15,8 +15,10 @@ Last updated: 2026-04-29
 
 | Priority | Status | Item | Why now | Tracking |
 |----------|--------|------|---------|----------|
-| P1 | Planned | Self-hosted runner enumeration and persistence | This is the most valuable missing feature for the NorthSec demo. The implementation can land in chunks, but `main` should only take slices that provide real operator value. | Task: [tasks/self-hosted-runner-enumeration-and-persistence.md](tasks/self-hosted-runner-enumeration-and-persistence.md) |
+| P1 | In review | Self-hosted runner phase 1 | The current slice is now operator-usable enough for the NorthSec path: observed runner targets, workflow push or copy, callback, resident persistence, and later re-attach. | Task: [tasks/self-hosted-runner-enumeration-and-persistence.md](tasks/self-hosted-runner-enumeration-and-persistence.md) |
 | P1 | Planned | Demo hardening and rehearsal path | The happy path for the talk needs to be stable, repeatable, and covered by the exact repos and flows that will be shown live. | Ref: [WHOOLI.md](WHOOLI.md) |
+| P2 | Planned | Self-hosted runner phase 2 follow-up | Phase 1 is useful, but it is not the done-done self-hosted runner feature. The next slice needs explicit enumeration entry points, richer evidence, active validation, and clearer lifecycle state. | Task: [tasks/self-hosted-runner-follow-up-and-validation.md](tasks/self-hosted-runner-follow-up-and-validation.md) |
+| P2 | Planned | Resident runner post-job observation and auto-harvest | Once a reusable runner foothold exists, the next operator QoL gain is to notice later jobs automatically and harvest job-scoped data with meaningful metadata. | Task: [tasks/brisket-resident-runner-job-observation-and-auto-harvest.md](tasks/brisket-resident-runner-job-observation-and-auto-harvest.md) |
 | P2 | Deferred | Finish LOTP path-aware targeting for the remaining detection-only families | The current support boundary is now honest: auto-supported LOTP families show up in the menu, and other detected LOTP findings stay manual-only in the wizard. The remaining gap is path-aware targeting for directory-sensitive shapes that still cannot be generated cleanly. | Issue [#54](https://github.com/boostsecurityio/smokedmeat/issues/54) |
 | P2 | Planned | Bracket-notation secret extraction | Workflow secret inventory and app-action secret extraction still only recognize `secrets.NAME`, so bracket notation stays invisible in recon output and secret typing. | Current analysis path |
 
@@ -60,6 +62,8 @@ The minimum acceptable outcome before NorthSec is an operator-usable self-hosted
 3. gives the operator a meaningful way to validate or act on those targets
 
 The phase breakdown in [tasks/self-hosted-runner-enumeration-and-persistence.md](tasks/self-hosted-runner-enumeration-and-persistence.md) remains useful for implementation order, but it is not itself the merge criterion.
+
+The current phase 1 slice is close to that minimum: observed targets are surfaced, the operator can act on them, and the resident foothold path is usable enough for the demo. The remaining "done-done" work now belongs in narrower follow-up specs instead of stretching the NorthSec path indefinitely.
 
 ### Demo hardening
 
