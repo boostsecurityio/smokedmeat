@@ -435,7 +435,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case CallbackControlSuccessMsg:
-		m.upsertCallback(msg.Callback)
+		if msg.Action == "revoke" {
+			m.removeCallback(msg.Callback.ID)
+		} else {
+			m.upsertCallback(msg.Callback)
+		}
 		m.AddOutput("success", fmt.Sprintf("Implant %s: %s", msg.Callback.ID, msg.Action))
 		return m, nil
 
@@ -539,6 +543,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			StagerID:    msg.StagerID,
 			ErrorDetail: msg.Err.Error(),
 			Outcome:     "failed",
+		}
+		return m, m.recordHistoryCmd(historyEntry)
+
+	case RunnerTargetWorkflowPushSuccessMsg:
+		m.StartWaitingForRunnerTarget(msg.StagerID, msg.Target, "Workflow Push", msg.DwellTime)
+		switch {
+		case msg.BranchURL != "":
+			m.AddOutput("success", fmt.Sprintf("Runner-target workflow branch pushed: %s", msg.BranchURL))
+		case msg.Branch != "":
+			m.AddOutput("success", fmt.Sprintf("Runner-target workflow branch pushed: %s", msg.Branch))
+		default:
+			m.AddOutput("success", "Runner-target workflow branch pushed")
+		}
+		m.activityLog.Add(IconSuccess, "Runner-target workflow deployed, waiting for callback")
+		historyEntry := counter.HistoryPayload{
+			Type:       "exploit.attempted",
+			SessionID:  m.config.SessionID,
+			StagerID:   msg.StagerID,
+			Outcome:    "pending",
+			Repository: "",
+		}
+		if msg.Target != nil {
+			historyEntry.Repository = msg.Target.Repository
+		}
+		if msg.BranchURL != "" {
+			historyEntry.PRURL = msg.BranchURL
+		}
+		return m, m.recordHistoryCmd(historyEntry)
+
+	case RunnerTargetWorkflowPushFailedMsg:
+		if m.phase == PhaseWizard || m.view == ViewWizard {
+			m.CloseWizard()
+		}
+		friendlyErr := parseDeploymentError(msg.Err)
+		m.AddOutput("error", "Runner-target workflow deployment failed: "+friendlyErr)
+		m.AddOutput("hint", "Use the copy workflow path if you need a manual or alternate-foothold route.")
+		m.activityLog.Add(IconError, "Runner-target deployment failed: "+friendlyErr)
+		historyEntry := counter.HistoryPayload{
+			Type:        "exploit.failed",
+			SessionID:   m.config.SessionID,
+			StagerID:    msg.StagerID,
+			ErrorDetail: msg.Err.Error(),
+			Outcome:     "failed",
+		}
+		if msg.Target != nil {
+			historyEntry.Repository = msg.Target.Repository
 		}
 		return m, m.recordHistoryCmd(historyEntry)
 
@@ -1143,6 +1193,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ExpressDataMsg:
 		return m.handleExpressData(msg)
 
+	case LootSyncMsg:
+		return m.handleLootSync(msg)
+
 	case TokenAcquiredMsg:
 		return m.handleTokenAcquired(msg)
 
@@ -1506,6 +1559,9 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.focus != FocusInput || m.input.Value() == "" {
 			if m.phase == PhasePostExploit {
 				m.dismissKnownDwellAgents()
+				if m.activeAgent != nil {
+					m.clearSessionContext(m.activeAgent.ID)
+				}
 				m.activeAgent = nil
 				m.dwellMode = false
 				m.jobDeadline = time.Time{}
@@ -1655,15 +1711,27 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "x":
 		if m.focus != FocusInput && m.paneFocus == PaneFocusFindings {
-			if node := m.SelectedTreeNode(); node == nil || node.Type != TreeNodeVuln {
-				m.AddOutput("error", "Exploit shortcut requires a [VULN] node.")
+			node := m.SelectedTreeNode()
+			if node == nil {
+				m.AddOutput("error", "Action shortcut requires a [VULN] or [SH-RUNNER] node.")
 				return m, nil
 			}
-			cmd, err := m.openSelectedVulnerabilityWizard("")
-			if err != nil {
-				m.AddOutput("error", err.Error())
+			switch node.Type {
+			case TreeNodeVuln:
+				cmd, err := m.openSelectedVulnerabilityWizard("")
+				if err != nil {
+					m.AddOutput("error", err.Error())
+				}
+				return m, cmd
+			case TreeNodeSelfHostedRunner:
+				cmd, err := m.openSelectedRunnerTarget()
+				if err != nil {
+					m.AddOutput("error", err.Error())
+				}
+				return m, cmd
+			default:
+				m.AddOutput("error", "Action shortcut requires a [VULN] or [SH-RUNNER] node.")
 			}
-			return m, cmd
 		}
 
 	case "K":
@@ -1875,7 +1943,7 @@ func (m Model) selectedDeepAnalyzeScope() (scopeType, scope string) {
 	switch node.Type {
 	case TreeNodeOrg:
 		return "org", m.treeNodeOrg(node)
-	case TreeNodeRepo, TreeNodeWorkflow, TreeNodeJob, TreeNodeVuln:
+	case TreeNodeRepo, TreeNodeWorkflow, TreeNodeSelfHostedRunner, TreeNodeJob, TreeNodeVuln:
 		return "repo", m.treeNodeRepo(node)
 	default:
 		return "", ""
@@ -1892,7 +1960,7 @@ func (m Model) selectedTreeTargetSpec() string {
 		if org := m.treeNodeOrg(node); org != "" {
 			return "org:" + org
 		}
-	case TreeNodeRepo:
+	case TreeNodeRepo, TreeNodeSelfHostedRunner:
 		if repo := m.treeNodeRepo(node); repo != "" {
 			return "repo:" + repo
 		}

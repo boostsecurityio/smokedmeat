@@ -301,6 +301,8 @@ func (m *Model) treeNodeURL(node *TreeNode) string {
 		return GitHubOrgURL(m.treeNodeOrg(node))
 	case TreeNodeRepo:
 		return GitHubRepoURL(m.treeNodeRepo(node))
+	case TreeNodeSelfHostedRunner:
+		return GitHubRepoURL(m.treeNodeRepo(node))
 	case TreeNodeWorkflow:
 		repo := m.treeNodeRepo(node)
 		if repo == "" {
@@ -374,6 +376,8 @@ func (m *Model) getTreeNodeStyle(node *TreeNode) lipgloss.Style {
 		return treeRepoStyle
 	case TreeNodeWorkflow:
 		return treeWorkflowStyle
+	case TreeNodeSelfHostedRunner:
+		return treeRunnerStyle
 	case TreeNodeJob:
 		return treeJobStyle
 	case TreeNodeSecret:

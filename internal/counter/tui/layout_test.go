@@ -204,6 +204,43 @@ func TestStickersLayout_FlexHeightShrinksWhenActivityExpands(t *testing.T) {
 	assert.Equal(t, 40-fixedChromeHeight-expandedActivityHeight, sl.FlexHeight())
 }
 
+func TestFormatWizardContent_WrapsLongLinesToWidth(t *testing.T) {
+	out := formatWizardContent("     ", "", "Current token can interact with PRs but cannot create the branch directly - contents:write is required", 40)
+
+	for _, line := range strings.Split(out, "\n") {
+		assert.LessOrEqual(t, lipgloss.Width(line), 40)
+	}
+}
+
+func TestBuildWizardModal_RunnerTargetStep3WrapsLongSSHStatusAndRoute(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.wizard = &WizardState{
+		Kind:               WizardKindRunnerTarget,
+		Step:               3,
+		RunnerTargetAction: RunnerTargetActionAutoWorkflowPush,
+		PersistenceAttempt: true,
+		SelectedRunnerTarget: &RunnerTargetSelection{
+			Repository:            "whooli/infrastructure-definitions",
+			LabelDisplay:          "linux-x64 +dynamic",
+			LabelSet:              []string{"self-hosted", "linux", "x64"},
+			DynamicLabelSet:       []string{"${{ needs.bootstrap.outputs.runner_label }}"},
+			ObservedWorkflowPaths: []string{".github/workflows/self-hosted-trusted-sync.yml"},
+			ObservedJobNames:      []string{"sync"},
+		},
+	}
+	m.sshState = &SSHState{
+		Results: []SSHTrialResult{
+			{Repo: "whooli/infrastructure-definitions", Success: true, Permission: "write"},
+		},
+	}
+
+	modal := m.buildWizardModal(96, 26)
+
+	for _, line := range modal {
+		assert.LessOrEqualf(t, lipgloss.Width(line), 96, "line=%q", stripANSI(line))
+	}
+}
+
 func TestStickersLayout_HeaderPositionStable(t *testing.T) {
 	sl := NewStickersLayout()
 	renderers := stubRenderers()
@@ -360,9 +397,72 @@ func TestBuildWizardModal_LOTPShowsAdvancedOptionsBeforePreview(t *testing.T) {
 	assert.Contains(t, out, "Callbacks:")
 	assert.Contains(t, out, "Cache Poisoning:")
 	assert.Contains(t, out, "Preview:")
-	assert.Contains(t, out, ":dwell")
+	assert.Contains(t, out, ":mode")
 	assert.Contains(t, out, "╰")
 	assert.Contains(t, out, "Only proceed if you are authorized")
+}
+
+func TestBuildWizardModal_LOTPShowsPersistenceForSelfHostedOverlap(t *testing.T) {
+	m := NewModel(Config{
+		SessionID:          "test",
+		KitchenExternalURL: "https://thoroughly-control-browsers-linear.trycloudflare.com",
+	})
+	m.pantry = observedSelfHostedRunnerPantry(t)
+	m.wizard = &WizardState{
+		Step: 3,
+		SelectedVuln: &Vulnerability{
+			Repository:  "acme/api",
+			Workflow:    ".github/workflows/pr.yml",
+			Job:         "build",
+			RuleID:      "untrusted_checkout_exec",
+			Context:     "untrusted_checkout",
+			LOTPTool:    "make",
+			LOTPTargets: []string{"Makefile"},
+		},
+		DeliveryMethod: DeliveryLOTP,
+	}
+
+	out := stripANSI(strings.Join(m.buildWizardModal(90, 26), "\n"))
+
+	assert.Contains(t, out, "Persistence:")
+	assert.Contains(t, out, "Off [p] to toggle")
+	assert.Contains(t, out, ":persist")
+	assert.Contains(t, out, "╰")
+	assert.NotContains(t, out, "\t")
+}
+
+func TestBuildRunnerTargetStep3PersistentResidentHidesCallbackBudget(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.wizard = &WizardState{
+		Kind:               WizardKindRunnerTarget,
+		Step:               3,
+		RunnerTargetAction: RunnerTargetActionAutoWorkflowPush,
+		PersistenceAttempt: true,
+		SelectedRunnerTarget: &RunnerTargetSelection{
+			Repository:            "whooli/infrastructure-definitions",
+			LabelDisplay:          "linux-x64 +dynamic",
+			LabelSet:              []string{"self-hosted", "linux", "x64"},
+			DynamicLabelSet:       []string{"${{ needs.bootstrap.outputs.runner_label }}"},
+			ObservedWorkflowPaths: []string{".github/workflows/benchmark-integrity.yml"},
+			ObservedJobNames:      []string{"execute"},
+		},
+	}
+	m.sshState = &SSHState{
+		Results: []SSHTrialResult{
+			{Repo: "whooli/infrastructure-definitions", Success: true, Permission: "write"},
+		},
+	}
+
+	out := stripANSI(strings.Join(m.buildRunnerTargetStep3Content(120), "\n"))
+
+	assert.Contains(t, out, "Proceed only if authorized. This will push a real branch.")
+	assert.Contains(t, out, "Job:")
+	assert.Contains(t, out, runnerTargetWorkflowJobName())
+	assert.Contains(t, out, "Seed callback:")
+	assert.Contains(t, out, "Express once to confirm execution")
+	assert.Contains(t, out, "Resident foothold:")
+	assert.Contains(t, out, "Enabled after job exit")
+	assert.NotContains(t, out, "Callbacks:")
 }
 
 func TestBuildWizardStep3LOTP_PreviewMatchesGeneratedPackageJSON(t *testing.T) {
@@ -439,8 +539,8 @@ func TestPadRight_KeepsRequestedWidth(t *testing.T) {
 	assert.Equal(t, 4, lipgloss.Width(padRight("⚠️", 4)))
 }
 
-func TestFormatWizardContent_AddsVariationSelectorSlack(t *testing.T) {
-	assert.Equal(t, "⚠️   ", formatWizardContent("", "", "⚠️", 4))
+func TestFormatWizardContent_KeepsVariationSelectorWithinWidth(t *testing.T) {
+	assert.Equal(t, 4, lipgloss.Width(formatWizardContent("", "", "⚠️", 4)))
 }
 
 func TestRenderPreviewBoxContent_TruncatesLongLinesWithoutWrapping(t *testing.T) {
@@ -448,6 +548,15 @@ func TestRenderPreviewBoxContent_TruncatesLongLinesWithoutWrapping(t *testing.T)
 
 	lines := strings.Split(stripANSI(box), "\n")
 	require.Len(t, lines, 3)
+	assert.Contains(t, lines[1], "...")
+}
+
+func TestRenderPreviewBoxContent_ExpandsTabsBeforeTruncating(t *testing.T) {
+	box := renderPreviewBoxContent(30, []string{"\t@curl -s '" + strings.Repeat("x", 80)})
+
+	lines := strings.Split(stripANSI(box), "\n")
+	require.Len(t, lines, 3)
+	assert.NotContains(t, box, "\t")
 	assert.Contains(t, lines[1], "...")
 }
 

@@ -44,6 +44,32 @@ func TestModel_Update_AutoPRDeploymentSuccess(t *testing.T) {
 	assert.NotNil(t, cmd, "Should return a history recording command")
 }
 
+func TestModel_Update_RunnerTargetWorkflowPushSuccess(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+	m.phase = PhaseWizard
+
+	result, cmd := m.Update(RunnerTargetWorkflowPushSuccessMsg{
+		StagerID:  "stager-runner-1",
+		Branch:    "smokedmeat-runner-7",
+		BranchURL: "https://github.com/org/repo/tree/smokedmeat-runner-7",
+		Target: &RunnerTargetSelection{
+			Repository:            "org/repo",
+			LabelDisplay:          "linux-x64",
+			ObservedWorkflowPaths: []string{".github/workflows/self-hosted.yml"},
+			ObservedJobNames:      []string{"sync"},
+		},
+	})
+
+	model := result.(Model)
+	assert.Equal(t, PhaseWaiting, model.phase)
+	require.NotNil(t, model.waiting)
+	assert.Equal(t, "stager-runner-1", model.waiting.StagerID)
+	assert.Equal(t, "org/repo", model.waiting.TargetRepo)
+	require.NotEmpty(t, model.output)
+	assert.Equal(t, "success", model.output[len(model.output)-1].Type)
+	assert.NotNil(t, cmd)
+}
+
 func TestModel_Update_IssueDeploymentSuccess(t *testing.T) {
 	m := NewModel(Config{SessionID: "test-session"})
 	m.phase = PhaseWizard
@@ -106,6 +132,29 @@ func TestModel_Update_AutoPRDeploymentFailed(t *testing.T) {
 	assert.Equal(t, "hint", model.output[1].Type)
 	assert.Contains(t, model.output[1].Content, "Copy payload")
 	assert.NotNil(t, cmd, "Should return a history recording command for failures too")
+}
+
+func TestModel_Update_RunnerTargetWorkflowPushFailed(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+	m.phase = PhaseWizard
+	m.wizard = &WizardState{Kind: WizardKindRunnerTarget, Step: 3}
+
+	result, cmd := m.Update(RunnerTargetWorkflowPushFailedMsg{
+		StagerID: "stager-runner-fail",
+		Target: &RunnerTargetSelection{
+			Repository: "org/repo",
+		},
+		Err: errors.New("fork failed: rate limited"),
+	})
+
+	model := result.(Model)
+	assert.Equal(t, PhaseRecon, model.phase)
+	require.Len(t, model.output, 2)
+	assert.Equal(t, "error", model.output[0].Type)
+	assert.Contains(t, model.output[0].Content, "Runner-target workflow deployment failed")
+	assert.Equal(t, "hint", model.output[1].Type)
+	assert.Contains(t, model.output[1].Content, "copy workflow")
+	assert.NotNil(t, cmd)
 }
 
 func TestModel_Update_IssueDeploymentFailed(t *testing.T) {
@@ -1025,6 +1074,35 @@ func TestModel_Update_CallbackControlFailedMsg_IncludesCallbackID(t *testing.T) 
 	assert.Contains(t, last.Content, "cb-abc123", "output should include the callback ID")
 	assert.Contains(t, last.Content, "revoke", "output should include the action")
 	assert.Contains(t, last.Content, "connection refused", "output should include the error")
+}
+
+func TestModel_Update_CallbackControlSuccessMsg_RevokeRemovesCallback(t *testing.T) {
+	m := NewModel(Config{SessionID: "test-session"})
+	m.phase = PhaseRecon
+	m.callbackModal = &CallbackModalState{Cursor: 0}
+	m.callbacks = []counter.CallbackPayload{
+		{ID: "cb-keep", CreatedAt: time.Now()},
+		{ID: "cb-revoke", CreatedAt: time.Now().Add(-time.Minute)},
+	}
+	m.setCallbacks(m.callbacks)
+
+	result, _ := m.Update(CallbackControlSuccessMsg{
+		Action: "revoke",
+		Callback: counter.CallbackPayload{
+			ID:        "cb-revoke",
+			CreatedAt: time.Now().Add(-time.Minute),
+			RevokedAt: ptrTime(time.Now()),
+		},
+	})
+
+	model := result.(Model)
+	require.Len(t, model.callbacks, 1)
+	assert.Equal(t, "cb-keep", model.callbacks[0].ID)
+	require.NotEmpty(t, model.output)
+	last := model.output[len(model.output)-1]
+	assert.Equal(t, "success", last.Type)
+	assert.Contains(t, last.Content, "cb-revoke")
+	assert.Contains(t, last.Content, "revoke")
 }
 
 func TestHandleKeyMsg_CopyLoot_GitHubAppKeyCopiesPEM(t *testing.T) {

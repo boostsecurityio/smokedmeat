@@ -13,24 +13,25 @@ import (
 )
 
 type StagerRow struct {
-	ID            string            `json:"id"`
-	ResponseType  string            `json:"response_type"`
-	Payload       string            `json:"payload"`
-	CreatedAt     time.Time         `json:"created_at"`
-	ExpiresAt     time.Time         `json:"expires_at"`
-	CalledBack    bool              `json:"called_back"`
-	CallbackAt    time.Time         `json:"callback_at"`
-	CallbackIP    string            `json:"callback_ip"`
-	SessionID     string            `json:"session_id"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
-	DwellTime     time.Duration     `json:"dwell_time"`
-	Persistent    bool              `json:"persistent"`
-	MaxCallbacks  int               `json:"max_callbacks,omitempty"`
-	DefaultMode   string            `json:"default_mode,omitempty"`
-	NextMode      string            `json:"next_mode,omitempty"`
-	CallbackCount int               `json:"callback_count"`
-	LastAgentID   string            `json:"last_agent_id,omitempty"`
-	RevokedAt     *time.Time        `json:"revoked_at,omitempty"`
+	ID              string            `json:"id"`
+	ResponseType    string            `json:"response_type"`
+	Payload         string            `json:"payload"`
+	CreatedAt       time.Time         `json:"created_at"`
+	ExpiresAt       time.Time         `json:"expires_at"`
+	CalledBack      bool              `json:"called_back"`
+	CallbackAt      time.Time         `json:"callback_at"`
+	CallbackIP      string            `json:"callback_ip"`
+	SessionID       string            `json:"session_id"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+	PrivateMetadata map[string]string `json:"private_metadata,omitempty"`
+	DwellTime       time.Duration     `json:"dwell_time"`
+	Persistent      bool              `json:"persistent"`
+	MaxCallbacks    int               `json:"max_callbacks,omitempty"`
+	DefaultMode     string            `json:"default_mode,omitempty"`
+	NextMode        string            `json:"next_mode,omitempty"`
+	CallbackCount   int               `json:"callback_count"`
+	LastAgentID     string            `json:"last_agent_id,omitempty"`
+	RevokedAt       *time.Time        `json:"revoked_at,omitempty"`
 }
 
 type StagerRepository struct {

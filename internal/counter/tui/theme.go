@@ -179,6 +179,7 @@ func ApplyTheme(name ThemeName) {
 	treeRepoStyle = lipgloss.NewStyle().Foreground(secondaryColor)
 	treePrivateRepoStyle = lipgloss.NewStyle().Foreground(primaryColor).Bold(true)
 	treeWorkflowStyle = lipgloss.NewStyle().Foreground(accentColor)
+	treeRunnerStyle = lipgloss.NewStyle().Foreground(warningColorVal).Bold(true)
 	treeJobStyle = lipgloss.NewStyle().Foreground(cyanColor)
 	treeSecretStyle = lipgloss.NewStyle().Foreground(primaryColor)
 	treeVulnStyle = lipgloss.NewStyle().Foreground(warningColorVal)

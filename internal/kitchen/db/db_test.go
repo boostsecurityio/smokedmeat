@@ -6,6 +6,7 @@ package db
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,4 +43,39 @@ func TestOrderRepository_ListPending(t *testing.T) {
 	orders, err := repo.ListPending()
 	require.NoError(t, err)
 	assert.Empty(t, orders)
+}
+
+func TestAgentRepository_UpsertPreservesAgentToken(t *testing.T) {
+	db := setupDB(t)
+	repo := NewAgentRepository(db)
+	now := time.Now().UTC()
+
+	err := repo.Upsert(&AgentRow{
+		AgentID:        "agt-1",
+		SessionID:      "sess-1",
+		AgentToken:     "agt_token",
+		TokenCreatedAt: now,
+		TokenExpiresAt: now.Add(time.Hour),
+	})
+	require.NoError(t, err)
+
+	err = repo.Upsert(&AgentRow{
+		AgentID:   "agt-1",
+		SessionID: "sess-1",
+		Hostname:  "runner-1",
+		OS:        "linux",
+		Arch:      "amd64",
+		FirstSeen: now,
+		LastSeen:  now,
+		IsOnline:  true,
+	})
+	require.NoError(t, err)
+
+	row, err := repo.Get("agt-1")
+	require.NoError(t, err)
+	require.NotNil(t, row)
+	assert.Equal(t, "agt_token", row.AgentToken)
+	assert.Equal(t, now, row.TokenCreatedAt)
+	assert.Equal(t, now.Add(time.Hour), row.TokenExpiresAt)
+	assert.Equal(t, "runner-1", row.Hostname)
 }

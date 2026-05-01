@@ -307,6 +307,73 @@ func TestHandleGitHubDeployPreflight_NormalizesWorkflowPathForVisibilityCheck(t 
 	assert.Equal(t, deployStatePass, resp.Capabilities[deployCapabilityDispatch].State)
 }
 
+func TestHandleGitHubDeployPreflight_WorkflowPushRequiresRepoPushPermission(t *testing.T) {
+	tests := []struct {
+		name          string
+		repoPush      bool
+		expectedState string
+		expected      string
+	}{
+		{
+			name:          "repo push denied",
+			repoPush:      false,
+			expectedState: deployStateFail,
+			expected:      "token lacks repository write access",
+		},
+		{
+			name:          "repo push allowed",
+			repoPush:      true,
+			expectedState: deployStatePass,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			swapGitHubClientTransport(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/api":
+					return jsonResponse(http.StatusOK, fmt.Sprintf(`{"private":false,"default_branch":"main","allow_forking":true,"has_issues":true,"permissions":{"push":%t}}`, tt.repoPush)), nil
+				case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/api/actions/workflows/analyze.yml":
+					return jsonResponse(http.StatusOK, `{"id":1,"path":".github/workflows/analyze.yml","state":"active"}`), nil
+				case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+					body, err := io.ReadAll(r.Body)
+					require.NoError(t, err)
+					switch {
+					case strings.Contains(string(body), "RepoFlags"):
+						return jsonResponse(http.StatusOK, `{"data":{"repository":{"hasIssuesEnabled":true,"hasPullRequestsEnabled":true}}}`), nil
+					default:
+						return jsonResponse(http.StatusOK, `{"data":{}}`), nil
+					}
+				default:
+					t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+					return nil, nil
+				}
+			}))
+
+			_, mux := newGitHubTestHandler()
+			body := `{
+				"token":"ghp_test",
+				"token_type":"classic_pat",
+				"token_owner":"vikorium",
+				"scopes":["repo","workflow"],
+				"vuln":{"repository":"acme/api","workflow":".github/workflows/analyze.yml","context":"workflow_dispatch_input"}
+			}`
+			req := httptest.NewRequest(http.MethodPost, "/github/deploy/preflight", strings.NewReader(body))
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			require.Equalf(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+			var resp DeployPreflightResponse
+			require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+			capability := resp.Capabilities[deployCapabilityWorkflowPush]
+			assert.Equal(t, tt.expectedState, capability.State)
+			if tt.expected != "" {
+				assert.Equal(t, tt.expected, capability.Reason)
+			}
+		})
+	}
+}
+
 func TestHandleGitHubDeployPreflight_NoForkPRBlockedButStubAllowed(t *testing.T) {
 	swapGitHubClientTransport(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch {

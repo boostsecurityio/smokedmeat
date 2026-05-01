@@ -47,6 +47,47 @@ func TestLookupCloudConfig_GCP(t *testing.T) {
 	assert.Equal(t, "sa@project.iam.gserviceaccount.com", config["service-account"])
 }
 
+func TestLookupCloudConfig_GCPPrefersActiveJobToken(t *testing.T) {
+	p := pantry.New()
+	repo := pantry.NewRepository("whooli", "infrastructure-definitions", "github")
+	require.NoError(t, p.AddAsset(repo))
+	workflow := pantry.NewWorkflow(repo.ID, ".github/workflows/deploy.yml")
+	require.NoError(t, p.AddAsset(workflow))
+	require.NoError(t, p.AddRelationship(repo.ID, workflow.ID, pantry.Contains()))
+	job := pantry.NewJob(workflow.ID, "sync")
+	require.NoError(t, p.AddAsset(job))
+	require.NoError(t, p.AddRelationship(workflow.ID, job.ID, pantry.Contains()))
+
+	cloud := pantry.NewCloud("gcp", "oidc_trust", "deploy@whooli.iam.gserviceaccount.com")
+	require.NoError(t, p.AddAsset(cloud))
+	require.NoError(t, p.AddRelationship(job.ID, cloud.ID, pantry.Exposes("sync", "")))
+	targetToken := pantry.NewToken("gcp_oidc", cloud.ID, []string{"iam.serviceAccounts.getAccessToken"})
+	targetToken.SetProperty("workload_provider", "projects/123/locations/global/workloadIdentityPools/pool/providers/deploy")
+	targetToken.SetProperty("service_account", "deploy@whooli.iam.gserviceaccount.com")
+	require.NoError(t, p.AddAsset(targetToken))
+	require.NoError(t, p.AddRelationship(cloud.ID, targetToken.ID, pantry.Contains()))
+
+	otherToken := pantry.NewToken("gcp_oidc", "gcp:oidc_trust:bootstrap@whooli.iam.gserviceaccount.com", []string{"iam.serviceAccounts.getAccessToken"})
+	otherToken.SetProperty("workload_provider", "projects/999/locations/global/workloadIdentityPools/pool/providers/bootstrap")
+	otherToken.SetProperty("service_account", "bootstrap@whooli.iam.gserviceaccount.com")
+	require.NoError(t, p.AddAsset(otherToken))
+
+	m := Model{
+		pantry: p,
+		activeAgent: &AgentState{
+			ID:       "agt-1",
+			Repo:     "whooli/infrastructure-definitions",
+			Workflow: ".github/workflows/deploy.yml",
+			Job:      "sync",
+		},
+	}
+
+	config := m.lookupCloudConfig("gcp")
+
+	assert.Equal(t, "projects/123/locations/global/workloadIdentityPools/pool/providers/deploy", config["workload-identity-provider"])
+	assert.Equal(t, "deploy@whooli.iam.gserviceaccount.com", config["service-account"])
+}
+
 func TestLookupCloudConfig_Azure(t *testing.T) {
 	p := pantry.New()
 	token := pantry.NewToken("azure_oidc", "job:deploy", []string{"Application.Read.All"})

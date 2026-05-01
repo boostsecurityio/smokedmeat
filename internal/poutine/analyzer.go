@@ -88,6 +88,7 @@ type WorkflowMeta struct {
 type JobMeta struct {
 	ID            string            `json:"id"`                     // Mandatory job key from YAML
 	DisplayName   string            `json:"display_name,omitempty"` // Optional name attribute
+	RunsOn        []string          `json:"runs_on,omitempty"`
 	Secrets       []string          `json:"secrets,omitempty"`
 	CloudActions  []CloudAction     `json:"cloud_actions,omitempty"`
 	AppActions    []AppAction       `json:"app_actions,omitempty"`
@@ -548,6 +549,10 @@ func extractWorkflowMetaWithVictims(result *AnalysisResult, pkg *models.PackageI
 			}
 
 			for _, runsOn := range job.RunsOn {
+				label := strings.TrimSpace(runsOn)
+				if label != "" {
+					jobMeta.RunsOn = append(jobMeta.RunsOn, label)
+				}
 				if strings.Contains(strings.ToLower(runsOn), "self-hosted") {
 					jobMeta.SelfHosted = true
 					meta.SelfHosted = true

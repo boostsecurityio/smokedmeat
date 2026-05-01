@@ -17,15 +17,16 @@ import (
 type AssetType string
 
 const (
-	AssetOrganization  AssetType = "organization"
-	AssetRepository    AssetType = "repository"
-	AssetWorkflow      AssetType = "workflow"
-	AssetJob           AssetType = "job"
-	AssetSecret        AssetType = "secret"
-	AssetToken         AssetType = "token"
-	AssetCloud         AssetType = "cloud"
-	AssetAgent         AssetType = "agent"
-	AssetVulnerability AssetType = "vulnerability"
+	AssetOrganization     AssetType = "organization"
+	AssetRepository       AssetType = "repository"
+	AssetWorkflow         AssetType = "workflow"
+	AssetJob              AssetType = "job"
+	AssetSelfHostedRunner AssetType = "self_hosted_runner_target"
+	AssetSecret           AssetType = "secret"
+	AssetToken            AssetType = "token"
+	AssetCloud            AssetType = "cloud"
+	AssetAgent            AssetType = "agent"
+	AssetVulnerability    AssetType = "vulnerability"
 )
 
 // AssetState indicates the operational state of an asset.
@@ -108,6 +109,27 @@ func NewJob(workflowID, jobName string) Asset {
 	id := fmt.Sprintf("%s:job:%s", workflowID, jobName)
 	asset := NewAsset(id, AssetJob, jobName)
 	asset.Properties["workflow_id"] = workflowID
+	return asset
+}
+
+func NewSelfHostedRunnerTarget(repoID string, labelSet []string) Asset {
+	normalized := NormalizeSelfHostedRunnerLabels(labelSet)
+	staticLabels, dynamicLabels := SplitSelfHostedRunnerLabels(normalized)
+	display := SelfHostedRunnerLabelDisplay(normalized)
+	id := selfHostedRunnerTargetID(repoID, normalized)
+	asset := NewAsset(id, AssetSelfHostedRunner, display)
+	asset.Properties["repo_id"] = repoID
+	asset.Properties["scope"] = "unknown"
+	asset.Properties["label_set"] = staticLabels
+	asset.Properties["dynamic_label_set"] = dynamicLabels
+	asset.Properties["observed_label_set"] = normalized
+	asset.Properties["label_display"] = display
+	asset.Properties["visibility_model"] = "unknown"
+	asset.Properties["repo_eligibility"] = "unknown"
+	asset.Properties["fork_pr_execution"] = "unknown"
+	asset.Properties["ephemerality"] = "unknown"
+	asset.Properties["existing_usage"] = true
+	asset.Properties["target_status"] = "observed"
 	return asset
 }
 
@@ -203,6 +225,10 @@ func VulnerabilityExploitSupportWithBashContext(provider, path, ruleID, bashCont
 	default:
 		return false, "This finding is analyze-only in v0.1.0. Exploit actions are only available for injection and pwn-request findings."
 	}
+}
+
+func IsSelfHostedRunnerAnalyzeOnlyRule(ruleID string) bool {
+	return strings.TrimSpace(ruleID) == "pr_runs_on_self_hosted"
 }
 
 func SetVulnerabilityExploitSupport(asset *Asset) {

@@ -133,3 +133,50 @@ func TestStartWizardPreflight_ClearsStaleDispatchStatusWithoutCredential(t *test
 	assert.Equal(t, deployStateFail, state)
 	assert.Equal(t, "No dispatch-capable token is available", reason)
 }
+
+func TestRunnerTargetActionStatus_BlocksAutoWorkflowPushWithoutContentsWrite(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.tokenInfo = &TokenInfo{Value: "ghs_app_token", Type: TokenTypeInstallApp, Source: "loot:APP_TOKEN_whooli"}
+	m.appTokenPermissions = map[string]string{
+		"contents":  "read",
+		"workflows": "write",
+	}
+
+	state, reason := m.runnerTargetActionStatus(RunnerTargetActionAutoWorkflowPush)
+
+	assert.Equal(t, deployStateDenied, state)
+	assert.Contains(t, reason, "contents:write")
+}
+
+func TestRunnerTargetActionStatus_BlocksAutoWorkflowPushWithoutWorkflowFileWrite(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.tokenInfo = &TokenInfo{Value: "ghs_app_token", Type: TokenTypeInstallApp, Source: "loot:APP_TOKEN_whooli"}
+	m.appTokenPermissions = map[string]string{
+		"contents": "write",
+	}
+
+	state, reason := m.runnerTargetActionStatus(RunnerTargetActionAutoWorkflowPush)
+
+	assert.Equal(t, deployStateDenied, state)
+	assert.Contains(t, reason, ".github/workflows")
+}
+
+func TestRunnerTargetActionStatus_AllowsAutoWorkflowPushViaSSH(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.wizard = &WizardState{
+		Kind:                 WizardKindRunnerTarget,
+		SelectedRunnerTarget: &RunnerTargetSelection{Repository: "acme/api"},
+	}
+	m.sshState = &SSHState{
+		KeyName:  "DEPLOY_KEY",
+		KeyValue: "-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----",
+		Results: []SSHTrialResult{
+			{Repo: "acme/api", Success: true, Permission: "write"},
+		},
+	}
+
+	state, reason := m.runnerTargetActionStatus(RunnerTargetActionAutoWorkflowPush)
+
+	assert.Equal(t, deployStateConfirmed, state)
+	assert.Contains(t, reason, "git over SSH")
+}

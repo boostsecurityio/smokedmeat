@@ -63,17 +63,9 @@ func (m *Model) renderActiveAgent(width, height int) string {
 	var lines []string
 	lines = append(lines, " "+panelTitleStyle.Render("Agent Status"))
 
-	remaining := time.Until(m.jobDeadline)
-	statusText := "✓ Express complete"
-	if remaining <= 0 || m.jobDeadline.IsZero() {
-		if m.dwellMode {
-			statusText = "✓ Dwell complete"
-		}
-	} else {
-		statusText = fmt.Sprintf("⏱ %s remaining", formatCountdown(remaining))
-	}
+	statusText, remaining, countdown := m.activeAgentStatus()
 	lines = append(lines,
-		mutedColor.Render("  Agent: ")+truncate(agent.ID, max(width-22, 12))+" | "+renderAgentStatus(statusText, remaining, m.dwellMode, m.jobDeadline.IsZero()),
+		mutedColor.Render("  Agent: ")+truncate(agent.ID, max(width-22, 12))+" | "+renderAgentStatus(statusText, remaining, countdown),
 		m.renderAgentProvenanceLine(agent, width),
 		mutedColor.Render("  Connected back: ")+m.renderAgentConnectedBack(agent),
 	)
@@ -86,6 +78,44 @@ func (m *Model) renderActiveAgent(width, height int) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func (m Model) activeAgentStatus() (string, time.Duration, bool) {
+	remaining := time.Until(m.jobDeadline)
+	switch m.activeAgentMode() {
+	case agentModeResident:
+		return "✓ Resident foothold online", remaining, false
+	case agentModeDwell:
+		switch {
+		case m.jobDeadline.IsZero():
+			return "✓ Dwell active", remaining, false
+		case remaining <= 0:
+			return "✓ Dwell complete", remaining, false
+		default:
+			return fmt.Sprintf("⏱ %s remaining", formatCountdown(remaining)), remaining, true
+		}
+	default:
+		switch {
+		case !m.jobDeadline.IsZero() && remaining > 0:
+			return fmt.Sprintf("⏱ %s remaining", formatCountdown(remaining)), remaining, true
+		default:
+			return "✓ Express complete", remaining, false
+		}
+	}
+}
+
+func (m Model) activeAgentMode() string {
+	if m.activeAgent == nil {
+		return ""
+	}
+	mode := strings.TrimSpace(m.activeAgent.Mode)
+	if mode != "" {
+		return mode
+	}
+	if m.dwellMode {
+		return agentModeDwell
+	}
+	return agentModeExpress
 }
 
 func formatCountdown(d time.Duration) string {
@@ -102,11 +132,8 @@ func formatCountdown(d time.Duration) string {
 	return fmt.Sprintf("0:%02d", seconds)
 }
 
-func renderAgentStatus(statusText string, remaining time.Duration, dwellMode, noDeadline bool) string {
-	if remaining <= 0 || noDeadline {
-		if dwellMode {
-			return successColor.Render(statusText)
-		}
+func renderAgentStatus(statusText string, remaining time.Duration, countdown bool) string {
+	if !countdown {
 		return successColor.Render(statusText)
 	}
 	countdownStyle := successColor

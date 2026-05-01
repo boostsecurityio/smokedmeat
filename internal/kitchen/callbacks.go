@@ -98,7 +98,7 @@ func callbackSummary(stager *RegisteredStager) CallbackSummary {
 		CallbackCount: stager.CallbackCount,
 		LastAgentID:   stager.LastAgentID,
 		RevokedAt:     stager.RevokedAt,
-		Metadata:      stager.Metadata,
+		Metadata:      publicStagerMetadata(stager.Metadata),
 	}
 	if !stager.ExpiresAt.IsZero() {
 		expiresAt := stager.ExpiresAt
@@ -138,25 +138,30 @@ func stagerRowFromRegistered(stager *RegisteredStager) *db.StagerRow {
 	if stager == nil {
 		return nil
 	}
+	metadata, legacyPrivateMetadata := splitStagerMetadata(stager.Metadata)
+	privateMetadata := cloneStagerMetadata(stager.PrivateMetadata)
+	privateMetadata = mergeStagerMetadata(privateMetadata, legacyPrivateMetadata)
+
 	row := &db.StagerRow{
-		ID:            stager.ID,
-		ResponseType:  stager.ResponseType,
-		Payload:       stager.Payload,
-		CreatedAt:     stager.CreatedAt,
-		ExpiresAt:     stager.ExpiresAt,
-		CalledBack:    stager.CalledBack,
-		CallbackAt:    stager.CallbackAt,
-		CallbackIP:    stager.CallbackIP,
-		SessionID:     stager.SessionID,
-		Metadata:      stager.Metadata,
-		DwellTime:     stager.DwellTime,
-		Persistent:    stager.Persistent,
-		MaxCallbacks:  stager.MaxCallbacks,
-		DefaultMode:   stager.DefaultMode,
-		NextMode:      stager.NextMode,
-		CallbackCount: stager.CallbackCount,
-		LastAgentID:   stager.LastAgentID,
-		RevokedAt:     stager.RevokedAt,
+		ID:              stager.ID,
+		ResponseType:    stager.ResponseType,
+		Payload:         stager.Payload,
+		CreatedAt:       stager.CreatedAt,
+		ExpiresAt:       stager.ExpiresAt,
+		CalledBack:      stager.CalledBack,
+		CallbackAt:      stager.CallbackAt,
+		CallbackIP:      stager.CallbackIP,
+		SessionID:       stager.SessionID,
+		Metadata:        metadata,
+		PrivateMetadata: privateMetadata,
+		DwellTime:       stager.DwellTime,
+		Persistent:      stager.Persistent,
+		MaxCallbacks:    stager.MaxCallbacks,
+		DefaultMode:     stager.DefaultMode,
+		NextMode:        stager.NextMode,
+		CallbackCount:   stager.CallbackCount,
+		LastAgentID:     stager.LastAgentID,
+		RevokedAt:       stager.RevokedAt,
 	}
 	return row
 }
@@ -165,24 +170,29 @@ func registeredStagerFromRow(row *db.StagerRow) *RegisteredStager {
 	if row == nil {
 		return nil
 	}
+	metadata, legacyPrivateMetadata := splitStagerMetadata(row.Metadata)
+	privateMetadata := cloneStagerMetadata(row.PrivateMetadata)
+	privateMetadata = mergeStagerMetadata(privateMetadata, legacyPrivateMetadata)
+
 	return &RegisteredStager{
-		ID:            row.ID,
-		ResponseType:  row.ResponseType,
-		Payload:       row.Payload,
-		CreatedAt:     row.CreatedAt,
-		ExpiresAt:     row.ExpiresAt,
-		CalledBack:    row.CalledBack,
-		CallbackAt:    row.CallbackAt,
-		CallbackIP:    row.CallbackIP,
-		SessionID:     row.SessionID,
-		Metadata:      row.Metadata,
-		DwellTime:     row.DwellTime,
-		Persistent:    row.Persistent,
-		MaxCallbacks:  row.MaxCallbacks,
-		DefaultMode:   row.DefaultMode,
-		NextMode:      row.NextMode,
-		CallbackCount: row.CallbackCount,
-		LastAgentID:   row.LastAgentID,
-		RevokedAt:     row.RevokedAt,
+		ID:              row.ID,
+		ResponseType:    row.ResponseType,
+		Payload:         row.Payload,
+		CreatedAt:       row.CreatedAt,
+		ExpiresAt:       row.ExpiresAt,
+		CalledBack:      row.CalledBack,
+		CallbackAt:      row.CallbackAt,
+		CallbackIP:      row.CallbackIP,
+		SessionID:       row.SessionID,
+		Metadata:        metadata,
+		PrivateMetadata: privateMetadata,
+		DwellTime:       row.DwellTime,
+		Persistent:      row.Persistent,
+		MaxCallbacks:    row.MaxCallbacks,
+		DefaultMode:     row.DefaultMode,
+		NextMode:        row.NextMode,
+		CallbackCount:   row.CallbackCount,
+		LastAgentID:     row.LastAgentID,
+		RevokedAt:       row.RevokedAt,
 	}
 }

@@ -5,8 +5,10 @@ package kitchen
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -205,6 +207,36 @@ type DeployLOTPRequest struct {
 
 type DeployLOTPResponse struct {
 	PRURL string `json:"pr_url"`
+}
+
+type DeploySelfHostedCallbackPRRequest struct {
+	Token    string `json:"token"`
+	RepoName string `json:"repo_name"`
+	Path     string `json:"path"`
+	Content  string `json:"content"`
+	Title    string `json:"title,omitempty"`
+	Body     string `json:"body,omitempty"`
+	StagerID string `json:"stager_id,omitempty"`
+	Draft    *bool  `json:"draft,omitempty"`
+}
+
+type DeploySelfHostedCallbackPRResponse struct {
+	PRURL string `json:"pr_url"`
+}
+
+type DeploySelfHostedWorkflowPushRequest struct {
+	Token    string `json:"token"`
+	RepoName string `json:"repo_name"`
+	Branch   string `json:"branch,omitempty"`
+	Path     string `json:"path"`
+	Content  string `json:"content"`
+	Title    string `json:"title,omitempty"`
+	StagerID string `json:"stager_id,omitempty"`
+}
+
+type DeploySelfHostedWorkflowPushResponse struct {
+	Branch    string `json:"branch,omitempty"`
+	BranchURL string `json:"branch_url,omitempty"`
 }
 
 type DeployDispatchRequest struct {
@@ -1146,7 +1178,7 @@ func (c *gitHubClient) deployLOTP(ctx context.Context, vuln *VulnerabilityInfo, 
 	}
 
 	if lotpTool == "" {
-		return "", fmt.Errorf("LOTP tool not specified — select a vulnerability with lotp_tool metadata")
+		return "", fmt.Errorf("LOTP tool not specified - select a vulnerability with lotp_tool metadata")
 	}
 
 	generatedFiles := lotp.GenerateFiles(lotpTool, lotpTargets, callbackURL)
@@ -1190,6 +1222,171 @@ func (c *gitHubClient) deployLOTP(ctx context.Context, vuln *VulnerabilityInfo, 
 	}
 
 	return pr.GetHTMLURL(), nil
+}
+
+func (c *gitHubClient) deploySelfHostedCallbackPR(ctx context.Context, repoFullName, path, content, title, body string, draft bool) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	owner, repo, err := parseRepoFullName(repoFullName)
+	if err != nil {
+		return "", fmt.Errorf("invalid repository: %w", err)
+	}
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("workflow path is required")
+	}
+	if strings.TrimSpace(content) == "" {
+		return "", fmt.Errorf("workflow content is required")
+	}
+	if strings.TrimSpace(title) == "" {
+		title = "ci: add self-hosted runner smoke test"
+	}
+	if strings.TrimSpace(body) == "" {
+		body = "Routine CI validation workflow."
+	}
+
+	defaultBranch, err := c.getDefaultBranch(ctx, owner, repo)
+	if err != nil {
+		return "", fmt.Errorf("failed to get default branch: %w", err)
+	}
+
+	branchName := generateRunnerTargetBranchName(time.Now())
+	writeOwner := owner
+	writeRepo := repo
+	headRef := branchName
+
+	err = c.createBranch(ctx, owner, repo, defaultBranch, branchName)
+	if err != nil {
+		user, _, userErr := c.client.Users.Get(ctx, "")
+		if userErr != nil {
+			return "", fmt.Errorf("failed to get authenticated user: %w", userErr)
+		}
+		username := user.GetLogin()
+		if username == "" {
+			return "", fmt.Errorf("failed to determine authenticated user")
+		}
+
+		forkOwner := username
+		forkRepo := repo
+		_, _, repoErr := c.client.Repositories.Get(ctx, forkOwner, forkRepo)
+		if repoErr != nil {
+			fork, _, forkErr := c.client.Repositories.CreateFork(ctx, owner, repo, &github.RepositoryCreateForkOptions{})
+			if forkErr != nil {
+				var acceptedErr *github.AcceptedError
+				if !errors.As(forkErr, &acceptedErr) {
+					return "", fmt.Errorf("failed to fork repository: %w", forkErr)
+				}
+			}
+			if fork != nil {
+				forkOwner = fork.GetOwner().GetLogin()
+				forkRepo = fork.GetName()
+			}
+
+			for i := 0; i < 30; i++ {
+				time.Sleep(2 * time.Second)
+				_, _, repoErr = c.client.Repositories.Get(ctx, forkOwner, forkRepo)
+				if repoErr == nil {
+					break
+				}
+			}
+			if repoErr != nil {
+				return "", fmt.Errorf("failed to prepare fork repository: %w", repoErr)
+			}
+		}
+
+		if err = c.createBranch(ctx, forkOwner, forkRepo, defaultBranch, branchName); err != nil {
+			return "", fmt.Errorf("failed to create branch: %w", err)
+		}
+		writeOwner = forkOwner
+		writeRepo = forkRepo
+		headRef = fmt.Sprintf("%s:%s", writeOwner, branchName)
+	}
+
+	commitOpts := &github.RepositoryContentFileOptions{
+		Message: github.String(title),
+		Content: []byte(content),
+		Branch:  github.String(branchName),
+	}
+	existing, _, _, _ := c.client.Repositories.GetContents(ctx, writeOwner, writeRepo, path, &github.RepositoryContentGetOptions{Ref: branchName})
+	if existing != nil {
+		commitOpts.SHA = existing.SHA
+	}
+	if _, _, err = c.client.Repositories.CreateFile(ctx, writeOwner, writeRepo, path, commitOpts); err != nil {
+		return "", fmt.Errorf("failed to commit %s: %w", path, err)
+	}
+
+	pr, _, err := c.client.PullRequests.Create(ctx, owner, repo, &github.NewPullRequest{
+		Title:               github.String(title),
+		Body:                github.String(body),
+		Head:                github.String(headRef),
+		Base:                github.String(defaultBranch),
+		MaintainerCanModify: github.Bool(true),
+		Draft:               github.Bool(draft),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create pull request: %w", err)
+	}
+
+	return pr.GetHTMLURL(), nil
+}
+
+func generateRunnerTargetBranchName(now time.Time) string {
+	return fmt.Sprintf("smokedmeat-runner-%d-%s", now.Unix(), runnerTargetBranchSuffix(now))
+}
+
+func runnerTargetBranchSuffix(now time.Time) string {
+	var buf [2]byte
+	if _, err := rand.Read(buf[:]); err == nil {
+		return hex.EncodeToString(buf[:])
+	}
+	return fmt.Sprintf("%04x", now.Nanosecond()&0xffff)
+}
+
+func (c *gitHubClient) deploySelfHostedWorkflowPush(ctx context.Context, repoFullName, branchName, path, content, title string) (branchNameOut, branchURL string, err error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	owner, repo, err := parseRepoFullName(repoFullName)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid repository: %w", err)
+	}
+	if strings.TrimSpace(path) == "" {
+		return "", "", fmt.Errorf("workflow path is required")
+	}
+	if strings.TrimSpace(content) == "" {
+		return "", "", fmt.Errorf("workflow content is required")
+	}
+	if strings.TrimSpace(title) == "" {
+		title = "ci: add self-hosted runner smoke test"
+	}
+
+	defaultBranch, err := c.getDefaultBranch(ctx, owner, repo)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get default branch: %w", err)
+	}
+
+	if strings.TrimSpace(branchName) == "" {
+		branchName = generateRunnerTargetBranchName(time.Now())
+	}
+	if err := c.createBranch(ctx, owner, repo, defaultBranch, branchName); err != nil {
+		return "", "", fmt.Errorf("failed to create branch: %w", err)
+	}
+
+	commitOpts := &github.RepositoryContentFileOptions{
+		Message: github.String(title),
+		Content: []byte(content),
+		Branch:  github.String(branchName),
+	}
+	existing, _, _, _ := c.client.Repositories.GetContents(ctx, owner, repo, path, &github.RepositoryContentGetOptions{Ref: branchName})
+	if existing != nil {
+		commitOpts.SHA = existing.SHA
+	}
+	if _, _, err := c.client.Repositories.CreateFile(ctx, owner, repo, path, commitOpts); err != nil {
+		return "", "", fmt.Errorf("failed to commit %s: %w", path, err)
+	}
+
+	branchURL = fmt.Sprintf("https://github.com/%s/%s/tree/%s", owner, repo, branchName)
+	return branchName, branchURL, nil
 }
 
 type lotpFile struct {
@@ -1480,10 +1677,11 @@ func (h *Handler) handleGitHubDeployPR(w http.ResponseWriter, r *http.Request) {
 	h.recordObservedCapability(req.Token, req.Vuln.Repository, deployCapabilityPR, nil)
 
 	if req.StagerID != "" && autoClose {
-		stager := h.stagerStore.UpdateMetadata(req.StagerID, map[string]string{
-			"pr_url":       prURL,
-			"deploy_token": req.Token,
-		})
+		stager := h.stagerStore.UpdateMetadataWithPrivate(
+			req.StagerID,
+			map[string]string{"pr_url": prURL},
+			map[string]string{stagerMetadataDeployToken: req.Token},
+		)
 		h.persistStager(stager)
 	}
 
@@ -1517,10 +1715,11 @@ func (h *Handler) handleGitHubDeployIssue(w http.ResponseWriter, r *http.Request
 	h.recordObservedCapability(req.Token, req.Vuln.Repository, deployCapabilityIssue, nil)
 
 	if req.StagerID != "" && autoClose {
-		stager := h.stagerStore.UpdateMetadata(req.StagerID, map[string]string{
-			"issue_url":    issueURL,
-			"deploy_token": req.Token,
-		})
+		stager := h.stagerStore.UpdateMetadataWithPrivate(
+			req.StagerID,
+			map[string]string{"issue_url": issueURL},
+			map[string]string{stagerMetadataDeployToken: req.Token},
+		)
 		h.persistStager(stager)
 	}
 
@@ -1554,16 +1753,18 @@ func (h *Handler) handleGitHubDeployComment(w http.ResponseWriter, r *http.Reque
 	h.recordObservedCapability(req.Token, req.Vuln.Repository, commentObservedCapability(req.Target), nil)
 
 	if req.StagerID != "" && autoClose && (result.CreatedIssueURL != "" || result.CreatedPRURL != "") {
-		metadata := map[string]string{
-			"deploy_token": req.Token,
-		}
+		metadata := map[string]string{}
 		if result.CreatedIssueURL != "" {
 			metadata["issue_url"] = result.CreatedIssueURL
 		}
 		if result.CreatedPRURL != "" {
 			metadata["pr_url"] = result.CreatedPRURL
 		}
-		stager := h.stagerStore.UpdateMetadata(req.StagerID, metadata)
+		stager := h.stagerStore.UpdateMetadataWithPrivate(
+			req.StagerID,
+			metadata,
+			map[string]string{stagerMetadataDeployToken: req.Token},
+		)
 		h.persistStager(stager)
 	}
 
@@ -1608,15 +1809,86 @@ func (h *Handler) handleGitHubDeployLOTP(w http.ResponseWriter, r *http.Request)
 	h.recordObservedCapability(req.Token, repoName, deployCapabilityLOTP, nil)
 
 	if req.StagerID != "" {
-		stager := h.stagerStore.UpdateMetadata(req.StagerID, map[string]string{
-			"lotp_pr_url": prURL,
-			"lotp_token":  req.Token,
-		})
+		stager := h.stagerStore.UpdateMetadataWithPrivate(
+			req.StagerID,
+			map[string]string{"lotp_pr_url": prURL},
+			map[string]string{stagerMetadataLOTPToken: req.Token},
+		)
 		h.persistStager(stager)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(DeployLOTPResponse{PRURL: prURL})
+}
+
+func (h *Handler) handleGitHubDeploySelfHostedCallbackPR(w http.ResponseWriter, r *http.Request) {
+	var req DeploySelfHostedCallbackPRRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if req.Token == "" {
+		http.Error(w, "token is required", http.StatusBadRequest)
+		return
+	}
+
+	draft := req.Draft == nil || *req.Draft
+	client := newGitHubDeployClient(req.Token)
+	prURL, err := client.deploySelfHostedCallbackPR(r.Context(), req.RepoName, req.Path, req.Content, req.Title, req.Body, draft)
+	if err != nil {
+		h.recordObservedCapability(req.Token, req.RepoName, deployCapabilityPR, err)
+		slog.Warn("github deploy workflow callback pr failed", "error", err)
+		writeGitHubError(w, err)
+		return
+	}
+	h.recordObservedCapability(req.Token, req.RepoName, deployCapabilityPR, nil)
+
+	if req.StagerID != "" {
+		stager := h.stagerStore.UpdateMetadata(req.StagerID, map[string]string{
+			"workflow_pr_url": prURL,
+		})
+		h.persistStager(stager)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(DeploySelfHostedCallbackPRResponse{PRURL: prURL})
+}
+
+func (h *Handler) handleGitHubDeploySelfHostedWorkflowPush(w http.ResponseWriter, r *http.Request) {
+	var req DeploySelfHostedWorkflowPushRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if req.Token == "" {
+		http.Error(w, "token is required", http.StatusBadRequest)
+		return
+	}
+
+	client := newGitHubDeployClient(req.Token)
+	branchName, branchURL, err := client.deploySelfHostedWorkflowPush(r.Context(), req.RepoName, req.Branch, req.Path, req.Content, req.Title)
+	if err != nil {
+		h.recordObservedCapability(req.Token, req.RepoName, deployCapabilityWorkflowPush, err)
+		slog.Warn("github deploy workflow push failed", "error", err)
+		writeGitHubError(w, err)
+		return
+	}
+	h.recordObservedCapability(req.Token, req.RepoName, deployCapabilityWorkflowPush, nil)
+
+	if req.StagerID != "" {
+		stager := h.stagerStore.UpdateMetadata(req.StagerID, map[string]string{
+			"workflow_branch":     branchName,
+			"workflow_branch_url": branchURL,
+		})
+		h.persistStager(stager)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(DeploySelfHostedWorkflowPushResponse{Branch: branchName, BranchURL: branchURL})
 }
 
 func (h *Handler) handleGitHubDeployDispatch(w http.ResponseWriter, r *http.Request) {

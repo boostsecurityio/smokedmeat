@@ -16,6 +16,7 @@ const (
 	TreeNodeOrg TreeNodeType = iota
 	TreeNodeRepo
 	TreeNodeWorkflow
+	TreeNodeSelfHostedRunner
 	TreeNodeJob
 	TreeNodeSecret
 	TreeNodeVuln
@@ -32,6 +33,8 @@ func (t TreeNodeType) String() string {
 		return "REPO"
 	case TreeNodeWorkflow:
 		return "WORKFLOW"
+	case TreeNodeSelfHostedRunner:
+		return "SH-RUNNER"
 	case TreeNodeJob:
 		return "JOB"
 	case TreeNodeSecret:
@@ -125,6 +128,7 @@ func BuildTreeFromPantry(p *pantry.Pantry) *TreeNode {
 	orgs := p.GetAssetsByType(pantry.AssetOrganization)
 	repos := p.GetAssetsByType(pantry.AssetRepository)
 	workflows := p.GetAssetsByType(pantry.AssetWorkflow)
+	runnerTargets := p.GetAssetsByType(pantry.AssetSelfHostedRunner)
 	jobs := p.GetAssetsByType(pantry.AssetJob)
 	secrets := p.GetAssetsByType(pantry.AssetSecret)
 	vulns := p.GetAssetsByType(pantry.AssetVulnerability)
@@ -223,6 +227,25 @@ func BuildTreeFromPantry(p *pantry.Pantry) *TreeNode {
 		}
 	}
 
+	runnerTargetNodes := make(map[string]*TreeNode)
+	for _, target := range runnerTargets {
+		node := assetToTreeNode(target, 2)
+		node.Expanded = false
+		runnerTargetNodes[target.ID] = node
+
+		parentID, _ := target.GetProperty("repo_id")
+		if parentStr, ok := parentID.(string); ok {
+			if parent, exists := repoNodes[parentStr]; exists {
+				node.Parent = parent
+				parent.Children = append(parent.Children, node)
+				continue
+			}
+		}
+
+		node.Parent = root
+		root.Children = append(root.Children, node)
+	}
+
 	jobNodes := make(map[string]*TreeNode)
 	for _, job := range jobs {
 		node := assetToTreeNode(job, 3)
@@ -275,6 +298,12 @@ func BuildTreeFromPantry(p *pantry.Pantry) *TreeNode {
 						attached = true
 						break
 					}
+					if repoNode, exists := repoNodes[parentID]; exists {
+						node.Parent = repoNode
+						repoNode.Children = append(repoNode.Children, node)
+						attached = true
+						break
+					}
 				}
 			}
 			if attached {
@@ -289,6 +318,9 @@ func BuildTreeFromPantry(p *pantry.Pantry) *TreeNode {
 	}
 
 	for _, vuln := range vulns {
+		if pantry.IsSelfHostedRunnerAnalyzeOnlyRule(vuln.RuleID) {
+			continue
+		}
 		node := assetToTreeNode(vuln, 4)
 
 		attached := false
@@ -403,6 +435,11 @@ func assetToTreeNode(a pantry.Asset, depth int) *TreeNode {
 		node.Type = TreeNodeWorkflow
 		if path, ok := a.Properties["path"].(string); ok && path != "" {
 			node.Label = path
+		}
+	case pantry.AssetSelfHostedRunner:
+		node.Type = TreeNodeSelfHostedRunner
+		if display, ok := a.Properties["label_display"].(string); ok && display != "" {
+			node.Label = display
 		}
 	case pantry.AssetJob:
 		node.Type = TreeNodeJob

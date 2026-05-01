@@ -217,6 +217,19 @@ func TestSelectedCachePoisonVictim_UsesReadyVictimList(t *testing.T) {
 	assert.Equal(t, "victim-2", victim.ID)
 }
 
+func TestCallbackMetadataForVulnerability_MarksResidentPersistence(t *testing.T) {
+	metadata := callbackMetadataForVulnerability(&Vulnerability{
+		Repository: "acme/api",
+		Workflow:   ".github/workflows/lint.yml",
+		Job:        "lint",
+	})
+
+	assert.Equal(t, "resident", metadata["persistence_mode"])
+	assert.Equal(t, "acme/api", metadata["repository"])
+	assert.Equal(t, ".github/workflows/lint.yml", metadata["workflow"])
+	assert.Equal(t, "lint", metadata["job"])
+}
+
 func TestPrepareWizardStager_CachePoisonEncodesDeploymentConfig(t *testing.T) {
 	m := NewModel(Config{
 		SessionID:          "sess-1",

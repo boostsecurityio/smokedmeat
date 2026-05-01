@@ -67,6 +67,31 @@ func TestNewJob(t *testing.T) {
 	assert.Equal(t, workflowID, job.Properties["workflow_id"])
 }
 
+func TestNewSelfHostedRunnerTarget(t *testing.T) {
+	target := NewSelfHostedRunnerTarget("github:acme/api", []string{"x64", "self-hosted", "linux"})
+
+	assert.Equal(t, AssetSelfHostedRunner, target.Type)
+	assert.Equal(t, "linux-x64", target.Name)
+	assert.Equal(t, "github:acme/api", target.Properties["repo_id"])
+	assert.Equal(t, []string{"self-hosted", "linux", "x64"}, target.Properties["label_set"])
+	assert.Equal(t, "linux-x64", target.Properties["label_display"])
+	assert.Equal(t, true, target.Properties["existing_usage"])
+	assert.Equal(t, "observed", target.Properties["target_status"])
+}
+
+func TestNewSelfHostedRunnerTarget_WithDynamicLabels(t *testing.T) {
+	target := NewSelfHostedRunnerTarget(
+		"github:acme/api",
+		[]string{"self-hosted", "linux", "x64", "${{ needs.bootstrap.outputs.runner_label }}"},
+	)
+
+	assert.Equal(t, "linux-x64 +dynamic", target.Name)
+	assert.Equal(t, []string{"self-hosted", "linux", "x64"}, target.Properties["label_set"])
+	assert.Equal(t, []string{"${{ needs.bootstrap.outputs.runner_label }}"}, target.Properties["dynamic_label_set"])
+	assert.Equal(t, []string{"self-hosted", "${{ needs.bootstrap.outputs.runner_label }}", "linux", "x64"}, target.Properties["observed_label_set"])
+	assert.Equal(t, "linux-x64 +dynamic", target.Properties["label_display"])
+}
+
 func TestNewSecret(t *testing.T) {
 	secret := NewSecret("AWS_ACCESS_KEY", "org", "github")
 

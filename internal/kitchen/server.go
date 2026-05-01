@@ -246,6 +246,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.Handle("POST /github/deploy/issue", opAuth(http.HandlerFunc(s.handler.handleGitHubDeployIssue)))
 	mux.Handle("POST /github/deploy/comment", opAuth(http.HandlerFunc(s.handler.handleGitHubDeployComment)))
 	mux.Handle("POST /github/deploy/lotp", opAuth(http.HandlerFunc(s.handler.handleGitHubDeployLOTP)))
+	mux.Handle("POST /github/deploy/self-hosted-callback-pr", opAuth(http.HandlerFunc(s.handler.handleGitHubDeploySelfHostedCallbackPR)))
+	mux.Handle("POST /github/deploy/self-hosted-workflow-push", opAuth(http.HandlerFunc(s.handler.handleGitHubDeploySelfHostedWorkflowPush)))
 	mux.Handle("POST /github/deploy/dispatch", opAuth(http.HandlerFunc(s.handler.handleGitHubDeployDispatch)))
 	mux.Handle("POST /github/deploy/preflight", opAuth(http.HandlerFunc(s.handler.handleGitHubDeployPreflight)))
 	mux.Handle("POST /github/repos", opAuth(http.HandlerFunc(s.handler.handleGitHubListRepos)))
@@ -428,6 +430,12 @@ func (s *Server) restoreFromDB() {
 		slog.Warn("failed to restore agents", "error", err)
 	} else {
 		for _, row := range agentRows {
+			if s.auth != nil && row.AgentToken != "" {
+				s.auth.RestoreAgentToken(row.AgentToken, row.AgentID, row.SessionID, row.TokenCreatedAt, row.TokenExpiresAt)
+			}
+			if row.LastSeen.IsZero() {
+				continue
+			}
 			s.sessions.UpdateAgentBeacon(row.AgentID, row.SessionID, row.Hostname, row.OS, row.Arch)
 			agentState := s.sessions.GetAgent(row.AgentID)
 			if agentState != nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -28,53 +29,12 @@ func (m Model) lookupCloudConfig(provider string) map[string]string {
 		return config
 	}
 
-	var tokenTypes []string
-	switch strings.ToLower(provider) {
-	case "aws":
-		tokenTypes = []string{"aws_oidc"}
-	case "gcp", "google":
-		tokenTypes = []string{"gcp_oidc"}
-	case "azure", "az":
-		tokenTypes = []string{"azure_oidc"}
-	default:
-		tokenTypes = []string{"aws_oidc", "gcp_oidc", "azure_oidc"}
+	tokens := m.currentJobCloudTokens(provider)
+	if len(tokens) == 0 {
+		tokens = m.allCloudTokens(provider)
 	}
-
-	for _, token := range m.pantry.GetAssetsByType(pantry.AssetToken) {
-		tokenType, _ := token.Properties["token_type"].(string)
-		matched := false
-		for _, tt := range tokenTypes {
-			if tokenType == tt {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			continue
-		}
-
-		propKeys := map[string]string{
-			"role_arn":              "role-arn",
-			"region":                "region",
-			"role_duration_seconds": "role-duration-seconds",
-			"role_external_id":      "role-external-id",
-			"workload_provider":     "workload-identity-provider",
-			"service_account":       "service-account",
-			"project_id":            "project-id",
-			"audience":              "audience",
-			"delegates":             "delegates",
-			"access_token_lifetime": "token-lifetime",
-			"access_token_scopes":   "token-scopes",
-			"tenant_id":             "tenant-id",
-			"client_id":             "client-id",
-			"subscription_id":       "subscription-id",
-			"environment":           "environment",
-		}
-		for propKey, argKey := range propKeys {
-			if v, ok := token.Properties[propKey].(string); ok && v != "" {
-				config[argKey] = m.resolveRefs(v)
-			}
-		}
+	for _, token := range tokens {
+		m.applyCloudTokenConfig(config, token)
 	}
 
 	if (strings.EqualFold(provider, "gcp") || strings.EqualFold(provider, "google")) && config["project-id"] == "" {
@@ -149,6 +109,130 @@ func (m Model) resolveRefs(value string) string {
 	value = m.resolveSecretRefs(value)
 	value = m.resolveVarRefs(value)
 	return value
+}
+
+func cloudTokenTypesForProvider(provider string) []string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "aws":
+		return []string{"aws_oidc"}
+	case "gcp", "google":
+		return []string{"gcp_oidc"}
+	case "azure", "az":
+		return []string{"azure_oidc"}
+	default:
+		return []string{"aws_oidc", "gcp_oidc", "azure_oidc"}
+	}
+}
+
+func cloudProviderAlias(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "google":
+		return "gcp"
+	case "az":
+		return "azure"
+	default:
+		return strings.ToLower(strings.TrimSpace(provider))
+	}
+}
+
+func cloudTokenMatchesProvider(token pantry.Asset, provider string) bool {
+	tokenType, _ := token.Properties["token_type"].(string)
+	for _, want := range cloudTokenTypesForProvider(provider) {
+		if tokenType == want {
+			return true
+		}
+	}
+	return false
+}
+
+func sortAssetsByID(assets []pantry.Asset) {
+	sort.Slice(assets, func(i, j int) bool {
+		return assets[i].ID < assets[j].ID
+	})
+}
+
+func (m Model) allCloudTokens(provider string) []pantry.Asset {
+	var tokens []pantry.Asset
+	for _, token := range m.pantry.GetAssetsByType(pantry.AssetToken) {
+		if cloudTokenMatchesProvider(token, provider) {
+			tokens = append(tokens, token)
+		}
+	}
+	sortAssetsByID(tokens)
+	return tokens
+}
+
+func pantryRepoID(repo string) string {
+	parts := strings.SplitN(strings.TrimSpace(repo), "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	return pantry.NewRepository(parts[0], parts[1], "github").ID
+}
+
+func (m Model) currentJobCloudTokens(provider string) []pantry.Asset {
+	if m.pantry == nil || m.activeAgent == nil {
+		return nil
+	}
+	repoID := pantryRepoID(m.activeAgent.Repo)
+	workflowPath := strings.TrimSpace(m.activeAgent.Workflow)
+	jobName := strings.TrimSpace(m.activeAgent.Job)
+	if repoID == "" || workflowPath == "" || jobName == "" {
+		return nil
+	}
+	workflowID := pantry.NewWorkflow(repoID, workflowPath).ID
+	jobID := pantry.NewJob(workflowID, jobName).ID
+	if !m.pantry.HasAsset(jobID) {
+		return nil
+	}
+
+	providerAlias := cloudProviderAlias(provider)
+	var tokens []pantry.Asset
+	for _, cloudEdge := range m.pantry.GetOutgoingEdges(jobID) {
+		cloudAsset, err := m.pantry.GetAsset(cloudEdge.To)
+		if err != nil || cloudAsset.Type != pantry.AssetCloud {
+			continue
+		}
+		if providerAlias != "" && providerAlias != "auto" && cloudProviderAlias(cloudAsset.Provider) != providerAlias {
+			continue
+		}
+		for _, tokenEdge := range m.pantry.GetOutgoingEdges(cloudAsset.ID) {
+			tokenAsset, err := m.pantry.GetAsset(tokenEdge.To)
+			if err != nil || tokenAsset.Type != pantry.AssetToken {
+				continue
+			}
+			if cloudTokenMatchesProvider(tokenAsset, provider) {
+				tokens = append(tokens, tokenAsset)
+			}
+		}
+	}
+	sortAssetsByID(tokens)
+	return tokens
+}
+
+func (m Model) applyCloudTokenConfig(config map[string]string, token pantry.Asset) {
+	propKeys := map[string]string{
+		"role_arn":              "role-arn",
+		"region":                "region",
+		"role_duration_seconds": "role-duration-seconds",
+		"role_external_id":      "role-external-id",
+		"workload_provider":     "workload-identity-provider",
+		"service_account":       "service-account",
+		"project_id":            "project-id",
+		"audience":              "audience",
+		"delegates":             "delegates",
+		"access_token_lifetime": "token-lifetime",
+		"access_token_scopes":   "token-scopes",
+		"tenant_id":             "tenant-id",
+		"client_id":             "client-id",
+		"subscription_id":       "subscription-id",
+		"environment":           "environment",
+	}
+	for propKey, argKey := range propKeys {
+		if v, ok := token.Properties[propKey].(string); ok && v != "" {
+			config[argKey] = m.resolveRefs(v)
+		}
+	}
 }
 
 func (m *Model) handlePivotResult(result *models.PivotResult) {

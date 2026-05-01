@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/boostsecurityio/smokedmeat/internal/counter"
+	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 	"github.com/boostsecurityio/smokedmeat/internal/poutine"
 )
 
@@ -273,7 +274,7 @@ func TestModel_Update_AnalysisCompleted_AddsSecretsWithoutVulns(t *testing.T) {
 	assert.Contains(t, output, "Found 2 secrets (private keys / credentials)")
 }
 
-func TestModel_Update_AnalysisCompleted_AnalyzeOnlyFindingsRemainVisible(t *testing.T) {
+func TestModel_Update_AnalysisCompleted_SelfHostedAnalyzeOnlyFindingStaysOutOfVulns(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.target = "acme"
 	m.targetType = "org"
@@ -297,15 +298,67 @@ func TestModel_Update_AnalysisCompleted_AnalyzeOnlyFindingsRemainVisible(t *test
 	})
 
 	model := result.(Model)
-	require.Len(t, model.vulnerabilities, 1)
-	assert.Equal(t, 0, model.selectedVuln)
+	assert.Empty(t, model.vulnerabilities)
 
 	var output []string
 	for _, line := range model.output {
 		output = append(output, line.Content)
 	}
-	assert.Contains(t, output, "Found 1 analyze-only finding")
-	assert.Contains(t, output, "Selected: V001. Analyze-only finding. Use 'use <id>' to inspect findings.")
+	assert.Contains(t, output, "No exploitable vulnerabilities found.")
+	assert.NotContains(t, output, "Selected: V001. Analyze-only finding. Use 'use <id>' to inspect findings.")
+}
+
+func TestModel_Update_AnalysisCompleted_ImportsGitleaksSecretsToPantry(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.target = "acme"
+	m.targetType = "org"
+
+	result, _ := m.Update(AnalysisCompletedMsg{
+		Result: &poutine.AnalysisResult{
+			Success:       true,
+			Target:        "acme",
+			TargetType:    "org",
+			ReposAnalyzed: 2,
+			SecretFindings: []poutine.SecretFinding{
+				{
+					RuleID:      "private-key",
+					Description: "Private Key detected",
+					Repository:  "acme/newcleus-core-v3",
+					File:        "README.md",
+					StartLine:   12,
+					Secret:      "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----",
+				},
+				{
+					RuleID:      "private-key",
+					Description: "Private Key detected",
+					Repository:  "acme/worker",
+					File:        "deploy.key",
+					StartLine:   3,
+					Secret:      "-----BEGIN RSA PRIVATE KEY-----\nworker\n-----END RSA PRIVATE KEY-----",
+				},
+			},
+		},
+	})
+
+	model := result.(Model)
+	require.NotNil(t, model.pantry)
+	secrets := model.pantry.GetAssetsByType(pantry.AssetSecret)
+	require.Len(t, secrets, 2)
+
+	repoIDsBySecret := make(map[string]string)
+	for _, edge := range model.pantry.AllRelationships() {
+		for _, secret := range secrets {
+			if edge.To == secret.ID {
+				repoIDsBySecret[secret.Name] = edge.From
+			}
+		}
+	}
+
+	assert.Equal(t, "github:acme/newcleus-core-v3", repoIDsBySecret["Private Key detected (README.md:12)"])
+	assert.Equal(t, "github:acme/worker", repoIDsBySecret["Private Key detected (deploy.key:3)"])
+
+	model.RebuildTree()
+	require.True(t, model.TreeSelectByID(secrets[0].ID) || model.TreeSelectByID(secrets[1].ID))
 }
 
 func TestModel_Update_AnalysisError(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -51,6 +52,7 @@ func run() error {
 		callbackID     string
 		callbackMode   string
 		beaconInterval time.Duration
+		maxOffline     time.Duration
 		dwellTime      time.Duration
 		expressMode    bool
 		cachePoison    string
@@ -63,6 +65,7 @@ func run() error {
 	flag.StringVar(&callbackID, "callback-id", getEnvOrDefault("CALLBACK_ID", ""), "Callback ID for persistent callback tracking")
 	flag.StringVar(&callbackMode, "callback-mode", getEnvOrDefault("CALLBACK_MODE", ""), "Callback mode for tracking")
 	flag.DurationVar(&beaconInterval, "interval", 30*time.Second, "Beacon interval")
+	flag.DurationVar(&maxOffline, "max-offline", getEnvOrDefaultDuration("MAX_OFFLINE", 0), "Maximum time to keep retrying while Kitchen is unreachable (0 = retry forever)")
 	flag.DurationVar(&dwellTime, "dwell", 0, "Dwell time (how long to stay active for interactive commands, 0=run once in express mode)")
 	flag.BoolVar(&expressMode, "express", false, "Express mode (smash & grab)")
 	flag.StringVar(&cachePoison, "cache-poison", getEnvOrDefault("CACHE_POISON_CONFIG", ""), "Base64-encoded cache poisoning deployment config")
@@ -82,6 +85,7 @@ func run() error {
 	config.CallbackID = callbackID
 	config.CallbackMode = callbackMode
 	config.BeaconInterval = beaconInterval
+	config.MaxOffline = maxOffline
 	config.DwellTime = dwellTime
 	config.CachePoisonConfig = cachePoison
 	config.Silent = !*verbose
@@ -104,4 +108,16 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func getEnvOrDefaultDuration(key string, defaultValue time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return defaultValue
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return defaultValue
+	}
+	return parsed
 }

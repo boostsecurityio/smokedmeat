@@ -14,15 +14,18 @@ import (
 
 // AgentRow represents an agent record in the database.
 type AgentRow struct {
-	AgentID       string     `json:"agent_id"`
-	SessionID     string     `json:"session_id"`
-	Hostname      string     `json:"hostname"`
-	OS            string     `json:"os"`
-	Arch          string     `json:"arch"`
-	FirstSeen     time.Time  `json:"first_seen"`
-	LastSeen      time.Time  `json:"last_seen"`
-	IsOnline      bool       `json:"is_online"`
-	DwellDeadline *time.Time `json:"dwell_deadline,omitempty"`
+	AgentID        string     `json:"agent_id"`
+	SessionID      string     `json:"session_id"`
+	Hostname       string     `json:"hostname"`
+	OS             string     `json:"os"`
+	Arch           string     `json:"arch"`
+	FirstSeen      time.Time  `json:"first_seen"`
+	LastSeen       time.Time  `json:"last_seen"`
+	IsOnline       bool       `json:"is_online"`
+	DwellDeadline  *time.Time `json:"dwell_deadline,omitempty"`
+	AgentToken     string     `json:"agent_token,omitempty"`
+	TokenCreatedAt time.Time  `json:"agent_token_created_at,omitempty"`
+	TokenExpiresAt time.Time  `json:"agent_token_expires_at,omitempty"`
 }
 
 // SessionRow represents a session record in the database.
@@ -53,9 +56,19 @@ func (r *AgentRepository) Upsert(agent *AgentRow) error {
 		if existing != nil {
 			var existingAgent AgentRow
 			if err := json.Unmarshal(existing, &existingAgent); err == nil {
-				agent.FirstSeen = existingAgent.FirstSeen
+				if agent.FirstSeen.IsZero() {
+					agent.FirstSeen = existingAgent.FirstSeen
+				}
+				if agent.LastSeen.IsZero() {
+					agent.LastSeen = existingAgent.LastSeen
+				}
 				if agent.DwellDeadline == nil {
 					agent.DwellDeadline = existingAgent.DwellDeadline
+				}
+				if agent.AgentToken == "" {
+					agent.AgentToken = existingAgent.AgentToken
+					agent.TokenCreatedAt = existingAgent.TokenCreatedAt
+					agent.TokenExpiresAt = existingAgent.TokenExpiresAt
 				}
 			}
 		}

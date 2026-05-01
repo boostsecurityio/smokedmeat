@@ -6,9 +6,14 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -45,7 +50,8 @@ func TestParseDeploymentError(t *testing.T) {
 		{"403 actions post-preflight", errors.New("403 actions workflow dispatch"), "actions:read but lacks actions:write"},
 		{"403 workflow post-preflight", errors.New("403 workflow dispatch denied"), "actions:read but lacks actions:write"},
 		{"410 Gone", errors.New("410 Gone"), "Issues are disabled"},
-		{"403 Resource not accessible", errors.New("403 Resource not accessible by integration"), "fine-grained PAT needs"},
+		{"403 workflow file commit", errors.New("failed to commit .github/workflows/smokedmeat-self-hosted.yml: PUT https://api.github.com/repos/acme/api/contents/.github/workflows/smokedmeat-self-hosted.yml: 403 Resource not accessible by integration []"), "workflow-file write"},
+		{"403 Resource not accessible", errors.New("403 Resource not accessible by integration"), "effective Contents: write and Pull requests: write"},
 		{"403 must have admin", errors.New("403 must have admin access"), "admin access"},
 		{"403 generic", errors.New("403 Forbidden"), "Classic token needs"},
 		{"404 Not Found", errors.New("404 Not Found"), "not found or not accessible"},
@@ -90,6 +96,101 @@ func TestMaskCommandToken(t *testing.T) {
 			assert.Equal(t, tt.expected, maskCommandToken(tt.input))
 		})
 	}
+}
+
+func TestGenerateRunnerTargetBranchNameIncludesRandomSuffix(t *testing.T) {
+	branch := generateRunnerTargetBranchName(time.Unix(1700000000, 0))
+
+	assert.Regexp(t, `^smokedmeat-runner-1700000000-[0-9a-f]{4}$`, branch)
+}
+
+func TestPushRunnerTargetWorkflowViaSSH_UsesGoGit(t *testing.T) {
+	remoteDir := seedRunnerTargetRemoteRepo(t)
+	originalRemoteURL := runnerTargetWorkflowRemoteURLFn
+	t.Cleanup(func() { runnerTargetWorkflowRemoteURLFn = originalRemoteURL })
+	runnerTargetWorkflowRemoteURLFn = func(repo string) string {
+		assert.Equal(t, "acme/api", repo)
+		return remoteDir
+	}
+
+	workflow := "name: test\non:\n  push:\n"
+	branch, branchURL, err := pushRunnerTargetWorkflowViaSSH(&SSHState{KeyValue: testSSHPrivateKey(t)}, "acme/api", "smokedmeat-runner-1-abcd", runnerTargetWorkflowPath(), workflow, "ci: test")
+
+	require.NoError(t, err)
+	assert.Equal(t, "smokedmeat-runner-1-abcd", branch)
+	assert.Equal(t, "https://github.com/acme/api/tree/smokedmeat-runner-1-abcd", branchURL)
+	assertRemoteWorkflowContent(t, remoteDir, branch, runnerTargetWorkflowPath(), workflow)
+}
+
+func TestDeployRunnerTargetAutoWorkflowPush_FailsOnEmptyKitchenBranch(t *testing.T) {
+	mock := &mockKitchenClient{
+		deploySelfHostedWorkflowPushResp: counter.DeploySelfHostedWorkflowPushResponse{
+			BranchURL: "https://github.com/acme/api/tree/",
+		},
+	}
+	m := newModelWithMockClient(mock)
+	m.tokenInfo = &TokenInfo{Value: "ghp_test"}
+	target := &RunnerTargetSelection{Repository: "acme/api"}
+
+	msg := m.deployRunnerTargetAutoWorkflowPush(target, "stg-1", "smokedmeat-runner-1-abcd", runnerTargetWorkflowPath(), "name: test\n", 0, nil)()
+
+	failed, ok := msg.(RunnerTargetWorkflowPushFailedMsg)
+	require.True(t, ok)
+	assert.Equal(t, "stg-1", failed.StagerID)
+	assert.Contains(t, failed.Err.Error(), "without a branch name")
+}
+
+func seedRunnerTargetRemoteRepo(t *testing.T) string {
+	t.Helper()
+	remoteDir := filepath.Join(t.TempDir(), "remote.git")
+	_, err := git.PlainInit(remoteDir, true)
+	require.NoError(t, err)
+
+	workDir := filepath.Join(t.TempDir(), "work")
+	repo, err := git.PlainInit(workDir, false)
+	require.NoError(t, err)
+	worktree, err := repo.Worktree()
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "README.md"), []byte("base\n"), 0o644))
+	_, err = worktree.Add("README.md")
+	require.NoError(t, err)
+	_, err = worktree.Commit("initial", &git.CommitOptions{
+		Author:    runnerTargetGitSignature(),
+		Committer: runnerTargetGitSignature(),
+	})
+	require.NoError(t, err)
+
+	_, err = repo.CreateRemote(&config.RemoteConfig{
+		Name: git.DefaultRemoteName,
+		URLs: []string{remoteDir},
+	})
+	require.NoError(t, err)
+	err = repo.Push(&git.PushOptions{
+		RemoteName: git.DefaultRemoteName,
+		RefSpecs: []config.RefSpec{
+			config.RefSpec("refs/heads/master:refs/heads/master"),
+		},
+	})
+	if !errors.Is(err, git.NoErrAlreadyUpToDate) {
+		require.NoError(t, err)
+	}
+	return remoteDir
+}
+
+func assertRemoteWorkflowContent(t *testing.T, remoteDir, branch, workflowPath, expected string) {
+	t.Helper()
+	repo, err := git.PlainOpen(remoteDir)
+	require.NoError(t, err)
+	ref, err := repo.Reference(plumbing.NewBranchReferenceName(branch), true)
+	require.NoError(t, err)
+	commit, err := repo.CommitObject(ref.Hash())
+	require.NoError(t, err)
+	file, err := commit.File(workflowPath)
+	require.NoError(t, err)
+	content, err := file.Contents()
+	require.NoError(t, err)
+	assert.Equal(t, expected, content)
 }
 
 func TestModel_Update_CommentDeploymentSuccess(t *testing.T) {

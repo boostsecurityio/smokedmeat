@@ -40,23 +40,29 @@ type mockKitchenClient struct {
 	startConsumingErr error
 	reconnectErr      error
 
-	deployPRResp           counter.DeployPRResponse
-	deployPRErr            error
-	lastDeployPRReq        counter.DeployPRRequest
-	deployIssueResp        counter.DeployIssueResponse
-	deployIssueErr         error
-	lastDeployIssueReq     counter.DeployIssueRequest
-	deployCommentResp      counter.DeployCommentResponse
-	deployCommentErr       error
-	lastDeployCommentReq   counter.DeployCommentRequest
-	deployLOTPResp         counter.DeployLOTPResponse
-	deployLOTPErr          error
-	lastDeployLOTPReq      counter.DeployLOTPRequest
-	triggerDispatchErr     error
-	lastTriggerDispatchReq counter.DeployDispatchRequest
-	fetchPreflightResp     *counter.DeployPreflightResponse
-	fetchPreflightErr      error
-	lastPreflightReq       counter.DeployPreflightRequest
+	deployPRResp                      counter.DeployPRResponse
+	deployPRErr                       error
+	lastDeployPRReq                   counter.DeployPRRequest
+	deployIssueResp                   counter.DeployIssueResponse
+	deployIssueErr                    error
+	lastDeployIssueReq                counter.DeployIssueRequest
+	deployCommentResp                 counter.DeployCommentResponse
+	deployCommentErr                  error
+	lastDeployCommentReq              counter.DeployCommentRequest
+	deployLOTPResp                    counter.DeployLOTPResponse
+	deployLOTPErr                     error
+	lastDeployLOTPReq                 counter.DeployLOTPRequest
+	deploySelfHostedCallbackPRResp    counter.DeploySelfHostedCallbackPRResponse
+	deploySelfHostedCallbackPRErr     error
+	lastDeploySelfHostedCallbackPRReq counter.DeploySelfHostedCallbackPRRequest
+	deploySelfHostedWorkflowPushResp  counter.DeploySelfHostedWorkflowPushResponse
+	deploySelfHostedWorkflowPushErr   error
+	lastDeploySelfHostedWorkflowReq   counter.DeploySelfHostedWorkflowPushRequest
+	triggerDispatchErr                error
+	lastTriggerDispatchReq            counter.DeployDispatchRequest
+	fetchPreflightResp                *counter.DeployPreflightResponse
+	fetchPreflightErr                 error
+	lastPreflightReq                  counter.DeployPreflightRequest
 
 	listReposWithInfoResp []counter.RepoInfo
 	listReposWithInfoErr  error
@@ -151,6 +157,16 @@ func (m *mockKitchenClient) DeployLOTP(_ context.Context, req counter.DeployLOTP
 	return m.deployLOTPResp, m.deployLOTPErr
 }
 
+func (m *mockKitchenClient) DeploySelfHostedCallbackPR(_ context.Context, req counter.DeploySelfHostedCallbackPRRequest) (counter.DeploySelfHostedCallbackPRResponse, error) {
+	m.lastDeploySelfHostedCallbackPRReq = req
+	return m.deploySelfHostedCallbackPRResp, m.deploySelfHostedCallbackPRErr
+}
+
+func (m *mockKitchenClient) DeploySelfHostedWorkflowPush(_ context.Context, req counter.DeploySelfHostedWorkflowPushRequest) (counter.DeploySelfHostedWorkflowPushResponse, error) {
+	m.lastDeploySelfHostedWorkflowReq = req
+	return m.deploySelfHostedWorkflowPushResp, m.deploySelfHostedWorkflowPushErr
+}
+
 func (m *mockKitchenClient) TriggerDispatch(_ context.Context, req counter.DeployDispatchRequest) error {
 	m.lastTriggerDispatchReq = req
 	return m.triggerDispatchErr
@@ -201,6 +217,7 @@ func (m *mockKitchenClient) SetCallbacks(_ func(counter.Beacon), _ func(*models.
 func (m *mockKitchenClient) SetEventCallback(_ func(counter.KitchenEvent))             {}
 func (m *mockKitchenClient) SetHistoryCallback(_ func(counter.HistoryPayload))         {}
 func (m *mockKitchenClient) SetExpressDataCallback(_ func(counter.ExpressDataPayload)) {}
+func (m *mockKitchenClient) SetLootSyncCallback(_ func(counter.LootSyncPayload))       {}
 func (m *mockKitchenClient) SetAnalysisProgressCallback(_ func(counter.AnalysisProgressPayload)) {
 }
 func (m *mockKitchenClient) SetAnalysisMetadataSyncCallback(_ func(counter.AnalysisMetadataSyncPayload)) {

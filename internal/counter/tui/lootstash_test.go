@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/boostsecurityio/smokedmeat/internal/counter"
 )
 
 func TestModel_RenderLootStash_Empty(t *testing.T) {
@@ -122,6 +124,106 @@ func TestModel_AddToSessionLoot(t *testing.T) {
 
 	assert.Len(t, m.sessionLoot, 1)
 	assert.Equal(t, "SESSION_KEY", m.sessionLoot[0].Name)
+}
+
+func TestModel_AddToSessionLoot_MergeRebuildsLootTreeWhenPlacementChanges(t *testing.T) {
+	m := NewModel(Config{})
+
+	m.AddToSessionLoot(CollectedSecret{
+		Name:  "GITHUB_TOKEN",
+		Value: "ghs_123",
+		Type:  "github_token",
+	})
+
+	require.NotNil(t, findNodeByID(m.lootTreeRoot, "loot:repo:(unknown)"))
+
+	m.AddToSessionLoot(CollectedSecret{
+		Name:       "GITHUB_TOKEN",
+		Value:      "ghs_123",
+		Type:       "github_token",
+		Repository: "acme/api",
+		Workflow:   ".github/workflows/ci.yml",
+		Job:        "build",
+	})
+
+	require.NotNil(t, findNodeByID(m.lootTreeRoot, "loot:repo:acme/api"))
+	require.NotNil(t, findNodeByID(m.lootTreeRoot, "loot:wf:acme/api:.github/workflows/ci.yml:build"))
+	assert.Nil(t, findNodeByID(m.lootTreeRoot, "loot:repo:(unknown)"))
+}
+
+func TestModel_AddToLootStash_MergeRebuildsLootTreeWhenPlacementChanges(t *testing.T) {
+	m := NewModel(Config{})
+
+	m.AddToLootStash(CollectedSecret{
+		Name:  "PRIVATE_KEY",
+		Value: "pem-data",
+		Type:  "private_key",
+	})
+
+	require.NotNil(t, findNodeByID(m.lootTreeRoot, "loot:repo:(unknown)"))
+
+	m.AddToLootStash(CollectedSecret{
+		Name:       "PRIVATE_KEY",
+		Value:      "pem-data",
+		Type:       "private_key",
+		Repository: "acme/api",
+		Workflow:   "README.md",
+		Job:        "extract",
+	})
+
+	require.NotNil(t, findNodeByID(m.lootTreeRoot, "loot:repo:acme/api"))
+	require.NotNil(t, findNodeByID(m.lootTreeRoot, "loot:wf:acme/api:README.md:extract"))
+	assert.Nil(t, findNodeByID(m.lootTreeRoot, "loot:repo:(unknown)"))
+}
+
+func TestModel_HandleLootSync_RestoresStoredLoot(t *testing.T) {
+	m := NewModel(Config{})
+	key := testSSHPrivateKey(t)
+
+	result, cmd := m.handleLootSync(LootSyncMsg{Sync: counter.LootSyncPayload{
+		Entries: []counter.LootSyncEntry{
+			{
+				Timestamp:  time.Now(),
+				Name:       "Private Key detected (README.md:12)",
+				Value:      key,
+				Type:       "private_key",
+				Source:     "acme/newcleus-core-v3:README.md:12",
+				HighValue:  true,
+				Repository: "acme/newcleus-core-v3",
+				Workflow:   "README.md",
+			},
+			{
+				Origin:           "express",
+				AgentID:          "agent-1234567890",
+				Timestamp:        time.Now(),
+				Name:             "GITHUB_TOKEN",
+				Value:            "ghs_1234567890",
+				Type:             "github_token",
+				Source:           "env",
+				HighValue:        false,
+				Repository:       "acme/newcleus-core-v3",
+				Workflow:         ".github/workflows/ci.yml",
+				Job:              "build",
+				TokenPermissions: map[string]string{"contents": "read"},
+			},
+		},
+	}})
+
+	model := result.(Model)
+	require.NotNil(t, cmd)
+	require.Len(t, model.lootStash, 1)
+	assert.Equal(t, "Private Key detected (README.md:12)", model.lootStash[0].Name)
+	assert.Equal(t, "private_key", model.lootStash[0].Type)
+	assert.Equal(t, "acme/newcleus-core-v3", model.lootStash[0].Repository)
+	assert.Equal(t, "README.md", model.lootStash[0].Workflow)
+	assert.NotEmpty(t, model.lootStash[0].KeyFingerprint)
+
+	require.Len(t, model.sessionLoot, 1)
+	assert.Equal(t, "GITHUB_TOKEN", model.sessionLoot[0].Name)
+	assert.True(t, model.sessionLoot[0].ExpressMode)
+	assert.True(t, model.sessionLoot[0].Ephemeral)
+	assert.Equal(t, "agent:agent-12:env", model.sessionLoot[0].Source)
+	assert.Equal(t, "read", model.displayPermissionsForSecret(model.sessionLoot[0])["contents"])
 }
 
 func TestRenderSelectedLootDetail_UsesKitchenTokenPermissionsForGitHubToken(t *testing.T) {

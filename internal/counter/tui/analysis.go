@@ -516,7 +516,7 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 		m.AddOutput("success", "Imported to attack graph: "+summary.String())
 	}
 
-	expandedFindings := poutine.ExpandFindings(result.Findings)
+	expandedFindings := filterVisibleFindings(poutine.ExpandFindings(result.Findings))
 
 	supportedCount := 0
 	for _, f := range expandedFindings {
@@ -655,6 +655,17 @@ func findingDedupKey(f poutine.Finding) string {
 		return fp
 	}
 	return fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s", f.Repository, f.Workflow, f.Job, f.Step, f.Line, f.RuleID, f.Context, f.Expression)
+}
+
+func filterVisibleFindings(findings []poutine.Finding) []poutine.Finding {
+	filtered := make([]poutine.Finding, 0, len(findings))
+	for _, finding := range findings {
+		if pantry.IsSelfHostedRunnerAnalyzeOnlyRule(finding.RuleID) {
+			continue
+		}
+		filtered = append(filtered, finding)
+	}
+	return filtered
 }
 
 func vulnerabilityDedupKey(v Vulnerability) string {

@@ -71,10 +71,13 @@ func run() error {
 		}
 	}
 
-	// Generate session ID if not provided
-	sid := *sessionID
-	if sid == "" {
-		sid = uuid.New().String()[:8]
+	sid := determineSessionID(*sessionID, savedConfig)
+	if savedConfig == nil {
+		savedConfig = &counter.Config{}
+	}
+	if savedConfig.SessionID != sid {
+		savedConfig.SessionID = sid
+		_ = counter.SaveConfig(savedConfig)
 	}
 
 	// If kitchen URL is set but no token, try SSH authentication
@@ -136,6 +139,16 @@ func run() error {
 	// Run the program
 	_, err := p.Run()
 	return err
+}
+
+func determineSessionID(flagValue string, savedConfig *counter.Config) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if savedConfig != nil && savedConfig.SessionID != "" {
+		return savedConfig.SessionID
+	}
+	return uuid.New().String()[:8]
 }
 
 // getEnvOrDefault returns the environment variable value or a default
