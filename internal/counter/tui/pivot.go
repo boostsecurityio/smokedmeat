@@ -66,10 +66,11 @@ type PivotResultMsg struct {
 	NewPerms        []PermissionGain // New permissions on known repos
 	TotalFound      int              // Total from API (before delta filtering)
 
-	NewVulns         []Vulnerability
-	Credentials      []CollectedSecret
-	TokenPermissions map[string]string
-	Err              error
+	NewVulns          []Vulnerability
+	DispatchWorkflows []WorkflowDispatchSelection
+	Credentials       []CollectedSecret
+	TokenPermissions  map[string]string
+	Err               error
 }
 
 func (m Model) executePivot(pivotType PivotType, target string) tea.Cmd {
@@ -196,7 +197,7 @@ func (m Model) resolveGitHubAppPivot(target string) (CollectedSecret, string, er
 			appID = m.detectAppID()
 		}
 		if appID == "" {
-			return CollectedSecret{}, "", fmt.Errorf("no App ID found — provide as: pivot app <app_id>")
+			return CollectedSecret{}, "", fmt.Errorf("no App ID found - provide as: pivot app <app_id>")
 		}
 		return *selected, appID, nil
 	}
@@ -219,7 +220,7 @@ func (m Model) resolveGitHubAppPivot(target string) (CollectedSecret, string, er
 		appID = m.detectAppID()
 	}
 	if appID == "" {
-		return CollectedSecret{}, "", fmt.Errorf("no App ID found — provide as: pivot app <app_id>")
+		return CollectedSecret{}, "", fmt.Errorf("no App ID found - provide as: pivot app <app_id>")
 	}
 
 	return keySecret, appID, nil
@@ -261,21 +262,18 @@ func (m Model) executeGitHubPivotWithToken(token, discoveredVia, target string) 
 			}
 		}
 
-		var newVulns []Vulnerability
+		repoName := fmt.Sprintf("%s/%s", targetOwner, targetRepo)
+		var dispatchWorkflows []WorkflowDispatchSelection
 		for _, wf := range workflows {
-			newVulns = append(newVulns, Vulnerability{
-				ID:         fmt.Sprintf("pivot-%s-%s-%s", targetOwner, targetRepo, wf),
-				RuleID:     "workflow_dispatch",
-				Title:      fmt.Sprintf("Dispatchable: %s", wf),
-				Severity:   "high",
-				Repository: fmt.Sprintf("%s/%s", targetOwner, targetRepo),
-				Workflow:   wf,
-				Context:    "workflow_dispatch",
-				Trigger:    "workflow_dispatch",
+			dispatchWorkflows = append(dispatchWorkflows, WorkflowDispatchSelection{
+				Repository: repoName,
+				Workflow:   wf.Path,
+				Ref:        wf.Ref,
+				Inputs:     wf.Inputs,
+				Values:     workflowDispatchDefaultValues(wf.Inputs),
 			})
 		}
 
-		repoName := fmt.Sprintf("%s/%s", targetOwner, targetRepo)
 		entityID := "repo:" + repoName
 
 		var newRepos []string
@@ -285,11 +283,11 @@ func (m Model) executeGitHubPivotWithToken(token, discoveredVia, target string) 
 		}
 
 		return PivotResultMsg{
-			Type:       PivotTypeGitHubToken,
-			Success:    true,
-			NewRepos:   newRepos,
-			NewVulns:   newVulns,
-			TotalFound: 1,
+			Type:              PivotTypeGitHubToken,
+			Success:           true,
+			NewRepos:          newRepos,
+			DispatchWorkflows: dispatchWorkflows,
+			TotalFound:        1,
 		}
 	}
 
@@ -608,7 +606,7 @@ func (m Model) validateSecretByName(name, value string) tea.Cmd {
 		}
 
 		if strings.Contains(value, "-----BEGIN") {
-			return SecretValidationMsg{SecretName: name, Success: false, Err: fmt.Errorf("PEM key — use 'pivot app' to exchange for token")}
+			return SecretValidationMsg{SecretName: name, Success: false, Err: fmt.Errorf("PEM key - use 'pivot app' to exchange for token")}
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

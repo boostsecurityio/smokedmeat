@@ -1220,7 +1220,7 @@ func TestHandleKeyMsg_XRequiresVulnerabilityTreeNode(t *testing.T) {
 	assert.Equal(t, PhasePostExploit, model.phase)
 	require.NotEmpty(t, model.output)
 	assert.Equal(t, "error", model.output[len(model.output)-1].Type)
-	assert.Equal(t, "Action shortcut requires a [VULN] or [SH-RUNNER] node.", model.output[len(model.output)-1].Content)
+	assert.Equal(t, "Action shortcut requires a [WORKFLOW], [VULN], or [SH-RUNNER] node.", model.output[len(model.output)-1].Content)
 }
 
 func TestHandleKeyMsg_XUsesHighlightedTreeVulnerabilityFromPantryNode(t *testing.T) {

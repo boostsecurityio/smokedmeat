@@ -208,9 +208,9 @@ func TestGOATFlagPath(t *testing.T) {
 	runCounterCommand(t, tmux, "pivot github "+infraRepo)
 	require.NotEmpty(t, waitForAny(tmux, []string{"Found ", "Token sees ", "No new repos discovered"}, 30*time.Second), "Dispatch pivot should produce output")
 
-	runCounterCommand(t, tmux, "exploit "+infraRepo+" "+deployWorkflow+" workflow_dispatch")
-	requireContent(t, tmux, "Step 1/3", 10*time.Second, "Dispatch exploit wizard should appear")
-	completeDispatchDeployWizard(t, tmux, 0)
+	jumpOmnibox(t, tmux, infraRepo+" "+deployWorkflow, deployWorkflow, 30*time.Second)
+	require.NoError(t, tmux.SendKeys("x"))
+	requireContent(t, tmux, "WORKFLOW DISPATCH", 10*time.Second, "Workflow dispatch modal should appear")
 	require.NoError(t, tmux.SendKeys("Enter"))
 	require.NotEmpty(t, waitForAny(tmux, []string{"workflow_dispatch triggered", "Phase:Waiting"}, 30*time.Second), "Counter should trigger the victim workflow through the dispatch exploit path")
 

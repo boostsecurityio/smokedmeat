@@ -209,7 +209,7 @@ func TestHandler_PersistAnalysisLoot(t *testing.T) {
 	assert.Equal(t, "private_key", rows[0].Type)
 	assert.Equal(t, "acme/newcleus-core-v3:README.md:12", rows[0].Source)
 	assert.Equal(t, "acme/newcleus-core-v3", rows[0].Repository)
-	assert.Equal(t, "README.md", rows[0].Workflow)
+	assert.Empty(t, rows[0].Workflow)
 }
 
 func TestHandler_GetAnalyzeResult_ReturnsStatuses(t *testing.T) {
@@ -988,7 +988,7 @@ func TestHandleAnalyze_EmptySessionID_SkipsRepoVisibility(t *testing.T) {
 	entityRepo := db.NewKnownEntityRepository(database)
 	entities, err := entityRepo.ListBySession("")
 	require.NoError(t, err)
-	assert.Empty(t, entities, "empty SessionID means recordAnalyzedRepoVisibility is never called — no entities in DB")
+	assert.Empty(t, entities, "empty SessionID means recordAnalyzedRepoVisibility is never called - no entities in DB")
 
 	// Prove: pantry has no private property
 	p := h.Pantry()
@@ -996,7 +996,7 @@ func TestHandleAnalyze_EmptySessionID_SkipsRepoVisibility(t *testing.T) {
 	repos := p.GetAssetsByType(pantry.AssetRepository)
 	for _, repo := range repos {
 		_, hasPrivate := repo.Properties["private"]
-		assert.False(t, hasPrivate, "repo %s should NOT have 'private' property — visibility check was skipped", repo.Name)
+		assert.False(t, hasPrivate, "repo %s should NOT have 'private' property - visibility check was skipped", repo.Name)
 	}
 }
 

@@ -42,36 +42,30 @@ func runnerTargetBranchSuffix(now time.Time) string {
 }
 
 func (m Model) deployAutoDispatch(vuln *Vulnerability, stagerID, payload string, token *CollectedSecret, inputName string, dwellTime time.Duration) tea.Cmd {
-	return func() tea.Msg {
-		if token == nil {
+	if token == nil {
+		return func() tea.Msg {
 			return AutoDispatchFailedMsg{StagerID: stagerID, Err: fmt.Errorf("no ephemeral token available")}
 		}
-
-		parts := strings.SplitN(vuln.Repository, "/", 2)
-		if len(parts) != 2 {
-			return AutoDispatchFailedMsg{StagerID: stagerID, Err: fmt.Errorf("invalid repository format")}
+	}
+	var inputs map[string]interface{}
+	if inputName != "" {
+		inputs = map[string]interface{}{inputName: payload}
+	}
+	target := WorkflowDispatchSelection{
+		Repository: vuln.Repository,
+		Workflow:   vuln.Workflow,
+	}
+	cmd := m.deployWorkflowDispatch(target, stagerID, token, inputs, dwellTime)
+	return func() tea.Msg {
+		msg := cmd()
+		if success, ok := msg.(AutoDispatchSuccessMsg); ok {
+			success.Vuln = vuln
+			if success.InputName == "" {
+				success.InputName = inputName
+			}
+			return success
 		}
-		owner, repo := parts[0], parts[1]
-
-		workflowFile := strings.TrimPrefix(vuln.Workflow, ".github/workflows/")
-		ctx := context.Background()
-		var inputs map[string]interface{}
-		if inputName != "" {
-			inputs = map[string]interface{}{inputName: payload}
-		}
-		err := m.kitchenClient.TriggerDispatch(ctx, counter.DeployDispatchRequest{
-			Token:        token.Value,
-			Owner:        owner,
-			Repo:         repo,
-			WorkflowFile: workflowFile,
-			Ref:          "main",
-			Inputs:       inputs,
-		})
-		if err != nil {
-			return AutoDispatchFailedMsg{StagerID: stagerID, Err: err}
-		}
-
-		return AutoDispatchSuccessMsg{StagerID: stagerID, Vuln: vuln, InputName: inputName, DwellTime: dwellTime}
+		return msg
 	}
 }
 

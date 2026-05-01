@@ -25,6 +25,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"golang.org/x/oauth2"
+	"gopkg.in/yaml.v3"
 
 	"github.com/boostsecurityio/smokedmeat/internal/buildinfo"
 	"github.com/boostsecurityio/smokedmeat/internal/lotp"
@@ -270,8 +271,23 @@ type ListWorkflowsRequest struct {
 	Repo  string `json:"repo"`
 }
 
+type WorkflowDispatchInput struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Required    bool     `json:"required,omitempty"`
+	Default     string   `json:"default,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	Options     []string `json:"options,omitempty"`
+}
+
+type DispatchableWorkflow struct {
+	Path   string                  `json:"path"`
+	Ref    string                  `json:"ref,omitempty"`
+	Inputs []WorkflowDispatchInput `json:"inputs,omitempty"`
+}
+
 type ListWorkflowsResponse struct {
-	Workflows []string `json:"workflows"`
+	Workflows []DispatchableWorkflow `json:"workflows"`
 }
 
 type GetUserRequest struct {
@@ -840,6 +856,53 @@ func (c *gitHubClient) triggerWorkflowDispatch(ctx context.Context, owner, repo,
 	return err
 }
 
+func (c *gitHubClient) validateDispatchInputs(ctx context.Context, owner, repo, workflowFile, ref string, inputs map[string]interface{}) error {
+	path := workflowContentPath(workflowFile)
+	content, _, _, err := c.client.Repositories.GetContents(ctx, owner, repo, path, &github.RepositoryContentGetOptions{Ref: ref})
+	if err != nil {
+		return nil
+	}
+	decoded, err := content.GetContent()
+	if err != nil {
+		return nil
+	}
+	workflow, ok := parseDispatchableWorkflow(path, ref, decoded)
+	if !ok {
+		return fmt.Errorf("workflow must define workflow_dispatch trigger")
+	}
+	for _, input := range workflow.Inputs {
+		value, exists := inputs[input.Name]
+		if input.Required && input.Default == "" && (!exists || strings.TrimSpace(fmt.Sprint(value)) == "") {
+			return fmt.Errorf("missing required workflow_dispatch input: %s", input.Name)
+		}
+		if exists && len(input.Options) > 0 {
+			valueText := strings.TrimSpace(fmt.Sprint(value))
+			if valueText == "" {
+				continue
+			}
+			matched := false
+			for _, option := range input.Options {
+				if valueText == option {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return fmt.Errorf("invalid workflow_dispatch input %s: expected one of %s", input.Name, strings.Join(input.Options, ", "))
+			}
+		}
+	}
+	return nil
+}
+
+func workflowContentPath(workflowFile string) string {
+	workflowFile = strings.TrimSpace(workflowFile)
+	if strings.HasPrefix(workflowFile, ".github/workflows/") {
+		return workflowFile
+	}
+	return ".github/workflows/" + workflowFile
+}
+
 func (c *gitHubClient) createIssue(ctx context.Context, owner, repo, title, body string) (*github.Issue, error) {
 	issue, _, err := c.client.Issues.Create(ctx, owner, repo, &github.IssueRequest{
 		Title: github.String(title),
@@ -892,13 +955,14 @@ func isRetryableIssueCommentError(err error) bool {
 	return strings.Contains(err.Error(), "Could not resolve to a node with the global id of")
 }
 
-func (c *gitHubClient) listWorkflowsWithDispatch(ctx context.Context, owner, repo string) ([]string, error) {
+func (c *gitHubClient) listWorkflowsWithDispatch(ctx context.Context, owner, repo string) ([]DispatchableWorkflow, error) {
 	workflows, _, err := c.client.Actions.ListWorkflows(ctx, owner, repo, &github.ListOptions{PerPage: 100})
 	if err != nil {
 		return nil, err
 	}
 
-	var dispatchable []string
+	defaultBranch, _ := c.getDefaultBranch(ctx, owner, repo)
+	var dispatchable []DispatchableWorkflow
 	for _, wf := range workflows.Workflows {
 		content, _, _, err := c.client.Repositories.GetContents(ctx, owner, repo, wf.GetPath(), nil)
 		if err != nil {
@@ -910,12 +974,129 @@ func (c *gitHubClient) listWorkflowsWithDispatch(ctx context.Context, owner, rep
 			continue
 		}
 
-		if strings.Contains(decoded, "workflow_dispatch") {
-			dispatchable = append(dispatchable, wf.GetPath())
+		workflow, ok := parseDispatchableWorkflow(wf.GetPath(), defaultBranch, decoded)
+		if ok {
+			dispatchable = append(dispatchable, workflow)
 		}
 	}
 
 	return dispatchable, nil
+}
+
+func parseDispatchableWorkflow(path, ref, content string) (DispatchableWorkflow, bool) {
+	workflow := DispatchableWorkflow{Path: path, Ref: ref}
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(content), &root); err != nil {
+		return workflow, strings.Contains(content, "workflow_dispatch")
+	}
+	if len(root.Content) == 0 {
+		return workflow, false
+	}
+	onNode := mappingValue(root.Content[0], "on")
+	if onNode == nil {
+		return workflow, false
+	}
+	dispatchNode := dispatchEventNode(onNode)
+	if dispatchNode == nil {
+		return workflow, false
+	}
+	workflow.Inputs = parseDispatchInputs(dispatchNode)
+	return workflow, true
+}
+
+func dispatchEventNode(onNode *yaml.Node) *yaml.Node {
+	switch onNode.Kind {
+	case yaml.ScalarNode:
+		if onNode.Value == "workflow_dispatch" {
+			return onNode
+		}
+	case yaml.SequenceNode:
+		for _, item := range onNode.Content {
+			if item.Value == "workflow_dispatch" {
+				return item
+			}
+		}
+	case yaml.MappingNode:
+		return mappingValue(onNode, "workflow_dispatch")
+	}
+	return nil
+}
+
+func parseDispatchInputs(dispatchNode *yaml.Node) []WorkflowDispatchInput {
+	inputsNode := mappingValue(dispatchNode, "inputs")
+	if inputsNode == nil || inputsNode.Kind != yaml.MappingNode {
+		return nil
+	}
+	inputs := make([]WorkflowDispatchInput, 0, len(inputsNode.Content)/2)
+	for i := 0; i+1 < len(inputsNode.Content); i += 2 {
+		name := strings.TrimSpace(inputsNode.Content[i].Value)
+		if name == "" {
+			continue
+		}
+		input := WorkflowDispatchInput{Name: name, Type: "string"}
+		value := inputsNode.Content[i+1]
+		if value.Kind == yaml.MappingNode {
+			input.Description = scalarString(mappingValue(value, "description"))
+			input.Required = scalarBool(mappingValue(value, "required"))
+			input.Default = scalarString(mappingValue(value, "default"))
+			if typ := scalarString(mappingValue(value, "type")); typ != "" {
+				input.Type = typ
+			}
+			input.Options = scalarStringSlice(mappingValue(value, "options"))
+		}
+		inputs = append(inputs, input)
+	}
+	return inputs
+}
+
+func mappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func scalarString(node *yaml.Node) string {
+	if node == nil {
+		return ""
+	}
+	if node.Kind == yaml.ScalarNode {
+		return node.Value
+	}
+	var value interface{}
+	if err := node.Decode(&value); err != nil || value == nil {
+		return ""
+	}
+	return fmt.Sprint(value)
+}
+
+func scalarBool(node *yaml.Node) bool {
+	if node == nil {
+		return false
+	}
+	var value bool
+	if err := node.Decode(&value); err == nil {
+		return value
+	}
+	return strings.EqualFold(strings.TrimSpace(node.Value), "true")
+}
+
+func scalarStringSlice(node *yaml.Node) []string {
+	if node == nil || node.Kind != yaml.SequenceNode {
+		return nil
+	}
+	values := make([]string, 0, len(node.Content))
+	for _, item := range node.Content {
+		if value := scalarString(item); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func (c *gitHubClient) deployIssue(ctx context.Context, vuln *VulnerabilityInfo, payload string, commentMode bool) (string, error) {
@@ -1904,18 +2085,33 @@ func (h *Handler) handleGitHubDeployDispatch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if req.Owner == "" || req.Repo == "" || req.WorkflowFile == "" || req.Ref == "" {
-		http.Error(w, "owner, repo, workflow_file, and ref are required", http.StatusBadRequest)
+	if req.Owner == "" || req.Repo == "" || req.WorkflowFile == "" {
+		http.Error(w, "owner, repo, and workflow_file are required", http.StatusBadRequest)
 		return
 	}
 
 	client := newGitHubDeployClient(req.Token)
+	if strings.TrimSpace(req.Ref) == "" {
+		defaultBranch, err := client.getDefaultBranch(r.Context(), req.Owner, req.Repo)
+		if err != nil {
+			slog.Warn("github deploy dispatch default branch lookup failed", "error", err)
+			writeGitHubError(w, err)
+			return
+		}
+		req.Ref = defaultBranch
+	}
 
 	dispatchCapability := dispatchObservedCapability(req.WorkflowFile)
 	if err := client.getWorkflowByFileName(r.Context(), req.Owner, req.Repo, req.WorkflowFile); err != nil {
 		h.recordObservedCapability(req.Token, req.Owner+"/"+req.Repo, dispatchCapability, err)
 		slog.Warn("github deploy dispatch preflight failed", "error", err)
 		writeGitHubError(w, fmt.Errorf("preflight: %w", err))
+		return
+	}
+
+	if err := client.validateDispatchInputs(r.Context(), req.Owner, req.Repo, req.WorkflowFile, req.Ref, req.Inputs); err != nil {
+		h.recordObservedCapability(req.Token, req.Owner+"/"+req.Repo, dispatchCapability, err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

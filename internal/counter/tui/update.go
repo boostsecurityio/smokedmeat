@@ -706,7 +706,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.AddOutput("success", "workflow_dispatch triggered")
 		}
-		m.activityLog.Add(IconSuccess, "Pivot dispatch sent, waiting for agent")
+		if msg.StagerID != "" {
+			m.activityLog.Add(IconSuccess, "Pivot dispatch sent, waiting for agent")
+		} else {
+			m.activityLog.Add(IconSuccess, "Workflow dispatch sent")
+		}
 		historyEntry := counter.HistoryPayload{
 			Type:      "exploit.attempted",
 			SessionID: m.config.SessionID,
@@ -716,6 +720,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Vuln != nil {
 			historyEntry.VulnID = msg.Vuln.ID
 			historyEntry.Repository = msg.Vuln.Repository
+		} else if msg.Repository != "" {
+			historyEntry.Repository = msg.Repository
 		}
 		return m, m.recordHistoryCmd(historyEntry)
 
@@ -753,7 +759,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.AddOutput("warning", fmt.Sprintf("Cloud shell exited with error: %v", msg.Err))
 		} else {
-			m.AddOutput("info", "Cloud shell closed. Session preserved — type 'cloud shell' to re-enter.")
+			m.AddOutput("info", "Cloud shell closed. Session preserved - type 'cloud shell' to re-enter.")
 		}
 		return m, nil
 
@@ -766,7 +772,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.AddOutput("warning", fmt.Sprintf("SSH shell exited with error: %v", msg.Err))
 		} else {
-			m.AddOutput("info", "SSH shell closed. Session preserved — type 'ssh shell' to re-enter.")
+			m.AddOutput("info", "SSH shell closed. Session preserved - type 'ssh shell' to re-enter.")
 		}
 		return m, nil
 
@@ -780,11 +786,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.Type {
 		case PivotTypeGitHubToken:
+			if len(msg.DispatchWorkflows) > 0 {
+				imported := m.importDispatchWorkflowsToPantry(msg.DispatchWorkflows)
+				m.AddOutput("success", fmt.Sprintf("Found %d dispatchable workflows", len(msg.DispatchWorkflows)))
+				if imported > 0 || len(msg.DispatchWorkflows) > 0 {
+					m.RebuildTree()
+				}
+				m.activityLog.Add(IconSecret, fmt.Sprintf("Pivot found %d dispatchable workflows", len(msg.DispatchWorkflows)))
+			}
 			if len(msg.NewVulns) > 0 {
 				m.vulnerabilities = append(m.vulnerabilities, msg.NewVulns...)
 				m.importVulnerabilitiesToPantry(msg.NewVulns)
-				m.AddOutput("success", fmt.Sprintf("Found %d dispatchable workflows", len(msg.NewVulns)))
-				m.activityLog.Add(IconSecret, fmt.Sprintf("Pivot found %d new targets", len(msg.NewVulns)))
 			}
 
 			if msg.TotalFound > 0 {
@@ -895,12 +907,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.swapActiveToken(cred)
 
-				m.AddOutput("success", fmt.Sprintf("GitHub App pivot successful — %s", cred.Name))
+				m.AddOutput("success", fmt.Sprintf("GitHub App pivot successful - %s", cred.Name))
 				m.AddOutput("info", fmt.Sprintf("  Token: %s", cred.MaskedValue()))
 				if cred.ExpiresAt != nil {
 					m.AddOutput("info", fmt.Sprintf("  Expires: %s", cred.ExpiresAt.Format("15:04:05")))
 				}
-				m.AddOutput("success", "Active token swapped — all commands now use installation token")
+				m.AddOutput("success", "Active token swapped - all commands now use installation token")
 				m.flashMessage = "Token swapped → " + cred.Name
 				m.flashUntil = time.Now().Add(5 * time.Second)
 
@@ -1713,10 +1725,20 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.focus != FocusInput && m.paneFocus == PaneFocusFindings {
 			node := m.SelectedTreeNode()
 			if node == nil {
-				m.AddOutput("error", "Action shortcut requires a [VULN] or [SH-RUNNER] node.")
+				m.AddOutput("error", "Action shortcut requires a [WORKFLOW], [VULN], or [SH-RUNNER] node.")
 				return m, nil
 			}
 			switch node.Type {
+			case TreeNodeWorkflow:
+				target, err := m.workflowDispatchTargetForNode(node)
+				if err != nil {
+					m.AddOutput("error", err.Error())
+					return m, nil
+				}
+				if err := m.OpenWorkflowDispatchWizard(target); err != nil {
+					m.AddOutput("error", err.Error())
+				}
+				return m, nil
 			case TreeNodeVuln:
 				cmd, err := m.openSelectedVulnerabilityWizard("")
 				if err != nil {
@@ -1730,7 +1752,7 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 				return m, cmd
 			default:
-				m.AddOutput("error", "Action shortcut requires a [VULN] or [SH-RUNNER] node.")
+				m.AddOutput("error", "Action shortcut requires a [WORKFLOW], [VULN], or [SH-RUNNER] node.")
 			}
 		}
 

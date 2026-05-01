@@ -417,7 +417,7 @@ func TestLootTreeSelectByID_ExpandsCollapsedAncestors(t *testing.T) {
 		}
 	}
 	require.NotEmpty(t, nodeID)
-	require.GreaterOrEqual(t, len(m.lootTreeNodes), 3)
+	require.GreaterOrEqual(t, len(m.lootTreeNodes), 2)
 	m.lootTreeRoot.Children[0].Expanded = false
 	m.ReflattenLootTree()
 

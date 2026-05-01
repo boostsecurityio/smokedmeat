@@ -73,6 +73,9 @@ type SecretFinding struct {
 type WorkflowMeta struct {
 	Repository         string                        `json:"repository"`
 	Path               string                        `json:"path"`
+	DefaultBranch      string                        `json:"default_branch,omitempty"`
+	EventTriggers      []string                      `json:"event_triggers,omitempty"`
+	DispatchInputs     []WorkflowDispatchInput       `json:"dispatch_inputs,omitempty"`
 	Secrets            []string                      `json:"secrets,omitempty"`
 	JobSecrets         map[string][]string           `json:"job_secrets,omitempty"`
 	Jobs               []JobMeta                     `json:"jobs,omitempty"`
@@ -82,6 +85,15 @@ type WorkflowMeta struct {
 	HasWrite           bool                          `json:"has_write,omitempty"`
 	SelfHosted         bool                          `json:"self_hosted,omitempty"`
 	CachePoisonVictims []cachepoison.VictimCandidate `json:"cache_poison_victims,omitempty"`
+}
+
+type WorkflowDispatchInput struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Required    bool     `json:"required,omitempty"`
+	Default     string   `json:"default,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	Options     []string `json:"options,omitempty"`
 }
 
 // JobMeta contains metadata about a specific job.
@@ -495,11 +507,32 @@ func extractWorkflowMetaWithVictims(result *AnalysisResult, pkg *models.PackageI
 		}
 
 		meta := WorkflowMeta{
-			Repository: repoName,
-			Path:       wf.Path,
-			JobSecrets: make(map[string][]string),
+			Repository:    repoName,
+			Path:          wf.Path,
+			DefaultBranch: pkg.DefaultBranch,
+			JobSecrets:    make(map[string][]string),
 		}
 		meta.CachePoisonVictims = cloneVictimCandidates(workflowVictims[wf.Path])
+		for _, event := range wf.Events {
+			if event.Name == "" {
+				continue
+			}
+			meta.EventTriggers = append(meta.EventTriggers, event.Name)
+			if event.Name == "workflow_dispatch" {
+				for _, input := range event.Inputs {
+					inputType := input.Type
+					if inputType == "" {
+						inputType = "string"
+					}
+					meta.DispatchInputs = append(meta.DispatchInputs, WorkflowDispatchInput{
+						Name:        input.Name,
+						Description: input.Description,
+						Required:    bool(input.Required),
+						Type:        inputType,
+					})
+				}
+			}
+		}
 
 		workflowSecrets := make(map[string]struct{})
 		workflowHasOIDC := false

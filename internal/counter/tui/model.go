@@ -1221,6 +1221,15 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 				}
 				wf := pantry.NewWorkflow(parentID, wfMeta.Path)
 				wf.State = pantry.StateValidated
+				if wfMeta.DefaultBranch != "" {
+					wf.SetProperty("default_branch", wfMeta.DefaultBranch)
+				}
+				if len(wfMeta.EventTriggers) > 0 {
+					wf.SetProperty("event_triggers", wfMeta.EventTriggers)
+				}
+				if len(wfMeta.DispatchInputs) > 0 {
+					wf.SetProperty("dispatch_inputs", wfMeta.DispatchInputs)
+				}
 				if wfMeta.HasOIDC {
 					wf.SetProperty("has_oidc", true)
 				}
@@ -1670,7 +1679,7 @@ func (m *Model) CanTransitionTo(newPhase Phase) bool {
 	case PhaseRecon:
 		return m.analysisComplete
 	case PhaseWizard:
-		return m.wizard != nil && (m.wizard.SelectedVuln != nil || m.wizard.SelectedRunnerTarget != nil)
+		return m.wizard != nil && (m.wizard.SelectedVuln != nil || m.wizard.SelectedRunnerTarget != nil || m.wizard.SelectedDispatch != nil)
 	case PhaseWaiting:
 		return m.phase == PhaseWizard && m.waiting != nil
 	case PhasePostExploit:
@@ -1723,6 +1732,31 @@ func (m *Model) OpenRunnerTargetWizard(target *RunnerTargetSelection) error {
 	m.wizard.SelectedRunnerTarget = target
 	m.wizard.RunnerTargetAction = RunnerTargetActionAutoWorkflowPush
 	m.wizard.Step = 1
+
+	m.prevView = m.view
+	m.prevFocus = m.focus
+	m.TransitionToPhase(PhaseWizard)
+	return nil
+}
+
+func (m *Model) OpenWorkflowDispatchWizard(target *WorkflowDispatchSelection) error {
+	if target == nil {
+		return fmt.Errorf("no workflow_dispatch target selected")
+	}
+	if strings.TrimSpace(target.Repository) == "" || strings.TrimSpace(target.Workflow) == "" {
+		return fmt.Errorf("workflow_dispatch target is missing repository or workflow")
+	}
+	if m.wizard == nil {
+		m.wizard = &WizardState{}
+	}
+	m.wizard.Reset()
+	m.wizard.Kind = WizardKindWorkflowDispatch
+	m.wizard.SelectedDispatch = target
+	m.wizard.Step = 1
+	if len(target.Inputs) > 0 {
+		m.wizardInput.SetValue(target.Values[target.Inputs[0].Name])
+		m.wizardInput.Focus()
+	}
 
 	m.prevView = m.view
 	m.prevFocus = m.focus

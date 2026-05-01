@@ -1785,7 +1785,6 @@ func TestHandlerDeployDispatch_MissingFields(t *testing.T) {
 		{"missing owner", `{"token":"ghp_test","owner":"","repo":"api","workflow_file":"ci.yml","ref":"main"}`},
 		{"missing repo", `{"token":"ghp_test","owner":"acme","repo":"","workflow_file":"ci.yml","ref":"main"}`},
 		{"missing workflow_file", `{"token":"ghp_test","owner":"acme","repo":"api","workflow_file":"","ref":"main"}`},
-		{"missing ref", `{"token":"ghp_test","owner":"acme","repo":"api","workflow_file":"ci.yml","ref":""}`},
 	}
 
 	for _, tt := range tests {
@@ -1794,7 +1793,7 @@ func TestHandlerDeployDispatch_MissingFields(t *testing.T) {
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, req)
 			assert.Equal(t, http.StatusBadRequest, rec.Code)
-			assert.Contains(t, rec.Body.String(), "owner, repo, workflow_file, and ref are required")
+			assert.Contains(t, rec.Body.String(), "owner, repo, and workflow_file are required")
 		})
 	}
 }
@@ -2290,7 +2289,33 @@ func TestListWorkflowsWithDispatch_FiltersCorrectly(t *testing.T) {
 
 	workflows, err := ghClient.listWorkflowsWithDispatch(context.Background(), "acme", "api")
 	require.NoError(t, err)
-	assert.Equal(t, []string{".github/workflows/deploy.yml"}, workflows)
+	require.Len(t, workflows, 1)
+	assert.Equal(t, ".github/workflows/deploy.yml", workflows[0].Path)
+}
+
+func TestParseDispatchableWorkflow_Inputs(t *testing.T) {
+	workflow, ok := parseDispatchableWorkflow(".github/workflows/deploy.yml", "main", `on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        default: prod
+        type: choice
+        options:
+          - dev
+          - prod
+`)
+
+	require.True(t, ok)
+	assert.Equal(t, ".github/workflows/deploy.yml", workflow.Path)
+	assert.Equal(t, "main", workflow.Ref)
+	require.Len(t, workflow.Inputs, 1)
+	assert.Equal(t, "environment", workflow.Inputs[0].Name)
+	assert.True(t, workflow.Inputs[0].Required)
+	assert.Equal(t, "prod", workflow.Inputs[0].Default)
+	assert.Equal(t, "choice", workflow.Inputs[0].Type)
+	assert.Equal(t, []string{"dev", "prod"}, workflow.Inputs[0].Options)
 }
 
 // =============================================================================

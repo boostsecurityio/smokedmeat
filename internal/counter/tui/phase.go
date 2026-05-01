@@ -146,15 +146,27 @@ type WizardKind int
 const (
 	WizardKindVulnerability WizardKind = iota
 	WizardKindRunnerTarget
+	WizardKindWorkflowDispatch
 )
 
 func (k WizardKind) String() string {
 	switch k {
 	case WizardKindRunnerTarget:
 		return "runner_target"
+	case WizardKindWorkflowDispatch:
+		return "workflow_dispatch"
 	default:
 		return "vulnerability"
 	}
+}
+
+type WorkflowDispatchSelection struct {
+	Repository string
+	Workflow   string
+	Ref        string
+	Inputs     []counter.WorkflowDispatchInput
+	Values     map[string]string
+	Cursor     int
 }
 
 type RunnerTargetAction int
@@ -306,7 +318,7 @@ func ApplicableDeliveryMethods(v *Vulnerability) []DeliveryMethod {
 		}
 	}
 
-	// LOTP for untrusted checkout (pwn request) — replace injection methods entirely
+	// LOTP for untrusted checkout (pwn request) - replace injection methods entirely
 	if v.RuleID == "untrusted_checkout_exec" {
 		if v.LOTPTool != "" || v.LOTPAction != "" {
 			return []DeliveryMethod{DeliveryLOTP, DeliveryManualSteps}
@@ -324,6 +336,7 @@ type WizardState struct {
 	Step                   int
 	SelectedVuln           *Vulnerability
 	SelectedRunnerTarget   *RunnerTargetSelection
+	SelectedDispatch       *WorkflowDispatchSelection
 	RunnerTargetAction     RunnerTargetAction
 	DeliveryMethod         DeliveryMethod
 	CommentTarget          CommentTarget
@@ -351,6 +364,7 @@ func (w *WizardState) Reset() {
 	w.Step = 1
 	w.SelectedVuln = nil
 	w.SelectedRunnerTarget = nil
+	w.SelectedDispatch = nil
 	w.RunnerTargetAction = RunnerTargetActionPassiveDetails
 	w.DeliveryMethod = DeliveryIssue
 	w.CommentTarget = CommentTargetIssue
