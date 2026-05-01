@@ -248,6 +248,9 @@ func (m *Model) renderTreeNode(node *TreeNode, width int, selected bool, menuNum
 
 	label := node.Label
 	typeTag := " [" + node.Type.String() + "]"
+	if node.Type == TreeNodeWorkflow && workflowNodeDispatchable(node) {
+		typeTag = " [WORKFLOW - DISPATCHABLE]"
+	}
 
 	if node.Type == TreeNodeRepo && node.State == TreeStateHighValue {
 		label = "🔒 " + label

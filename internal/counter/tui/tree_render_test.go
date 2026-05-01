@@ -286,6 +286,36 @@ func TestRenderTreeNode_AddsGitHubHyperlinks(t *testing.T) {
 	require.Contains(t, workflowLine, "https://github.com/whooli/xyz/blob/HEAD/.github/workflows/ci.yml")
 }
 
+func TestRenderTreeNode_MarksDispatchableWorkflowAction(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	repo := &TreeNode{ID: "github:whooli/xyz", Label: "xyz", Type: TreeNodeRepo}
+	workflow := &TreeNode{
+		ID:     "github:whooli/xyz:workflow:.github/workflows/deploy.yml",
+		Label:  ".github/workflows/deploy.yml",
+		Type:   TreeNodeWorkflow,
+		Parent: repo,
+		Properties: map[string]interface{}{
+			"event_triggers": []string{"push", "workflow_dispatch"},
+		},
+	}
+	normal := &TreeNode{
+		ID:     "github:whooli/xyz:workflow:.github/workflows/ci.yml",
+		Label:  ".github/workflows/ci.yml",
+		Type:   TreeNodeWorkflow,
+		Parent: repo,
+		Properties: map[string]interface{}{
+			"event_triggers": []string{"push"},
+		},
+	}
+
+	dispatchLine := stripANSI(m.renderTreeNode(workflow, 100, false, 0))
+	normalLine := stripANSI(m.renderTreeNode(normal, 100, false, 0))
+
+	assert.Contains(t, dispatchLine, "[WORKFLOW - DISPATCHABLE]")
+	assert.Contains(t, normalLine, "[WORKFLOW]")
+	assert.NotContains(t, normalLine, "DISPATCHABLE")
+}
+
 func TestRenderVulnDetails_FallsBackToPathLineMatch(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.vulnerabilities = []Vulnerability{{
