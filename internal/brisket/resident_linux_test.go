@@ -7,6 +7,7 @@
 package brisket
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -85,6 +86,24 @@ func TestNormalizeResidentMemDumpResult_SetsCounters(t *testing.T) {
 	assert.Equal(t, 1, result.ProcessTargets)
 }
 
+func TestResidentWorkerKey_FallsBackToPIDWhenStartTickMissing(t *testing.T) {
+	first := residentWorkerKey(residentWorkerProcess{PID: 101, Root: "/runner", StartTick: ""})
+	second := residentWorkerKey(residentWorkerProcess{PID: 202, Root: "/runner", StartTick: ""})
+
+	assert.Equal(t, "/runner:101", first)
+	assert.Equal(t, "/runner:202", second)
+}
+
+func TestResidentProcessStartTickFromStat_HandlesCommWithSpaces(t *testing.T) {
+	stat := residentTestProcStat("Runner Worker", "42", "123456789")
+
+	parent, ok := residentProcessParentFromStat(stat)
+
+	assert.Equal(t, "123456789", residentProcessStartTickFromStat(stat))
+	assert.True(t, ok)
+	assert.Equal(t, 42, parent)
+}
+
 func TestResidentProcessTreeFromParents(t *testing.T) {
 	parents := map[int]int{
 		10: 1,
@@ -96,4 +115,32 @@ func TestResidentProcessTreeFromParents(t *testing.T) {
 
 	assert.Equal(t, []int{11, 12, 13, 10}, residentProcessTreeFromParents(10, parents, true))
 	assert.Equal(t, []int{11, 12, 13}, residentProcessTreeFromParents(10, parents, false))
+	assert.Empty(t, residentProcessTreeFromParents(10, nil, false))
+	assert.Equal(t, []int{10}, residentProcessTreeFromParents(10, nil, true))
+}
+
+func residentTestProcStat(comm, ppid, startTick string) string {
+	fields := []string{
+		"S",
+		ppid,
+		"43",
+		"44",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"1",
+		"0",
+		startTick,
+	}
+	return "99 (" + comm + ") " + strings.Join(fields, " ")
 }
