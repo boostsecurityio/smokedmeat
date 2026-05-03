@@ -293,6 +293,86 @@ func TestHandleExpressData_CachePoisonArmed(t *testing.T) {
 	assert.Equal(t, "armed", model.waiting.CachePoison.WriterStatus.Status)
 }
 
+func TestHandleExpressData_CachePoisonArmedPromptsVictimDwellArm(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWaiting
+	m.view = ViewWaiting
+	m.waiting = NewWaitingState("stg-1", "acme/api", "V001", ".github/workflows/lint.yml", "lint", "Create Issue", 0)
+	m.waiting.CachePoison = &CachePoisonWaitingState{
+		Victim:          cachepoison.VictimCandidate{Workflow: ".github/workflows/deploy.yml"},
+		VictimStagerID:  "victim-stg",
+		VictimDwellTime: time.Minute,
+	}
+
+	data := counter.ExpressDataPayload{
+		AgentID:    "brisket-001234567890",
+		Hostname:   "runner-1",
+		Timestamp:  time.Now(),
+		CallbackID: "stg-1",
+		CachePoison: &models.CachePoisonStatus{
+			Status: "armed",
+		},
+	}
+
+	result, _ := m.handleExpressData(ExpressDataMsg{Data: data})
+	model := result.(Model)
+
+	require.NotNil(t, model.waiting)
+	require.NotNil(t, model.waiting.CachePoison)
+	state := model.waiting.CachePoison
+	assert.True(t, state.VictimWaitingHinted)
+	assert.True(t, state.VictimWaitingFlashUntil.After(time.Now()))
+	assert.True(t, state.VictimWaitingAutoReturnAt.After(time.Now()))
+
+	hints := 0
+	for _, entry := range model.activityLog.Entries() {
+		if entry.Message == cachePoisonVictimWaitingDwellHint {
+			hints++
+		}
+	}
+	assert.Equal(t, 1, hints)
+
+	model.updateCachePoisonVictimWaitingPrompt(time.Now())
+	hints = 0
+	for _, entry := range model.activityLog.Entries() {
+		if entry.Message == cachePoisonVictimWaitingDwellHint {
+			hints++
+		}
+	}
+	assert.Equal(t, 1, hints)
+}
+
+func TestTimerTick_CachePoisonVictimWaitingAutoReturnsToActivity(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWaiting
+	m.view = ViewWaiting
+	m.waiting = NewWaitingState("stg-1", "acme/api", "V001", ".github/workflows/lint.yml", "lint", "Create Issue", 0)
+	m.waiting.CachePoison = &CachePoisonWaitingState{
+		Victim:                    cachepoison.VictimCandidate{Workflow: ".github/workflows/deploy.yml"},
+		VictimStagerID:            "victim-stg",
+		VictimDwellTime:           time.Minute,
+		WriterStatus:              &models.CachePoisonStatus{Status: "armed"},
+		VictimWaitingHinted:       true,
+		VictimWaitingFlashUntil:   time.Now().Add(-time.Second),
+		VictimWaitingAutoReturnAt: time.Now().Add(-time.Second),
+	}
+
+	result, cmd := m.Update(TimerTickMsg{})
+	model := result.(Model)
+
+	require.NotNil(t, cmd)
+	assert.Equal(t, PhaseRecon, model.phase)
+	assert.Equal(t, ViewFindings, model.view)
+	assert.Equal(t, FocusSessions, model.focus)
+	assert.Equal(t, PaneFocusActivity, model.paneFocus)
+	require.NotNil(t, model.waiting)
+	require.NotNil(t, model.waiting.CachePoison)
+	assert.True(t, model.waiting.CachePoison.VictimWaitingAutoReturned)
+	assert.Equal(t, cachePoisonVictimWaitingDwellHint, model.flashMessage)
+	assert.True(t, model.flashUntil.After(time.Now()))
+	assert.Equal(t, model.flashUntil, model.flashCenterUntil)
+}
+
 func TestHandleExpressData_CachePoisonArmedBeforeStartWaiting(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.pendingCachePoison = &CachePoisonWaitingState{
@@ -526,6 +606,46 @@ func TestHandleExpressData_CachePoisonVictimWithoutCallbackIDMatchesOriginBefore
 	assert.Nil(t, model.waiting)
 }
 
+func TestHandleExpressData_CachePoisonVictimUsesConfiguredDwellTime(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWaiting
+	m.sessions = []Session{{AgentID: "agt-victim"}}
+	m.waiting = NewWaitingState("stg-1", "acme/api", "V001", ".github/workflows/lint.yml", "lint", "Issue", 0)
+	m.waiting.CachePoison = &CachePoisonWaitingState{
+		Victim: cachepoison.VictimCandidate{
+			Repository: "acme/api",
+			Workflow:   ".github/workflows/deploy.yml",
+			Job:        "deploy",
+		},
+		WriterAgentID:   "agt-writer",
+		VictimStagerID:  "victim-stg",
+		VictimDwellTime: time.Minute,
+	}
+
+	now := time.Now()
+	data := counter.ExpressDataPayload{
+		AgentID:      "agt-victim",
+		Hostname:     "victim-runner",
+		Timestamp:    now,
+		CallbackMode: "dwell",
+		Repository:   "acme/api",
+		Workflow:     ".github/workflows/deploy.yml",
+		Job:          "deploy",
+	}
+
+	result, _ := m.handleExpressData(ExpressDataMsg{Data: data})
+	model := result.(Model)
+
+	assert.Equal(t, PhasePostExploit, model.phase)
+	require.NotNil(t, model.activeAgent)
+	assert.Equal(t, "agt-victim", model.activeAgent.ID)
+	assert.Equal(t, agentModeDwell, model.activeAgent.Mode)
+	assert.True(t, model.dwellMode)
+	assert.True(t, model.jobDeadline.After(now.Add(50*time.Second)))
+	assert.True(t, model.jobDeadline.Before(now.Add(70*time.Second)))
+	assert.Nil(t, model.waiting)
+}
+
 func TestHandleExpressData_CachePoisonVictimWithoutCallbackModeActivatesAfterDwellBeacon(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhaseWaiting
@@ -610,6 +730,38 @@ func TestHandleBeacon_CachePoisonPendingVictimActivatesOnLaterDwellBeacon(t *tes
 		DwellDeadline: ptrTime(time.Now().Add(30 * time.Second)),
 	}})
 	model = beaconResult.(Model)
+
+	assert.Equal(t, PhasePostExploit, model.phase)
+	require.NotNil(t, model.activeAgent)
+	assert.Equal(t, "agt-victim", model.activeAgent.ID)
+	assert.Nil(t, model.waiting)
+}
+
+func TestHandleBeacon_CachePoisonVictimActivatesAfterAutoReturnToRecon(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseRecon
+	m.view = ViewFindings
+	m.waiting = NewWaitingState("stg-1", "acme/api", "V001", ".github/workflows/lint.yml", "lint", "Issue", 30*time.Second)
+	m.waiting.CachePoison = &CachePoisonWaitingState{
+		Victim: cachepoison.VictimCandidate{
+			Repository: "acme/api",
+			Workflow:   ".github/workflows/deploy.yml",
+			Job:        "deploy",
+		},
+		WriterAgentID:  "agt-writer",
+		VictimStagerID: "victim-stg",
+	}
+
+	result, _ := m.handleBeacon(BeaconMsg{Beacon: counter.Beacon{
+		AgentID:      "agt-victim",
+		Hostname:     "victim-runner",
+		OS:           "linux",
+		Arch:         "amd64",
+		Timestamp:    time.Now(),
+		CallbackID:   "victim-stg",
+		CallbackMode: "dwell",
+	}})
+	model := result.(Model)
 
 	assert.Equal(t, PhasePostExploit, model.phase)
 	require.NotNil(t, model.activeAgent)

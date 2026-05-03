@@ -478,6 +478,9 @@ func (m *Model) renderToastOverlay(screen string) string {
 		Bold(true).
 		Padding(0, 1)
 	toast := toastStyle.Render(msg)
+	if time.Now().Before(m.flashCenterUntil) {
+		return compositeCenter(toast, screen, m.width, m.height)
+	}
 	return compositeTopCenter(toast, screen, m.width, m.height, 2)
 }
 
@@ -741,8 +744,11 @@ func (m *Model) renderNewStatusBar() string {
 			helpKeyStyle.Render("j/k") + helpDescStyle.Render(":scroll")
 	case ViewCallbacks:
 		keyHints = helpKeyStyle.Render("j/k") + helpDescStyle.Render(":select ") +
-			helpKeyStyle.Render("e/d/n/x/r") + helpDescStyle.Render(":manage ") +
-			helpKeyStyle.Render("Esc") + helpDescStyle.Render(":close")
+			helpKeyStyle.Render("e/x/r") + helpDescStyle.Render(":manage ")
+		if callback := m.selectedCallback(); callback != nil && callbackHasDwellDuration(callback) && !m.callbackIsResidentFoothold(callback) {
+			keyHints += helpKeyStyle.Render("d/n") + helpDescStyle.Render(":dwell ")
+		}
+		keyHints += helpKeyStyle.Render("Esc") + helpDescStyle.Render(":close")
 	case ViewWaiting:
 		keyHints = helpKeyStyle.Render("Esc") + helpDescStyle.Render(":cancel ") +
 			helpKeyStyle.Render("o") + helpDescStyle.Render(":open PR ") +
@@ -1387,6 +1393,15 @@ func (m *Model) renderWaitingView(height int) string {
 			if m.waiting.CachePoison.VictimAgentID != "" {
 				victimStatus = successColor.Render("connected")
 			}
+			victimHint := ""
+			if time.Now().Before(m.waiting.CachePoison.VictimWaitingFlashUntil) {
+				if time.Now().UnixMilli()/350%2 == 0 {
+					victimStatus = warningColor.Render("waiting")
+				} else {
+					victimStatus = successColor.Render("waiting")
+				}
+				victimHint = warningColor.Render(cachePoisonVictimWaitingScreenHint(m.waiting))
+			}
 			lines = append(lines,
 				centerText(fmt.Sprintf("Writer: %s", m.waiting.TargetWorkflow), m.width),
 				centerText(fmt.Sprintf("Victim: %s", m.waiting.CachePoison.Victim.Workflow), m.width),
@@ -1394,6 +1409,9 @@ func (m *Model) renderWaitingView(height int) string {
 				centerText(fmt.Sprintf("Writer cache: %s", writerCacheStatus), m.width),
 				centerText(fmt.Sprintf("Victim callback: %s", victimStatus), m.width),
 			)
+			if victimHint != "" {
+				lines = append(lines, centerText(victimHint, m.width))
+			}
 		}
 
 		if m.waiting.PRURL != "" {
@@ -2441,8 +2459,11 @@ func (m *Model) renderDwellTimeOption(pad string, innerWidth int) []string {
 func (m *Model) renderDwellTimeLine(pad string, innerWidth int) string {
 	dwellLabel := "Express (grab & exit)"
 	if m.wizard != nil && m.wizard.CachePoisonEnabled {
-		dwell := cachePoisonPersistentDwell(m.wizard.DwellTime)
-		dwellLabel = fmt.Sprintf("Express default, dwell %s available", dwell)
+		if m.wizard.DwellTime > 0 {
+			dwellLabel = fmt.Sprintf("Express default, next dwell %s", m.wizard.DwellTime)
+		} else {
+			dwellLabel = "Express (victim exits after callback)"
+		}
 	} else if m.wizard.DwellTime > 0 {
 		dwellLabel = fmt.Sprintf("Dwell %s (stay active)", m.wizard.DwellTime)
 	}

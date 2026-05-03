@@ -201,3 +201,34 @@ func TestHandleCallbacksKeyMsg_CopiesResidentFootholdRetriggerRecipe(t *testing.
 	require.NotEmpty(t, model.output)
 	assert.Contains(t, model.output[len(model.output)-1].Content, "Copied retrigger recipe for branch smokedmeat-runner-123")
 }
+
+func TestHandleCallbacksKeyMsg_NextDwellBlockedWithoutDwellDuration(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.view = ViewCallbacks
+	m.phase = PhaseRecon
+	m.callbackModal = &CallbackModalState{Cursor: 0}
+	m.callbacks = []counter.CallbackPayload{{ID: "cb-express", DefaultMode: "express"}}
+
+	result, cmd := m.handleCallbacksKeyMsg(tea.KeyPressMsg{Text: "n", Code: 'n'})
+	model := result.(Model)
+
+	assert.Nil(t, cmd)
+	require.Len(t, model.output, 2)
+	assert.Equal(t, "warning", model.output[0].Type)
+	assert.Contains(t, model.output[0].Content, "has no dwell duration configured")
+	assert.Equal(t, "info", model.output[1].Type)
+	assert.Contains(t, model.output[1].Content, "Re-deploy with dwell enabled")
+}
+
+func TestHandleCallbacksKeyMsg_NextDwellAllowedWithDwellDuration(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.view = ViewCallbacks
+	m.phase = PhaseRecon
+	m.callbackModal = &CallbackModalState{Cursor: 0}
+	m.kitchenClient = &mockKitchenClient{}
+	m.callbacks = []counter.CallbackPayload{{ID: "cb-dwell", DefaultMode: "express", DwellTime: "1m0s"}}
+
+	_, cmd := m.handleCallbacksKeyMsg(tea.KeyPressMsg{Text: "n", Code: 'n'})
+
+	assert.NotNil(t, cmd)
+}

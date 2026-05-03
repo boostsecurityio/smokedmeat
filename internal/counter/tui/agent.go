@@ -18,6 +18,12 @@ import (
 	"github.com/boostsecurityio/smokedmeat/internal/stagerurl"
 )
 
+const (
+	cachePoisonVictimWaitingPromptDuration = 5 * time.Second
+	cachePoisonVictimWaitingDwellHint      = "Victim callback is waiting - press Shift+I to arm the next dwell callback"
+	cachePoisonVictimWaitingExpressHint    = "Victim callback is waiting in express mode"
+)
+
 func (m Model) handleBeacon(msg BeaconMsg) (tea.Model, tea.Cmd) {
 	beacon := msg.Beacon
 	callbackMode := strings.TrimSpace(beacon.CallbackMode)
@@ -64,10 +70,10 @@ func (m Model) handleBeacon(msg BeaconMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch {
+	case m.waiting != nil && m.waiting.CachePoison != nil:
+		m.handleCachePoisonBeacon(beacon)
 	case m.phase == PhaseWaiting && m.waiting != nil:
 		switch {
-		case m.waiting.CachePoison != nil:
-			m.handleCachePoisonBeacon(beacon)
 		case beacon.CallbackMode == agentModeResident:
 			m.activateWaitingAgentWithMode(beacon.AgentID, beacon.Hostname, beacon.DwellDeadline, beacon.CallbackMode)
 		case beacon.CallbackMode != agentModeDwell && m.callbackIsPersistent(beacon.CallbackID):
@@ -154,6 +160,7 @@ func (m *Model) handleCachePoisonBeacon(beacon counter.Beacon) {
 		}
 		m.AddOutput("info", fmt.Sprintf("Unattributed callback received: %s", beacon.AgentID))
 	}
+	m.updateCachePoisonVictimWaitingPrompt(time.Now())
 }
 
 func cachePoisonBeaconIndicatesDwell(beacon counter.Beacon) bool {
@@ -222,19 +229,20 @@ func (m *Model) activateCachePoisonVictim(agentID, hostname string, dwellDeadlin
 	}
 	waiting.CachePoison.VictimAgentID = agentID
 	repo, workflow, job := cachePoisonVictimTarget(waiting)
+	dwellTime := cachePoisonVictimDwellTime(waiting)
 	m.activeAgent = &AgentState{
 		ID:        agentID,
 		Runner:    hostname,
 		Repo:      repo,
 		Workflow:  workflow,
 		Job:       job,
-		Mode:      m.normalizeActiveAgentMode(agentModeDwell, dwellDeadline, waiting.DwellTime),
+		Mode:      m.normalizeActiveAgentMode(agentModeDwell, dwellDeadline, dwellTime),
 		EntryVuln: waiting.TargetVuln,
 		StartTime: time.Now(),
 	}
 	m.clearDismissedDwellAgent(agentID)
 	m.selectSessionByAgentID(agentID)
-	m.setActiveAgentTiming(m.activeAgent.Mode, dwellDeadline, waiting.DwellTime)
+	m.setActiveAgentTiming(m.activeAgent.Mode, dwellDeadline, dwellTime)
 	m.TransitionToPhase(PhasePostExploit)
 	m.waiting = nil
 	m.activityLog.Add(IconSuccess, fmt.Sprintf("Cache victim %s connected - entering post-exploit phase", agentID[:8]))
@@ -261,6 +269,46 @@ func assignCachePoisonWriterStatus(state *CachePoisonWaitingState, status *model
 	}
 }
 
+func cachePoisonVictimWaitingReady(waiting *WaitingState) bool {
+	if waiting == nil || waiting.CachePoison == nil {
+		return false
+	}
+	state := waiting.CachePoison
+	if state.VictimAgentID != "" || strings.TrimSpace(state.VictimStagerID) == "" {
+		return false
+	}
+	if state.WriterStatus == nil {
+		return false
+	}
+	return strings.TrimSpace(state.WriterStatus.Status) == "armed"
+}
+
+func (m *Model) updateCachePoisonVictimWaitingPrompt(now time.Time) {
+	if !cachePoisonVictimWaitingReady(m.waiting) {
+		return
+	}
+	state := m.waiting.CachePoison
+	hint := cachePoisonVictimWaitingPrompt(m.waiting)
+	if !state.VictimWaitingHinted {
+		state.VictimWaitingHinted = true
+		state.VictimWaitingFlashUntil = now.Add(cachePoisonVictimWaitingPromptDuration)
+		state.VictimWaitingAutoReturnAt = state.VictimWaitingFlashUntil
+		m.activityLog.Add(IconInfo, hint)
+	}
+	if state.VictimWaitingAutoReturned || state.VictimWaitingAutoReturnAt.IsZero() || now.Before(state.VictimWaitingAutoReturnAt) {
+		return
+	}
+	if m.phase != PhaseWaiting || m.view != ViewWaiting {
+		return
+	}
+	state.VictimWaitingAutoReturned = true
+	m.TransitionToPhase(PhaseRecon)
+	m.focusPane(PaneFocusActivity)
+	m.flashMessage = hint
+	m.flashUntil = now.Add(cachePoisonVictimWaitingPromptDuration)
+	m.flashCenterUntil = m.flashUntil
+}
+
 func cachePoisonVictimTarget(waiting *WaitingState) (repo, workflow, job string) {
 	repo = waiting.CachePoison.Victim.Repository
 	if repo == "" {
@@ -275,6 +323,30 @@ func cachePoisonVictimTarget(waiting *WaitingState) (repo, workflow, job string)
 		job = waiting.TargetJob
 	}
 	return
+}
+
+func cachePoisonVictimDwellTime(waiting *WaitingState) time.Duration {
+	if waiting == nil {
+		return 0
+	}
+	if waiting.CachePoison != nil && waiting.CachePoison.VictimDwellTime > 0 {
+		return waiting.CachePoison.VictimDwellTime
+	}
+	return waiting.DwellTime
+}
+
+func cachePoisonVictimWaitingPrompt(waiting *WaitingState) string {
+	if cachePoisonVictimDwellTime(waiting) > 0 {
+		return cachePoisonVictimWaitingDwellHint
+	}
+	return cachePoisonVictimWaitingExpressHint
+}
+
+func cachePoisonVictimWaitingScreenHint(waiting *WaitingState) string {
+	if cachePoisonVictimDwellTime(waiting) > 0 {
+		return "Press Shift+I to arm next dwell callback"
+	}
+	return "Express callback will run when victim workflow triggers"
 }
 
 func (m *Model) activateWaitingAgentWithMode(agentID, hostname string, dwellDeadline *time.Time, callbackMode string) {
@@ -567,6 +639,7 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 			m.activityLog.Add(IconError, msg)
 			m.AddOutput("error", msg)
 		}
+		m.updateCachePoisonVictimWaitingPrompt(time.Now())
 	}
 
 	if cachePoisonVictimMatchesExpressData(m.waiting, data) {
@@ -575,7 +648,7 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 		}
 		m.waiting.PendingAgents[data.AgentID] = data.Timestamp
 		if data.CallbackMode == "dwell" || cachePoisonPendingDwell(m.waiting.CachePoison, data.AgentID) {
-			m.activateCachePoisonVictim(data.AgentID, data.Hostname, nil)
+			m.activateCachePoisonVictim(data.AgentID, data.Hostname, dwellDeadline)
 		} else {
 			m.waiting.CachePoison.PendingVictim = data.AgentID
 			m.AddOutput("info", fmt.Sprintf("Persistent callback hit in express mode: %s", data.AgentID))
@@ -591,9 +664,9 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 		m.waiting.PendingAgents[data.AgentID] = data.Timestamp
 		switch {
 		case data.CallbackMode == "resident":
-			m.activateWaitingAgentWithMode(data.AgentID, data.Hostname, nil, data.CallbackMode)
+			m.activateWaitingAgentWithMode(data.AgentID, data.Hostname, dwellDeadline, data.CallbackMode)
 		case data.CallbackMode == "dwell":
-			m.activateWaitingAgentWithMode(data.AgentID, data.Hostname, nil, data.CallbackMode)
+			m.activateWaitingAgentWithMode(data.AgentID, data.Hostname, dwellDeadline, data.CallbackMode)
 		case m.callbackIsPersistent(data.CallbackID):
 			if m.callbackIDIsResidentFoothold(data.CallbackID) {
 				m.AddOutput("info", fmt.Sprintf("Resident foothold seed hit in express mode: %s", data.AgentID))
@@ -659,12 +732,19 @@ func (m Model) expressDataDwellDeadline(data counter.ExpressDataPayload, capture
 		deadline := m.jobDeadline
 		return &deadline
 	}
-	if m.waiting != nil && m.waiting.DwellTime > 0 {
+	if m.waiting != nil {
+		dwellTime := m.waiting.DwellTime
+		if cachePoisonVictimMatchesExpressData(m.waiting, data) {
+			dwellTime = cachePoisonVictimDwellTime(m.waiting)
+		}
+		if dwellTime <= 0 {
+			return nil
+		}
 		base := data.Timestamp
 		if base.IsZero() {
 			base = time.Now()
 		}
-		deadline := base.Add(m.waiting.DwellTime)
+		deadline := base.Add(dwellTime)
 		return &deadline
 	}
 	if !m.jobDeadline.IsZero() {

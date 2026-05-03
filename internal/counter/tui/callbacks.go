@@ -15,13 +15,8 @@ import (
 	"github.com/boostsecurityio/smokedmeat/internal/counter"
 )
 
-const persistentCallbackDefaultDwell = 15 * time.Minute
-
 func cachePoisonPersistentDwell(duration time.Duration) time.Duration {
-	if duration > 0 {
-		return duration
-	}
-	return persistentCallbackDefaultDwell
+	return duration
 }
 
 func (m *Model) openCallbacksModal() tea.Cmd {
@@ -320,6 +315,18 @@ func (m Model) selectedCallback() *counter.CallbackPayload {
 	return &callback
 }
 
+func callbackHasDwellDuration(callback *counter.CallbackPayload) bool {
+	if callback == nil {
+		return false
+	}
+	dwell := strings.TrimSpace(callback.DwellTime)
+	if dwell == "" {
+		return false
+	}
+	duration, err := time.ParseDuration(dwell)
+	return err == nil && duration > 0
+}
+
 func (m *Model) callbackCursorDown() {
 	if len(m.callbacks) == 0 || m.callbackModal == nil {
 		return
@@ -454,10 +461,20 @@ func (m Model) handleCallbacksKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "d":
 		if callback := m.selectedCallback(); callback != nil {
+			if !callbackHasDwellDuration(callback) {
+				m.AddOutput("warning", fmt.Sprintf("Implant %s has no dwell duration configured", callback.ID))
+				m.AddOutput("info", "Re-deploy with dwell enabled in Step 3/3 of the wizard")
+				return m, nil
+			}
 			return m, m.controlCallbackCmd(callback.ID, "default_dwell")
 		}
 	case "n":
 		if callback := m.selectedCallback(); callback != nil {
+			if !callbackHasDwellDuration(callback) {
+				m.AddOutput("warning", fmt.Sprintf("Implant %s has no dwell duration configured", callback.ID))
+				m.AddOutput("info", "Re-deploy with dwell enabled in Step 3/3 of the wizard")
+				return m, nil
+			}
 			return m, m.controlCallbackCmd(callback.ID, "arm_next_dwell")
 		}
 	case "x":

@@ -252,8 +252,9 @@ type Model struct {
 	appPermissionView   map[string]map[string]string
 
 	// Flash message (temporary notification in status bar)
-	flashMessage string
-	flashUntil   time.Time
+	flashMessage     string
+	flashUntil       time.Time
+	flashCenterUntil time.Time
 
 	// Loot flash (highlight loot panel briefly)
 	lootFlash      bool

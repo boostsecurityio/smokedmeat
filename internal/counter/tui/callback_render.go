@@ -85,9 +85,11 @@ func (m *Model) buildCallbacksModal(width, height int) string {
 				helpKeyStyle.Render("t") + helpDescStyle.Render(":retrigger ")
 		} else {
 			hints += helpKeyStyle.Render("e") + helpDescStyle.Render(":express ") +
-				helpKeyStyle.Render("d") + helpDescStyle.Render(":default dwell ") +
-				helpKeyStyle.Render("n") + helpDescStyle.Render(":next dwell ") +
 				helpKeyStyle.Render("x") + helpDescStyle.Render(":clear ")
+			if callbackHasDwellDuration(callback) {
+				hints += helpKeyStyle.Render("d") + helpDescStyle.Render(":default dwell ") +
+					helpKeyStyle.Render("n") + helpDescStyle.Render(":next dwell ")
+			}
 		}
 	}
 	hints += helpKeyStyle.Render("r") + helpDescStyle.Render(":revoke ") +

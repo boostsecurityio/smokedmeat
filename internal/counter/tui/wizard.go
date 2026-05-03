@@ -40,6 +40,28 @@ func cycleWizardCallbackBudget(current int) int {
 	return budgets[0]
 }
 
+func wizardDwellPresets(w *WizardState) []time.Duration {
+	if w != nil && w.CachePoisonEnabled {
+		return []time.Duration{0, time.Minute, 2 * time.Minute, 5 * time.Minute}
+	}
+	return []time.Duration{0, 30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute}
+}
+
+func cycleWizardDwellTime(w *WizardState) {
+	if w == nil {
+		return
+	}
+	presets := wizardDwellPresets(w)
+	currentIdx := 0
+	for i, preset := range presets {
+		if preset == w.DwellTime {
+			currentIdx = i
+			break
+		}
+	}
+	w.DwellTime = presets[(currentIdx+1)%len(presets)]
+}
+
 func isPureWorkflowDispatchVuln(vuln *Vulnerability) bool {
 	if vuln == nil {
 		return false
@@ -308,15 +330,7 @@ func (m Model) handleRunnerTargetWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, t
 		if m.wizard.Step == 3 &&
 			(m.wizard.RunnerTargetAction == RunnerTargetActionAutoWorkflowPush || m.wizard.RunnerTargetAction == RunnerTargetActionCopyWorkflow) &&
 			!m.wizard.PersistenceAttempt {
-			dwellPresets := []time.Duration{0, 30 * time.Second, 60 * time.Second, 2 * time.Minute, 5 * time.Minute}
-			currentIdx := 0
-			for i, d := range dwellPresets {
-				if d == m.wizard.DwellTime {
-					currentIdx = i
-					break
-				}
-			}
-			m.wizard.DwellTime = dwellPresets[(currentIdx+1)%len(dwellPresets)]
+			cycleWizardDwellTime(m.wizard)
 		}
 		return m, nil
 	case "b":
@@ -360,15 +374,7 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			return m.advanceWizardStep()
 		case "d":
-			dwellPresets := []time.Duration{0, 30 * time.Second, 60 * time.Second, 2 * time.Minute, 5 * time.Minute}
-			currentIdx := 0
-			for i, d := range dwellPresets {
-				if d == m.wizard.DwellTime {
-					currentIdx = i
-					break
-				}
-			}
-			m.wizard.DwellTime = dwellPresets[(currentIdx+1)%len(dwellPresets)]
+			cycleWizardDwellTime(m.wizard)
 			return m, nil
 		case "b":
 			m.cycleWizardCallbackBudget()
@@ -464,15 +470,7 @@ func (m Model) handleWizardKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "d":
 		if m.wizard.Step == 3 {
-			dwellPresets := []time.Duration{0, 30 * time.Second, 60 * time.Second, 2 * time.Minute, 5 * time.Minute}
-			currentIdx := 0
-			for i, d := range dwellPresets {
-				if d == m.wizard.DwellTime {
-					currentIdx = i
-					break
-				}
-			}
-			m.wizard.DwellTime = dwellPresets[(currentIdx+1)%len(dwellPresets)]
+			cycleWizardDwellTime(m.wizard)
 		}
 		return m, nil
 

@@ -434,14 +434,19 @@ func (w *WaitingState) IsTimedOut() bool {
 }
 
 type CachePoisonWaitingState struct {
-	Victim         cachepoison.VictimCandidate
-	WriterStagerID string
-	VictimStagerID string
-	WriterAgentID  string
-	VictimAgentID  string
-	PendingVictim  string
-	PendingDwell   map[string]struct{}
-	WriterStatus   *models.CachePoisonStatus
+	Victim                    cachepoison.VictimCandidate
+	WriterStagerID            string
+	VictimStagerID            string
+	WriterAgentID             string
+	VictimAgentID             string
+	VictimDwellTime           time.Duration
+	PendingVictim             string
+	PendingDwell              map[string]struct{}
+	WriterStatus              *models.CachePoisonStatus
+	VictimWaitingHinted       bool
+	VictimWaitingFlashUntil   time.Time
+	VictimWaitingAutoReturnAt time.Time
+	VictimWaitingAutoReturned bool
 }
 
 type CallbackModalState struct {

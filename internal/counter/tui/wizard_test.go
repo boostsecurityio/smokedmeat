@@ -1242,6 +1242,17 @@ func TestWizardKeyMsg_DKey_TogglesDwellTime(t *testing.T) {
 	assert.Equal(t, 30*time.Second, model.wizard.DwellTime, "First toggle should go to 30s")
 }
 
+func TestWizardKeyMsg_DKey_CachePoisonStartsAtOneMinute(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWizard
+	m.wizard = &WizardState{Step: 3, DwellTime: 0, CachePoisonEnabled: true}
+
+	result, _ := m.handleWizardKeyMsg(tea.KeyPressMsg{Code: 'd'})
+
+	model := result.(Model)
+	assert.Equal(t, time.Minute, model.wizard.DwellTime, "Cache poison dwell should start at 1m")
+}
+
 func TestWizardKeyMsg_DKey_CyclesDwellPresets(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhaseWizard

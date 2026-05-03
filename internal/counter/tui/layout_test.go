@@ -588,6 +588,99 @@ func TestRenderWaitingView_ShowsWriterCacheStatus(t *testing.T) {
 	assert.Contains(t, out, "Writer cache: armed")
 }
 
+func TestRenderWaitingView_FlashesVictimWaitingHint(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 120
+	m.waiting = NewWaitingState("stg-123", "acme/api", "V001", ".github/workflows/lint.yml", "lint", "Add Comment", 0)
+	m.waiting.CachePoison = &CachePoisonWaitingState{
+		Victim:                  cachepoison.VictimCandidate{Workflow: ".github/workflows/deploy.yml"},
+		WriterAgentID:           "agt-writer",
+		WriterStatus:            &models.CachePoisonStatus{Status: "armed"},
+		VictimStagerID:          "victim-stg",
+		VictimDwellTime:         time.Minute,
+		VictimWaitingFlashUntil: time.Now().Add(time.Second),
+	}
+
+	out := stripANSI(m.renderWaitingView(24))
+
+	assert.Contains(t, out, "Victim callback: waiting")
+	assert.Contains(t, out, "Press Shift+I to arm next dwell callback")
+}
+
+func TestRenderWaitingView_FlashesExpressVictimWaitingHint(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 120
+	m.waiting = NewWaitingState("stg-123", "acme/api", "V001", ".github/workflows/lint.yml", "lint", "Add Comment", 0)
+	m.waiting.CachePoison = &CachePoisonWaitingState{
+		Victim:                  cachepoison.VictimCandidate{Workflow: ".github/workflows/deploy.yml"},
+		WriterAgentID:           "agt-writer",
+		WriterStatus:            &models.CachePoisonStatus{Status: "armed"},
+		VictimStagerID:          "victim-stg",
+		VictimWaitingFlashUntil: time.Now().Add(time.Second),
+	}
+
+	out := stripANSI(m.renderWaitingView(24))
+
+	assert.Contains(t, out, "Victim callback: waiting")
+	assert.Contains(t, out, "Express callback will run when victim workflow triggers")
+	assert.NotContains(t, out, "Press Shift+I")
+}
+
+func TestRenderToastOverlay_CanRenderCenteredToast(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 80
+	m.height = 20
+	m.flashMessage = cachePoisonVictimWaitingDwellHint
+	m.flashUntil = time.Now().Add(time.Second)
+	m.flashCenterUntil = m.flashUntil
+	background := strings.Join([]string{
+		"top",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"middle",
+	}, "\n")
+
+	out := stripANSI(m.renderToastOverlay(background))
+
+	assert.Contains(t, out, cachePoisonVictimWaitingDwellHint)
+	lines := strings.Split(out, "\n")
+	require.Greater(t, len(lines), 8)
+	assert.NotContains(t, strings.Join(lines[:4], "\n"), cachePoisonVictimWaitingDwellHint)
+}
+
+func TestBuildCallbacksModal_HidesDwellControlsWithoutDwellDuration(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 120
+	m.callbackModal = &CallbackModalState{Cursor: 0}
+	m.callbacks = []counter.CallbackPayload{{ID: "cb-express", DefaultMode: "express"}}
+
+	out := stripANSI(m.buildCallbacksModal(100, 20))
+
+	assert.Contains(t, out, "Dwell: not configured")
+	assert.NotContains(t, out, "default dwell")
+	assert.NotContains(t, out, "next dwell")
+}
+
+func TestBuildCallbacksModal_ShowsDwellControlsWithDwellDuration(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 120
+	m.callbackModal = &CallbackModalState{Cursor: 0}
+	m.callbacks = []counter.CallbackPayload{{ID: "cb-dwell", DefaultMode: "express", DwellTime: "1m0s"}}
+
+	out := stripANSI(m.buildCallbacksModal(100, 20))
+
+	assert.Contains(t, out, "Dwell: 1m0s")
+	assert.Contains(t, out, "default dwell")
+	assert.Contains(t, out, "next dwell")
+}
+
 func TestRenderNewStatusBar_ShowsFilterHintWhenFindingsPaneFocused(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.width = 120

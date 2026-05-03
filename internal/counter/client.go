@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -1017,6 +1018,10 @@ func (k *KitchenClient) ControlCallback(ctx context.Context, callbackID string, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		detailBytes, _ := io.ReadAll(resp.Body)
+		if detail := strings.TrimSpace(string(detailBytes)); detail != "" {
+			return nil, fmt.Errorf("callback control failed: %s: %s", resp.Status, detail)
+		}
 		return nil, fmt.Errorf("callback control failed: %s", resp.Status)
 	}
 
