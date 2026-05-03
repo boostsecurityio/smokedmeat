@@ -669,6 +669,46 @@ func TestHandleExpressData_FallsBackToWaitingRepo(t *testing.T) {
 	assert.Equal(t, "waiting-org/waiting-repo", model.sessionLoot[0].Repository)
 }
 
+func TestHandleExpressData_ResidentDoesNotBackfillAttribution(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhasePostExploit
+	m.target = "target/repo"
+	m.waiting = NewWaitingState("stg-1", "waiting/repo", "V001", ".github/workflows/bootstrap.yml", "bootstrap", "auto_pr", 0)
+	m.activeAgent = &AgentState{
+		ID:       "agt-resident",
+		Repo:     "active/repo",
+		Workflow: ".github/workflows/active.yml",
+		Job:      "active",
+	}
+
+	data := counter.ExpressDataPayload{
+		AgentID:   "agt-resident",
+		Hostname:  "runner-1",
+		Timestamp: time.Now(),
+		Secrets: []counter.ExtractedSecret{{
+			Name:      "AWS_SECRET_ACCESS_KEY",
+			Value:     "secret-value",
+			Type:      "aws_secret",
+			Source:    "runner_memory",
+			HighValue: true,
+		}},
+		ResidentJob: &models.ResidentJobObservation{
+			Event:                 models.ResidentJobEventHarvested,
+			JobKey:                "/runner:123456789",
+			SignalSource:          "runner_worker_process",
+			AttributionConfidence: models.ResidentJobConfidenceUnknown,
+		},
+	}
+
+	result, _ := m.handleExpressData(ExpressDataMsg{Data: data})
+
+	model := result.(Model)
+	require.Len(t, model.lootStash, 1)
+	assert.Empty(t, model.lootStash[0].Repository)
+	assert.Empty(t, model.lootStash[0].Workflow)
+	assert.Empty(t, model.lootStash[0].Job)
+}
+
 func TestHandleExpressData_PersistentRunnerTargetExpressHitStaysWaiting(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhaseWaiting

@@ -6,6 +6,7 @@ package brisket
 import (
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/boostsecurityio/smokedmeat/internal/models"
@@ -65,15 +66,44 @@ func residentJobKey(observed models.ResidentJobObservation) string {
 		observed.RunID,
 		observed.RunAttempt,
 		observed.GitHubJobID,
+		observed.CheckRunID,
+		observed.OrchestrationID,
 	}
 	joined := strings.Join(parts, ":")
+	if residentJobHasRunIdentity(observed) && strings.Trim(joined, ":") != "" {
+		return joined
+	}
+	workerKey := residentJobWorkerKey(observed)
+	if strings.Trim(joined, ":") != "" && workerKey != "" {
+		return joined + ":" + workerKey
+	}
 	if strings.Trim(joined, ":") != "" {
 		return joined
 	}
+	return workerKey
+}
+
+func residentJobHasRunIdentity(observed models.ResidentJobObservation) bool {
+	return observed.RunID != "" || observed.GitHubJobID != "" || observed.CheckRunID != "" || observed.OrchestrationID != ""
+}
+
+func residentJobWorkerKey(observed models.ResidentJobObservation) string {
 	if observed.WorkerLog != "" {
 		return observed.WorkerLog
 	}
-	return observed.RunnerRoot + ":" + observed.WorkerProcessStarted
+	if observed.RunnerRoot != "" && observed.WorkerProcessStarted != "" {
+		return observed.RunnerRoot + ":" + observed.WorkerProcessStarted
+	}
+	if observed.RunnerRoot != "" && observed.WorkerPID != 0 {
+		return observed.RunnerRoot + ":" + strconv.Itoa(observed.WorkerPID)
+	}
+	if observed.WorkerPID != 0 {
+		return strconv.Itoa(observed.WorkerPID)
+	}
+	if observed.RunnerRoot != "" {
+		return observed.RunnerRoot
+	}
+	return ""
 }
 
 func residentAttributionConfidence(observed models.ResidentJobObservation) string {

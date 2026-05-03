@@ -101,7 +101,7 @@ func (a *Agent) harvestResidentWorker(ctx context.Context, worker residentWorker
 		HarvestProfile:       models.ResidentJobHarvestProfileLite,
 	}
 	observed.JobKey = residentJobKey(observed)
-	observed.WorkerLog = waitForResidentWorkerLog(ctx, worker.Root, worker.SeenAt)
+	observed.WorkerLog = waitForResidentWorkerLog(ctx, worker)
 	if observed.WorkerLog != "" {
 		observed = parseResidentWorkerLog(observed.WorkerLog, observed)
 	}
@@ -126,7 +126,7 @@ func (a *Agent) harvestResidentWorker(ctx context.Context, worker residentWorker
 
 func refreshResidentWorkerObservation(ctx context.Context, worker residentWorkerProcess, observed models.ResidentJobObservation) models.ResidentJobObservation {
 	if observed.WorkerLog == "" || !residentWorkerLogHasAttribution(observed.WorkerLog) {
-		observed.WorkerLog = waitForResidentWorkerLog(ctx, worker.Root, worker.SeenAt)
+		observed.WorkerLog = waitForResidentWorkerLog(ctx, worker)
 	}
 	if observed.WorkerLog != "" {
 		observed = parseResidentWorkerLog(observed.WorkerLog, observed)
@@ -234,7 +234,7 @@ func mergeResidentMemDumpStats(pid int, into, result *MemDumpResult) *MemDumpRes
 }
 
 func residentMemDumpHasData(result *MemDumpResult) bool {
-	return result != nil && (len(result.Secrets) > 0 || len(result.Vars) > 0 || len(result.Endpoints) > 0)
+	return result != nil && (len(result.Secrets) > 0 || len(result.Vars) > 0)
 }
 
 func residentMemDumpFallback(pid int, empty, failed *MemDumpResult) *MemDumpResult {
@@ -428,7 +428,7 @@ func residentProcessTreeFromParents(root int, parents map[int]int, includeRoot b
 	return pids
 }
 
-func waitForResidentWorkerLog(ctx context.Context, root string, since time.Time) string {
+func waitForResidentWorkerLog(ctx context.Context, worker residentWorkerProcess) string {
 	deadline := time.NewTimer(3 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -436,10 +436,18 @@ func waitForResidentWorkerLog(ctx context.Context, root string, since time.Time)
 
 	var fallback string
 	for {
-		if path := newestResidentWorkerLog(root, since); path != "" {
+		if path := residentWorkerOpenLog(worker); path != "" {
 			fallback = path
 			if residentWorkerLogHasAttribution(path) {
 				return path
+			}
+		}
+		if fallback == "" {
+			if path := newestResidentWorkerLog(worker.Root, worker.SeenAt); path != "" {
+				fallback = path
+				if residentWorkerLogHasAttribution(path) {
+					return path
+				}
 			}
 		}
 		select {
@@ -450,6 +458,43 @@ func waitForResidentWorkerLog(ctx context.Context, root string, since time.Time)
 		case <-ticker.C:
 		}
 	}
+}
+
+func residentWorkerOpenLog(worker residentWorkerProcess) string {
+	fdDir := fmt.Sprintf("/proc/%d/fd", worker.PID)
+	entries, err := os.ReadDir(fdDir)
+	if err != nil {
+		return ""
+	}
+	var newest string
+	var newestMod time.Time
+	for _, entry := range entries {
+		target, err := os.Readlink(filepath.Join(fdDir, entry.Name()))
+		if err != nil || strings.Contains(target, " (deleted)") || !residentWorkerLogPathMatches(worker.Root, target) {
+			continue
+		}
+		info, err := os.Stat(target)
+		if err != nil {
+			continue
+		}
+		if newest == "" || info.ModTime().After(newestMod) {
+			newest = target
+			newestMod = info.ModTime()
+		}
+	}
+	return newest
+}
+
+func residentWorkerLogPathMatches(root, path string) bool {
+	if root == "" || path == "" {
+		return false
+	}
+	cleanPath := filepath.Clean(path)
+	if filepath.Dir(cleanPath) != filepath.Clean(filepath.Join(root, "_diag")) {
+		return false
+	}
+	name := filepath.Base(cleanPath)
+	return strings.HasPrefix(name, "Worker_") && strings.HasSuffix(name, ".log")
 }
 
 func newestResidentWorkerLog(root string, since time.Time) string {
@@ -467,7 +512,7 @@ func newestResidentWorkerLog(root string, since time.Time) string {
 		if err != nil {
 			continue
 		}
-		if info.ModTime().Before(since.Add(-10 * time.Second)) {
+		if info.ModTime().Before(since) {
 			continue
 		}
 		if newest == "" || info.ModTime().After(newestMod) {

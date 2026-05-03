@@ -106,6 +106,59 @@ func TestResidentWorkerLogHasAttribution(t *testing.T) {
 	assert.True(t, residentWorkerLogHasAttribution(complete))
 }
 
+func TestResidentJobKey_StrongAttributionUsesRunIdentity(t *testing.T) {
+	key := residentJobKey(models.ResidentJobObservation{
+		Repository:           "owner/repo",
+		Workflow:             ".github/workflows/ci.yml",
+		Job:                  "test",
+		RunID:                "25223159810",
+		RunnerRoot:           "/runner",
+		WorkerProcessStarted: "123456789",
+	})
+
+	assert.Contains(t, key, "25223159810")
+	assert.Contains(t, key, "owner/repo")
+	assert.NotContains(t, key, "/runner")
+}
+
+func TestResidentJobKey_CheckRunIDCountsAsRunIdentity(t *testing.T) {
+	key := residentJobKey(models.ResidentJobObservation{
+		Job:                  "test",
+		CheckRunID:           "73960130388",
+		RunnerRoot:           "/runner",
+		WorkerProcessStarted: "123456789",
+	})
+
+	assert.Contains(t, key, "73960130388")
+	assert.NotContains(t, key, "/runner")
+}
+
+func TestResidentJobKey_WeakAttributionIncludesWorkerIdentity(t *testing.T) {
+	first := residentJobKey(models.ResidentJobObservation{
+		Job:                  "test",
+		RunnerRoot:           "/runner",
+		WorkerProcessStarted: "123456789",
+	})
+	second := residentJobKey(models.ResidentJobObservation{
+		Job:                  "test",
+		RunnerRoot:           "/runner",
+		WorkerProcessStarted: "987654321",
+	})
+
+	assert.NotEqual(t, first, second)
+	assert.Contains(t, first, "/runner:123456789")
+	assert.Contains(t, second, "/runner:987654321")
+}
+
+func TestResidentJobKey_WeakAttributionFallsBackToWorkerLog(t *testing.T) {
+	key := residentJobKey(models.ResidentJobObservation{
+		Job:       "test",
+		WorkerLog: "/runner/_diag/Worker_current.log",
+	})
+
+	assert.Contains(t, key, "/runner/_diag/Worker_current.log")
+}
+
 func TestSplitWorkflowRef(t *testing.T) {
 	repo, workflow := splitWorkflowRef("owner/repo/.github/workflows/ci.yml@refs/heads/main")
 

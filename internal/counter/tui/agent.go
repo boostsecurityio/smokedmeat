@@ -418,37 +418,32 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 	workflow := data.Workflow
 	job := data.Job
 	if data.ResidentJob != nil {
-		if data.ResidentJob.Repository != "" {
-			repo = data.ResidentJob.Repository
-		}
-		if data.ResidentJob.Workflow != "" {
-			workflow = data.ResidentJob.Workflow
-		}
-		if data.ResidentJob.Job != "" {
-			job = data.ResidentJob.Job
-		}
+		repo = data.ResidentJob.Repository
+		workflow = data.ResidentJob.Workflow
+		job = data.ResidentJob.Job
 		m.noteResidentJob(data.AgentID, data.Hostname, data.ResidentJob)
-	}
-	if repo == "" {
-		repo = m.target
-		if m.waiting != nil && m.waiting.TargetRepo != "" {
-			repo = m.waiting.TargetRepo
-		} else if m.activeAgent != nil && m.activeAgent.Repo != "" {
-			repo = m.activeAgent.Repo
+	} else {
+		if repo == "" {
+			repo = m.target
+			if m.waiting != nil && m.waiting.TargetRepo != "" {
+				repo = m.waiting.TargetRepo
+			} else if m.activeAgent != nil && m.activeAgent.Repo != "" {
+				repo = m.activeAgent.Repo
+			}
 		}
-	}
-	if workflow == "" {
-		if m.waiting != nil {
-			workflow = m.waiting.TargetWorkflow
-		} else if m.activeAgent != nil {
-			workflow = m.activeAgent.Workflow
+		if workflow == "" {
+			if m.waiting != nil {
+				workflow = m.waiting.TargetWorkflow
+			} else if m.activeAgent != nil {
+				workflow = m.activeAgent.Workflow
+			}
 		}
-	}
-	if job == "" {
-		if m.waiting != nil {
-			job = m.waiting.TargetJob
-		} else if m.activeAgent != nil {
-			job = m.activeAgent.Job
+		if job == "" {
+			if m.waiting != nil {
+				job = m.waiting.TargetJob
+			} else if m.activeAgent != nil {
+				job = m.activeAgent.Job
+			}
 		}
 	}
 	m.updateSessionContext(data.AgentID, repo, workflow, job)

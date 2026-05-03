@@ -7,8 +7,12 @@
 package brisket
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -20,7 +24,7 @@ func TestResidentMemDumpHasData(t *testing.T) {
 	assert.False(t, residentMemDumpHasData(&MemDumpResult{}))
 	assert.True(t, residentMemDumpHasData(&MemDumpResult{Secrets: []string{"secret"}}))
 	assert.True(t, residentMemDumpHasData(&MemDumpResult{Vars: []string{"VAR=value"}}))
-	assert.True(t, residentMemDumpHasData(&MemDumpResult{Endpoints: []gump.Endpoint{{EnvName: "ACTIONS_RUNTIME_TOKEN"}}}))
+	assert.False(t, residentMemDumpHasData(&MemDumpResult{Endpoints: []gump.Endpoint{{EnvName: "ACTIONS_RUNTIME_TOKEN"}}}))
 }
 
 func TestResidentMemDumpFallback_PrefersEmptyScanOverLaterExit(t *testing.T) {
@@ -92,6 +96,34 @@ func TestResidentWorkerKey_FallsBackToPIDWhenStartTickMissing(t *testing.T) {
 
 	assert.Equal(t, "/runner:101", first)
 	assert.Equal(t, "/runner:202", second)
+}
+
+func TestWaitForResidentWorkerLog_IgnoresLogBeforeWorkerSeen(t *testing.T) {
+	root := t.TempDir()
+	diag := filepath.Join(root, "_diag")
+	assert.NoError(t, os.Mkdir(diag, 0o700))
+	stale := filepath.Join(diag, "Worker_stale.log")
+	assert.NoError(t, os.WriteFile(stale, []byte(`{
+	  "github": {"d": [
+	    {"k": "repository", "v": "owner/repo"},
+	    {"k": "workflow_ref", "v": "owner/repo/.github/workflows/ci.yml@refs/heads/main"}
+	  ]},
+	  "job": {"d": [{"k": "workflow_file_path", "v": ".github/workflows/ci.yml"}]}
+	}`), 0o600))
+	since := time.Now().UTC()
+	assert.NoError(t, os.Chtimes(stale, since.Add(-time.Second), since.Add(-time.Second)))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	path := waitForResidentWorkerLog(ctx, residentWorkerProcess{PID: -1, Root: root, SeenAt: since})
+
+	assert.Empty(t, path)
+}
+
+func TestResidentWorkerLogPathMatches(t *testing.T) {
+	assert.True(t, residentWorkerLogPathMatches("/runner", "/runner/_diag/Worker_20260501-164156-utc.log"))
+	assert.False(t, residentWorkerLogPathMatches("/runner", "/runner/_diag/Runner_20260501-164156-utc.log"))
+	assert.False(t, residentWorkerLogPathMatches("/runner", "/runner/other/Worker_20260501-164156-utc.log"))
 }
 
 func TestResidentProcessStartTickFromStat_HandlesCommWithSpaces(t *testing.T) {
