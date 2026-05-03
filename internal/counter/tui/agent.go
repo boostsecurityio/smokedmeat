@@ -74,6 +74,11 @@ func (m Model) handleBeacon(msg BeaconMsg) (tea.Model, tea.Cmd) {
 		m.handleCachePoisonBeacon(beacon)
 	case m.phase == PhaseWaiting && m.waiting != nil:
 		switch {
+		case m.waiting.Method == waitingMethodWorkflowDispatch && m.waiting.StagerID == "":
+			if m.waiting.PendingAgents == nil {
+				m.waiting.PendingAgents = make(map[string]time.Time)
+			}
+			m.waiting.PendingAgents[beacon.AgentID] = beacon.Timestamp
 		case beacon.CallbackMode == agentModeResident:
 			m.activateWaitingAgentWithMode(beacon.AgentID, beacon.Hostname, beacon.DwellDeadline, beacon.CallbackMode)
 		case beacon.CallbackMode != agentModeDwell && m.callbackIsPersistent(beacon.CallbackID):
@@ -382,6 +387,48 @@ func waitingMatchesExpressData(waiting *WaitingState, data counter.ExpressDataPa
 	return data.CallbackID == waiting.StagerID
 }
 
+func workflowDispatchWaitingMatchesExpressData(waiting *WaitingState, data counter.ExpressDataPayload) bool {
+	if waiting == nil || waiting.CachePoison != nil || waiting.StagerID != "" || waiting.Method != waitingMethodWorkflowDispatch {
+		return false
+	}
+	repo, workflow, job := expressDataTarget(data)
+	matched := false
+	if waiting.TargetRepo != "" {
+		if repo == "" || repo != waiting.TargetRepo {
+			return false
+		}
+		matched = true
+	}
+	if waiting.TargetWorkflow != "" {
+		if workflow == "" || workflow != waiting.TargetWorkflow {
+			return false
+		}
+		matched = true
+	}
+	if waiting.TargetJob != "" {
+		if job == "" || job != waiting.TargetJob {
+			return false
+		}
+		matched = true
+	}
+	return matched
+}
+
+func expressDataTarget(data counter.ExpressDataPayload) (repo, workflow, job string) {
+	if data.ResidentJob != nil {
+		return data.ResidentJob.Repository, data.ResidentJob.Workflow, data.ResidentJob.Job
+	}
+	return data.Repository, data.Workflow, data.Job
+}
+
+func workflowDispatchDataCanActivate(data counter.ExpressDataPayload, dwellDeadline *time.Time) bool {
+	switch strings.TrimSpace(data.CallbackMode) {
+	case agentModeResident, agentModeDwell:
+		return true
+	}
+	return dwellDeadline != nil
+}
+
 func (m *Model) setActiveAgentTiming(mode string, deadline *time.Time, fallback time.Duration) {
 	if strings.TrimSpace(mode) == agentModeResident {
 		m.jobDeadline = time.Time{}
@@ -676,6 +723,19 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 				m.AddOutput("info", "Arm the next implant with dwell from the implants modal when you want an interactive foothold")
 			}
 			m.activityLog.Add(IconInfo, fmt.Sprintf("Express callback %s connected", agentShort))
+		}
+	}
+
+	if workflowDispatchWaitingMatchesExpressData(m.waiting, data) {
+		if m.waiting.PendingAgents == nil {
+			m.waiting.PendingAgents = make(map[string]time.Time)
+		}
+		m.waiting.PendingAgents[data.AgentID] = data.Timestamp
+		if workflowDispatchDataCanActivate(data, dwellDeadline) {
+			m.activateWaitingAgentWithMode(data.AgentID, data.Hostname, dwellDeadline, data.CallbackMode)
+		} else {
+			m.AddOutput("info", fmt.Sprintf("Workflow dispatch callback observed in express mode: %s", data.AgentID))
+			m.activityLog.Add(IconInfo, fmt.Sprintf("Workflow dispatch callback %s observed", agentShort))
 		}
 	}
 

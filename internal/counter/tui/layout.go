@@ -750,9 +750,11 @@ func (m *Model) renderNewStatusBar() string {
 		}
 		keyHints += helpKeyStyle.Render("Esc") + helpDescStyle.Render(":close")
 	case ViewWaiting:
-		keyHints = helpKeyStyle.Render("Esc") + helpDescStyle.Render(":cancel ") +
-			helpKeyStyle.Render("o") + helpDescStyle.Render(":open PR ") +
-			helpKeyStyle.Render("g") + helpDescStyle.Render(":graph")
+		keyHints = helpKeyStyle.Render("Esc") + helpDescStyle.Render(":cancel ")
+		if _, label := waitingOpenURL(m.waiting); label != "" {
+			keyHints += helpKeyStyle.Render("o") + helpDescStyle.Render(":open "+label+" ")
+		}
+		keyHints += helpKeyStyle.Render("g") + helpDescStyle.Render(":graph")
 	case ViewAgent:
 		keyHints = helpKeyStyle.Render("q") + helpDescStyle.Render(":quit ")
 		keyHints += m.paneNavHints()
@@ -1367,12 +1369,17 @@ func (m *Model) renderWaitingView(height int) string {
 		}
 
 		// Details
-		lines = append(lines,
-			"",
-			centerText(fmt.Sprintf("Stager: %s", m.waiting.StagerID), m.width),
-			centerText(fmt.Sprintf("Target: %s", m.waiting.TargetRepo), m.width),
-			centerText(fmt.Sprintf("Method: %s", m.waiting.Method), m.width),
-		)
+		lines = append(lines, "")
+		if m.waiting.StagerID != "" {
+			lines = append(lines, centerText(fmt.Sprintf("Stager: %s", m.waiting.StagerID), m.width))
+		}
+		if m.waiting.TargetRepo != "" {
+			lines = append(lines, centerText(fmt.Sprintf("Target: %s", m.waiting.TargetRepo), m.width))
+		}
+		if m.waiting.TargetWorkflow != "" && m.waiting.CachePoison == nil {
+			lines = append(lines, centerText(fmt.Sprintf("Workflow: %s", m.waiting.TargetWorkflow), m.width))
+		}
+		lines = append(lines, centerText(fmt.Sprintf("Method: %s", m.waiting.Method), m.width))
 		if m.waiting.CachePoison != nil {
 			writerStatus := mutedColor.Render("pending")
 			if m.waiting.CachePoison.WriterAgentID != "" {
@@ -1414,9 +1421,9 @@ func (m *Model) renderWaitingView(height int) string {
 			}
 		}
 
-		if m.waiting.PRURL != "" {
-			prLink := Hyperlink(m.waiting.PRURL, "PR: "+m.waiting.PRURL+" (click or press 'o')")
-			lines = append(lines, "", centerText(prLink, m.width))
+		if targetURL, label := waitingOpenURL(m.waiting); targetURL != "" {
+			openLink := Hyperlink(targetURL, waitingOpenDisplayLabel(label)+": "+targetURL+" (click or press 'o')")
+			lines = append(lines, "", centerText(openLink, m.width))
 		}
 
 		if !m.waiting.IsTimedOut() {
@@ -3158,8 +3165,27 @@ func (m *Model) buildHelpModal(width, height int) []string {
 	return lines
 }
 
+func waitingOpenDisplayLabel(label string) string {
+	switch label {
+	case "PR":
+		return "PR"
+	case "run":
+		return "Run"
+	case "workflow":
+		return "Workflow"
+	default:
+		return strings.TrimSpace(label)
+	}
+}
+
 func waitingTipsForMethod(method string) []string {
 	switch method {
+	case waitingMethodWorkflowDispatch:
+		return []string{
+			"Dispatch was accepted by GitHub, but the workflow may not run an implant",
+			"Esc leaves this wait and returns to Recon",
+			"Check the Actions tab if no callback arrives",
+		}
 	case "Create Issue", "Add Comment":
 		return []string{
 			"Issue/comment must contain the payload in the body",

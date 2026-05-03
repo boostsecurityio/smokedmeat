@@ -402,6 +402,7 @@ type WaitingState struct {
 	Method         string
 	DwellTime      time.Duration
 	CachePoison    *CachePoisonWaitingState
+	WorkflowRun    *WorkflowDispatchWaitingState
 	PendingAgents  map[string]time.Time
 }
 
@@ -449,6 +450,28 @@ type CachePoisonWaitingState struct {
 	VictimWaitingAutoReturned bool
 }
 
+type WorkflowDispatchWaitingState struct {
+	Token         string
+	Owner         string
+	Repo          string
+	WorkflowFile  string
+	Ref           string
+	RequestedAt   time.Time
+	LastPollAt    time.Time
+	PollInFlight  bool
+	RunID         int64
+	RunNumber     int
+	RunURL        string
+	Status        string
+	Conclusion    string
+	Actor         string
+	RunCreatedAt  time.Time
+	RunUpdatedAt  time.Time
+	RunStartedAt  time.Time
+	CompletedSeen bool
+	ErrorLogged   bool
+}
+
 type CallbackModalState struct {
 	Cursor      int
 	PreferredID string
@@ -466,6 +489,8 @@ const (
 	agentModeExpress  = "express"
 	agentModeDwell    = "dwell"
 	agentModeResident = "resident"
+
+	waitingMethodWorkflowDispatch = "Workflow Dispatch"
 )
 
 type AgentState struct {

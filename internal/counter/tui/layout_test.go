@@ -573,6 +573,42 @@ func TestRenderWaitingView_ShowsETA(t *testing.T) {
 	assert.Contains(t, out, "stg-123")
 }
 
+func TestRenderWaitingView_ShowsWorkflowOpenTarget(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 140
+	m.waiting = NewWaitingState("", "whooli/infrastructure-definitions", "V001", ".github/workflows/deploy.yml", "sync", waitingMethodWorkflowDispatch, 0)
+	m.waiting.WorkflowRun = &WorkflowDispatchWaitingState{}
+
+	out := stripANSI(m.renderWaitingView(24))
+
+	assert.Contains(t, out, "Workflow: https://github.com/whooli/infrastructure-definitions/actions/workflows/deploy.yml")
+	assert.NotContains(t, out, "PR:")
+}
+
+func TestRenderWaitingView_ShowsRunOpenTarget(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 140
+	m.waiting = NewWaitingState("", "whooli/infrastructure-definitions", "V001", ".github/workflows/deploy.yml", "sync", waitingMethodWorkflowDispatch, 0)
+	m.waiting.WorkflowRun = &WorkflowDispatchWaitingState{RunURL: "https://github.com/whooli/infrastructure-definitions/actions/runs/123"}
+
+	out := stripANSI(m.renderWaitingView(24))
+
+	assert.Contains(t, out, "Run: https://github.com/whooli/infrastructure-definitions/actions/runs/123")
+	assert.NotContains(t, out, "PR:")
+}
+
+func TestRenderWaitingView_ShowsIssueOpenTarget(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 140
+	m.waiting = NewWaitingState("stg-123", "whooli/infrastructure-definitions", "V001", ".github/workflows/deploy.yml", "sync", "Issue", 0)
+	m.waiting.PRURL = "https://github.com/whooli/infrastructure-definitions/issues/7"
+
+	out := stripANSI(m.renderWaitingView(24))
+
+	assert.Contains(t, out, "Issue: https://github.com/whooli/infrastructure-definitions/issues/7")
+	assert.NotContains(t, out, "PR:")
+}
+
 func TestRenderWaitingView_ShowsWriterCacheStatus(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.width = 120
@@ -922,6 +958,32 @@ func TestRenderNewStatusBar_ShowsThemeAndLogHintsInAgentView(t *testing.T) {
 	assert.Contains(t, out, "Shift+L:log")
 	assert.Contains(t, out, "Shift+I:implants")
 	assert.Contains(t, out, "t:theme")
+}
+
+func TestRenderNewStatusBar_WaitingOpenHintMatchesTarget(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 180
+	m.view = ViewWaiting
+	m.waiting = NewWaitingState("", "whooli/infrastructure-definitions", "V001", ".github/workflows/deploy.yml", "sync", waitingMethodWorkflowDispatch, 0)
+	m.waiting.WorkflowRun = &WorkflowDispatchWaitingState{}
+
+	out := stripANSI(m.renderNewStatusBar())
+	assert.Contains(t, out, "o:open workflow")
+	assert.NotContains(t, out, "o:open PR")
+
+	m.waiting.WorkflowRun.RunURL = "https://github.com/whooli/infrastructure-definitions/actions/runs/123"
+	out = stripANSI(m.renderNewStatusBar())
+	assert.Contains(t, out, "o:open run")
+	assert.NotContains(t, out, "o:open workflow")
+
+	m.waiting.WorkflowRun = nil
+	m.waiting.PRURL = "https://github.com/whooli/infrastructure-definitions/pull/1"
+	out = stripANSI(m.renderNewStatusBar())
+	assert.Contains(t, out, "o:open PR")
+
+	m.waiting.PRURL = "https://github.com/whooli/infrastructure-definitions/issues/1"
+	out = stripANSI(m.renderNewStatusBar())
+	assert.Contains(t, out, "o:open Issue")
 }
 
 func TestRenderNewStatusBar_PrioritizesThemeHintAtWalkthroughWidth(t *testing.T) {

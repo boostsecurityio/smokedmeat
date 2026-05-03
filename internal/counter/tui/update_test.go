@@ -641,20 +641,27 @@ func TestModel_Update_PivotResultSuccess_StoresPivotTargets(t *testing.T) {
 	assert.Equal(t, "org/repo3", model.pivotTargets[2])
 }
 
-func TestModel_Update_AutoDispatchSuccess_WithoutStagerStaysOutOfWaiting(t *testing.T) {
+func TestModel_Update_AutoDispatchSuccess_WithoutStagerStartsWorkflowDispatchWaiting(t *testing.T) {
 	m := NewModel(Config{SessionID: "test-session"})
 	m.phase = PhaseRecon
 
 	result, cmd := m.Update(AutoDispatchSuccessMsg{
+		Repository: "org/repo",
+		Workflow:   ".github/workflows/deploy.yml",
 		Vuln: &Vulnerability{
 			ID:         "V020",
 			Repository: "org/repo",
+			Workflow:   ".github/workflows/deploy.yml",
 		},
 	})
 
 	model := result.(Model)
-	assert.Equal(t, PhaseRecon, model.phase)
-	assert.Nil(t, model.waiting)
+	assert.Equal(t, PhaseWaiting, model.phase)
+	require.NotNil(t, model.waiting)
+	assert.Empty(t, model.waiting.StagerID)
+	assert.Equal(t, "org/repo", model.waiting.TargetRepo)
+	assert.Equal(t, ".github/workflows/deploy.yml", model.waiting.TargetWorkflow)
+	assert.Equal(t, waitingMethodWorkflowDispatch, model.waiting.Method)
 	require.NotEmpty(t, model.output)
 	assert.Equal(t, "success", model.output[len(model.output)-1].Type)
 	assert.Equal(t, "workflow_dispatch triggered", model.output[len(model.output)-1].Content)

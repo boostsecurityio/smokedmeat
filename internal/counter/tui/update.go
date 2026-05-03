@@ -700,6 +700,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AutoDispatchSuccessMsg:
 		if msg.StagerID != "" {
 			m.StartWaiting(msg.StagerID, "", msg.Vuln, "Dispatch", msg.DwellTime)
+		} else if msg.Repository != "" || msg.Workflow != "" || msg.Vuln != nil {
+			m.StartWaitingForWorkflowDispatch(msg.Repository, msg.Workflow, msg.Ref, msg.Token, msg.TriggeredAt, msg.Vuln)
 		}
 		if msg.InputName != "" {
 			m.AddOutput("success", fmt.Sprintf("workflow_dispatch triggered (input: %s)", msg.InputName))
@@ -709,7 +711,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.StagerID != "" {
 			m.activityLog.Add(IconSuccess, "Pivot dispatch sent, waiting for agent")
 		} else {
-			m.activityLog.Add(IconSuccess, "Workflow dispatch sent")
+			m.activityLog.Add(IconSuccess, "Workflow dispatch sent, waiting for workflow activity")
 		}
 		historyType := "exploit.attempted"
 		if msg.StagerID == "" && msg.Vuln == nil {
@@ -1293,8 +1295,58 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case TimerTickMsg:
-		m.updateCachePoisonVictimWaitingPrompt(time.Now())
-		return m, timerTickCmd()
+		now := time.Now()
+		m.updateCachePoisonVictimWaitingPrompt(now)
+		return m, tea.Batch(timerTickCmd(), m.workflowDispatchRunPollCmd(now))
+
+	case WorkflowDispatchRunStatusMsg:
+		if m.waiting == nil || m.waiting.WorkflowRun == nil {
+			return m, nil
+		}
+		state := m.waiting.WorkflowRun
+		state.PollInFlight = false
+		if msg.Run == nil {
+			return m, nil
+		}
+		newRun := state.RunID == 0 || state.RunID != msg.Run.ID
+		state.RunID = msg.Run.ID
+		state.RunNumber = msg.Run.RunNumber
+		state.RunURL = msg.Run.HTMLURL
+		state.Status = msg.Run.Status
+		state.Conclusion = msg.Run.Conclusion
+		state.Actor = msg.Run.Actor
+		state.RunCreatedAt = msg.Run.CreatedAt
+		state.RunUpdatedAt = msg.Run.UpdatedAt
+		state.RunStartedAt = msg.Run.RunStartedAt
+		if newRun {
+			m.AddOutput("info", fmt.Sprintf("Workflow run correlated: #%d", msg.Run.RunNumber))
+			m.activityLog.Add(IconInfo, fmt.Sprintf("Workflow run #%d correlated", msg.Run.RunNumber))
+		}
+		if msg.Run.Status == "completed" {
+			state.CompletedSeen = true
+			if msg.Run.Conclusion == "success" {
+				m.AddOutput("success", fmt.Sprintf("Workflow run #%d completed successfully", msg.Run.RunNumber))
+				m.activityLog.Add(IconSuccess, fmt.Sprintf("Workflow run #%d completed successfully", msg.Run.RunNumber))
+				m.waiting = nil
+				m.TransitionToPhase(PhaseRecon)
+				return m, nil
+			}
+			m.AddOutput("warning", fmt.Sprintf("Workflow run #%d completed: %s", msg.Run.RunNumber, orFallback(msg.Run.Conclusion, "unknown")))
+			m.activityLog.Add(IconWarning, fmt.Sprintf("Workflow run #%d completed: %s", msg.Run.RunNumber, orFallback(msg.Run.Conclusion, "unknown")))
+		}
+		return m, nil
+
+	case WorkflowDispatchRunStatusFailedMsg:
+		if m.waiting == nil || m.waiting.WorkflowRun == nil {
+			return m, nil
+		}
+		state := m.waiting.WorkflowRun
+		state.PollInFlight = false
+		if !state.ErrorLogged {
+			state.ErrorLogged = true
+			m.AddOutput("warning", fmt.Sprintf("Workflow run polling failed: %v", msg.Err))
+		}
+		return m, nil
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -1401,11 +1453,11 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.phase == PhaseWaiting && m.waiting != nil {
 		switch msg.String() {
 		case "o":
-			if m.waiting.PRURL != "" {
-				if err := m.openBrowser(m.waiting.PRURL); err != nil {
-					m.AddOutput("info", Hyperlink(m.waiting.PRURL, "Click to open PR →"))
+			if targetURL, label := waitingOpenURL(m.waiting); targetURL != "" {
+				if err := m.openBrowser(targetURL); err != nil {
+					m.AddOutput("info", Hyperlink(targetURL, fmt.Sprintf("Click to open %s →", label)))
 				} else {
-					m.AddOutput("success", "Opened PR in browser")
+					m.AddOutput("success", fmt.Sprintf("Opened %s in browser", label))
 				}
 			}
 			return m, nil

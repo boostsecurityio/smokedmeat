@@ -832,6 +832,75 @@ func TestHandleExpressData_CachePoisonVictimWithoutCallbackIDRequiresMatchingOri
 	assert.Empty(t, model.waiting.CachePoison.VictimAgentID)
 }
 
+func TestHandleBeacon_WorkflowDispatchWaitingDoesNotActivateArbitraryBeacon(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWaiting
+	m.waiting = NewWaitingState("", "acme/api", "", ".github/workflows/deploy.yml", "", waitingMethodWorkflowDispatch, 0)
+
+	result, _ := m.handleBeacon(BeaconMsg{Beacon: counter.Beacon{
+		AgentID:   "agt-other",
+		Hostname:  "runner-1",
+		OS:        "linux",
+		Arch:      "amd64",
+		Timestamp: time.Now(),
+	}})
+	model := result.(Model)
+
+	assert.Equal(t, PhaseWaiting, model.phase)
+	assert.Nil(t, model.activeAgent)
+	require.NotNil(t, model.waiting)
+	assert.Contains(t, model.waiting.PendingAgents, "agt-other")
+}
+
+func TestHandleExpressData_WorkflowDispatchWaitingActivatesDwellCallback(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWaiting
+	m.waiting = NewWaitingState("", "acme/api", "", ".github/workflows/deploy.yml", "", waitingMethodWorkflowDispatch, 0)
+
+	data := counter.ExpressDataPayload{
+		AgentID:      "agt-dispatch",
+		Hostname:     "runner-1",
+		Timestamp:    time.Now(),
+		CallbackMode: "dwell",
+		Repository:   "acme/api",
+		Workflow:     ".github/workflows/deploy.yml",
+		Job:          "sync",
+	}
+
+	result, _ := m.handleExpressData(ExpressDataMsg{Data: data})
+	model := result.(Model)
+
+	assert.Equal(t, PhasePostExploit, model.phase)
+	require.NotNil(t, model.activeAgent)
+	assert.Equal(t, "agt-dispatch", model.activeAgent.ID)
+	assert.Equal(t, "acme/api", model.activeAgent.Repo)
+	assert.Equal(t, ".github/workflows/deploy.yml", model.activeAgent.Workflow)
+	assert.Nil(t, model.waiting)
+}
+
+func TestHandleExpressData_WorkflowDispatchWaitingKeepsExpressCallbackWaiting(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWaiting
+	m.waiting = NewWaitingState("", "acme/api", "", ".github/workflows/deploy.yml", "", waitingMethodWorkflowDispatch, 0)
+
+	data := counter.ExpressDataPayload{
+		AgentID:      "agt-dispatch",
+		Hostname:     "runner-1",
+		Timestamp:    time.Now(),
+		CallbackMode: "express",
+		Repository:   "acme/api",
+		Workflow:     ".github/workflows/deploy.yml",
+	}
+
+	result, _ := m.handleExpressData(ExpressDataMsg{Data: data})
+	model := result.(Model)
+
+	assert.Equal(t, PhaseWaiting, model.phase)
+	assert.Nil(t, model.activeAgent)
+	require.NotNil(t, model.waiting)
+	assert.Contains(t, model.waiting.PendingAgents, "agt-dispatch")
+}
+
 func TestHandleExpressData_FallsBackToWaitingRepo(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhaseWaiting

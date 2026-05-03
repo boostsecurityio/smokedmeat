@@ -249,6 +249,33 @@ type DeployDispatchRequest struct {
 	Inputs       map[string]interface{} `json:"inputs,omitempty"`
 }
 
+type WorkflowDispatchRunRequest struct {
+	Token        string    `json:"token"`
+	Owner        string    `json:"owner"`
+	Repo         string    `json:"repo"`
+	WorkflowFile string    `json:"workflow_file"`
+	Ref          string    `json:"ref,omitempty"`
+	CreatedAfter time.Time `json:"created_after,omitempty"`
+}
+
+type WorkflowDispatchRun struct {
+	ID           int64     `json:"id"`
+	RunNumber    int       `json:"run_number,omitempty"`
+	RunAttempt   int       `json:"run_attempt,omitempty"`
+	Status       string    `json:"status,omitempty"`
+	Conclusion   string    `json:"conclusion,omitempty"`
+	HTMLURL      string    `json:"html_url,omitempty"`
+	Actor        string    `json:"actor,omitempty"`
+	Event        string    `json:"event,omitempty"`
+	CreatedAt    time.Time `json:"created_at,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+	RunStartedAt time.Time `json:"run_started_at,omitempty"`
+}
+
+type WorkflowDispatchRunResponse struct {
+	Run *WorkflowDispatchRun `json:"run,omitempty"`
+}
+
 type ListReposRequest struct {
 	Token string `json:"token"`
 }
@@ -854,6 +881,63 @@ func (c *gitHubClient) triggerWorkflowDispatch(ctx context.Context, owner, repo,
 	}
 	_, err := c.client.Actions.CreateWorkflowDispatchEventByFileName(ctx, owner, repo, workflowFile, req)
 	return err
+}
+
+func (c *gitHubClient) latestWorkflowDispatchRun(ctx context.Context, owner, repo, workflowFile, ref string, createdAfter time.Time) (*WorkflowDispatchRun, error) {
+	createdFloor := createdAfter.Add(-15 * time.Second).UTC()
+	opts := &github.ListWorkflowRunsOptions{
+		Event:       "workflow_dispatch",
+		ListOptions: github.ListOptions{PerPage: 10},
+	}
+	if !createdAfter.IsZero() {
+		opts.Created = ">=" + createdFloor.Format(time.RFC3339)
+	}
+	if strings.TrimSpace(ref) != "" {
+		opts.Branch = strings.TrimSpace(ref)
+	}
+	runs, _, err := c.client.Actions.ListWorkflowRunsByFileName(ctx, owner, repo, strings.TrimPrefix(workflowFile, ".github/workflows/"), opts)
+	if err != nil {
+		return nil, err
+	}
+
+	var best *github.WorkflowRun
+	for _, run := range runs.WorkflowRuns {
+		if run == nil || run.GetEvent() != "workflow_dispatch" {
+			continue
+		}
+		created := run.GetCreatedAt().Time
+		if !createdAfter.IsZero() && created.Before(createdFloor) {
+			continue
+		}
+		if best == nil || created.After(best.GetCreatedAt().Time) || run.GetID() > best.GetID() {
+			best = run
+		}
+	}
+	if best == nil {
+		return nil, nil
+	}
+
+	result := &WorkflowDispatchRun{
+		ID:           best.GetID(),
+		RunNumber:    best.GetRunNumber(),
+		RunAttempt:   best.GetRunAttempt(),
+		Status:       best.GetStatus(),
+		Conclusion:   best.GetConclusion(),
+		HTMLURL:      best.GetHTMLURL(),
+		Event:        best.GetEvent(),
+		CreatedAt:    best.GetCreatedAt().Time,
+		UpdatedAt:    best.GetUpdatedAt().Time,
+		RunStartedAt: best.GetRunStartedAt().Time,
+	}
+	if actor := best.GetActor(); actor != nil {
+		result.Actor = actor.GetLogin()
+	}
+	if result.Actor == "" {
+		if actor := best.GetTriggeringActor(); actor != nil {
+			result.Actor = actor.GetLogin()
+		}
+	}
+	return result, nil
 }
 
 func (c *gitHubClient) validateDispatchInputs(ctx context.Context, owner, repo, workflowFile, ref string, inputs map[string]interface{}) error {
@@ -2146,6 +2230,35 @@ func (h *Handler) handleGitHubDeployDispatch(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+func (h *Handler) handleGitHubWorkflowDispatchRun(w http.ResponseWriter, r *http.Request) {
+	var req WorkflowDispatchRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if req.Token == "" {
+		http.Error(w, "token is required", http.StatusBadRequest)
+		return
+	}
+	if req.Owner == "" || req.Repo == "" || req.WorkflowFile == "" {
+		http.Error(w, "owner, repo, and workflow_file are required", http.StatusBadRequest)
+		return
+	}
+
+	client := newGitHubDeployClient(req.Token)
+	run, err := client.latestWorkflowDispatchRun(r.Context(), req.Owner, req.Repo, req.WorkflowFile, req.Ref, req.CreatedAfter)
+	if err != nil {
+		writeGitHubError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(WorkflowDispatchRunResponse{Run: run})
 }
 
 func (h *Handler) handleGitHubListRepos(w http.ResponseWriter, r *http.Request) {
