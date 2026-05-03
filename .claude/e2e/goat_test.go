@@ -33,6 +33,8 @@ const (
 	founderPreviewWorkflow = ".github/workflows/founder-preview-intake.yml"
 	flagBucket             = "whooli-newcleus-benchmarks"
 	flagXYZHash            = "2c90d898d0924d8d5cf3f4094fd446bb0f1deea61c4b41f9b40215852dfe1414"
+	goatDwellAdjustments   = 2
+	goatDwellLabel         = "1m0s"
 )
 
 var (
@@ -119,8 +121,8 @@ func TestGOATFlagPath(t *testing.T) {
 	}
 
 	openDeployWizardFromMenu(t, tmux, vulnKey)
-	completeIssueDeployWizard(t, tmux, 4)
-	requireContent(t, tmux, "5m0s", 2*time.Second, "Dwell time should be 5m0s")
+	completeIssueDeployWizard(t, tmux, goatDwellAdjustments)
+	requireContent(t, tmux, goatDwellLabel, 2*time.Second, "Dwell time should be "+goatDwellLabel)
 	require.NoError(t, tmux.SendKeys("Enter"))
 
 	deployPhase = waitForAny(tmux, []string{"Phase:Waiting", "Phase:Post-Exploit"}, 30*time.Second)
@@ -145,8 +147,8 @@ func TestGOATFlagPath(t *testing.T) {
 
 	runCounterCommand(t, tmux, "exploit comment")
 	requireContent(t, tmux, "Step 1/3", 10*time.Second, "Comment foothold wizard should appear")
-	completeIssueDeployWizard(t, tmux, 4)
-	requireContent(t, tmux, "5m0s", 2*time.Second, "Comment foothold dwell time should be 5m0s")
+	completeIssueDeployWizard(t, tmux, goatDwellAdjustments)
+	requireContent(t, tmux, goatDwellLabel, 2*time.Second, "Comment foothold dwell time should be "+goatDwellLabel)
 	require.NoError(t, tmux.SendKeys("Enter"))
 
 	deployPhase = waitForAny(tmux, []string{"Phase:Waiting", "Phase:Post-Exploit"}, 30*time.Second)
@@ -191,7 +193,7 @@ func TestGOATFlagPath(t *testing.T) {
 		[]string{"benchmark-bot", benchmarkBotWorkflow},
 	)
 	openDeployWizardFromMenu(t, tmux, infraWriterKey)
-	completeCommentDeployWizardWithCachePoison(t, tmux, 0, 4, deployWorkflow, "")
+	completeCommentDeployWizardWithCachePoison(t, tmux, 0, goatDwellAdjustments, deployWorkflow, "")
 	requireContent(t, tmux, benchmarkBotWorkflow, 5*time.Second, "Writer workflow should be the benchmark bot workflow")
 	requireContent(t, tmux, deployWorkflow, 5*time.Second, "Deploy workflow should be selectable as the cache poison victim")
 	require.NoError(t, tmux.SendKeys("Enter"))
