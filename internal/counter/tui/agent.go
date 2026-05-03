@@ -413,6 +413,8 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 	if data.ResidentJob != nil {
 		source = fmt.Sprintf("resident:%s:%s", agentShort, data.ResidentJob.SignalSource)
 	}
+	capturedInDwell := m.expressDataCapturedInDwell(data)
+	dwellDeadline := m.expressDataDwellDeadline(data, capturedInDwell)
 
 	repo := data.Repository
 	workflow := data.Workflow
@@ -473,18 +475,23 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 			secretJob = es.Job
 		}
 		ephemeral := !es.HighValue || isEphemeralSecretName(es.Name)
+		expressMode := ephemeral && !capturedInDwell
 		secret := CollectedSecret{
-			Name:        es.Name,
-			Value:       es.Value,
-			Source:      source + ":" + es.Source,
-			Ephemeral:   ephemeral,
-			CollectedAt: data.Timestamp,
-			Type:        es.Type,
-			Repository:  secretRepo,
-			Workflow:    secretWorkflow,
-			Job:         secretJob,
-			AgentID:     agentShort,
-			ExpressMode: ephemeral,
+			Name:          es.Name,
+			Value:         es.Value,
+			Source:        source + ":" + es.Source,
+			Ephemeral:     ephemeral,
+			CollectedAt:   data.Timestamp,
+			Type:          es.Type,
+			Repository:    secretRepo,
+			Workflow:      secretWorkflow,
+			Job:           secretJob,
+			AgentID:       agentShort,
+			ExpressMode:   expressMode,
+			DwellDeadline: dwellDeadline,
+		}
+		if !secret.IsEphemeral() {
+			secret.DwellDeadline = nil
 		}
 		if structuralType, ok := m.workflowSecretTypes[es.Name]; ok {
 			secret.Type = structuralType
@@ -492,7 +499,7 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 		if secret.IsEphemeral() && secretRepo != "" {
 			secret.BoundToRepo = secretRepo
 		}
-		if secret.IsEphemeral() && secret.ExpressMode {
+		if secret.IsEphemeral() {
 			m.AddToSessionLoot(secret)
 		} else {
 			m.AddToLootStash(secret)
@@ -620,6 +627,51 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 	m.AddOutput("success", fmt.Sprintf("Express data received: %d secrets%s from %s", len(data.Secrets), varInfo, agentShort))
 
 	return m, m.listenForExpressData()
+}
+
+func (m Model) expressDataCapturedInDwell(data counter.ExpressDataPayload) bool {
+	switch strings.TrimSpace(data.CallbackMode) {
+	case agentModeDwell:
+		return true
+	case agentModeExpress, agentModeResident:
+		return false
+	}
+	if data.ResidentJob != nil {
+		return false
+	}
+	if data.DwellDeadline != nil {
+		return true
+	}
+	if m.activeAgent != nil && m.activeAgent.ID == data.AgentID && m.activeAgentMode() == agentModeDwell {
+		return true
+	}
+	return m.waiting != nil && m.waiting.DwellTime > 0
+}
+
+func (m Model) expressDataDwellDeadline(data counter.ExpressDataPayload, capturedInDwell bool) *time.Time {
+	if !capturedInDwell {
+		return nil
+	}
+	if data.DwellDeadline != nil {
+		return data.DwellDeadline
+	}
+	if m.activeAgent != nil && m.activeAgent.ID == data.AgentID && !m.jobDeadline.IsZero() {
+		deadline := m.jobDeadline
+		return &deadline
+	}
+	if m.waiting != nil && m.waiting.DwellTime > 0 {
+		base := data.Timestamp
+		if base.IsZero() {
+			base = time.Now()
+		}
+		deadline := base.Add(m.waiting.DwellTime)
+		return &deadline
+	}
+	if !m.jobDeadline.IsZero() {
+		deadline := m.jobDeadline
+		return &deadline
+	}
+	return nil
 }
 
 func (m *Model) noteResidentHistory(entry HistoryEntry) {

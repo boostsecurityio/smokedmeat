@@ -139,6 +139,38 @@ func TestHandleExpressData_SecretsCollected(t *testing.T) {
 	assert.False(t, model.lootStash[0].ExpressMode)
 }
 
+func TestHandleExpressData_DwellEphemeralSecretStaysLive(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.phase = PhaseWaiting
+	m.waiting = NewWaitingState("stg-1", "acme/api", "V001", ".github/workflows/ci.yml", "build", "auto_pr", 30*time.Second)
+	deadline := time.Now().Add(30 * time.Second)
+
+	result, _ := m.handleExpressData(ExpressDataMsg{Data: counter.ExpressDataPayload{
+		AgentID:       "brisket-001234567890",
+		Hostname:      "runner-1",
+		Timestamp:     time.Now(),
+		CallbackID:    "stg-1",
+		CallbackMode:  "dwell",
+		DwellDeadline: &deadline,
+		Secrets: []counter.ExtractedSecret{{
+			Name:      "GITHUB_TOKEN",
+			Value:     "ghs_test123",
+			Type:      "github_token",
+			Source:    "env",
+			HighValue: false,
+		}},
+		TokenPermissions: map[string]string{"actions": "write"},
+	}})
+
+	model := result.(Model)
+	require.Len(t, model.sessionLoot, 1)
+	secret := model.sessionLoot[0]
+	assert.False(t, secret.ExpressMode)
+	require.NotNil(t, secret.DwellDeadline)
+	assert.True(t, model.canPivotSecret(secret))
+	assert.NotContains(t, model.formatLootSecretBadges(&secret), "[expired]")
+}
+
 func TestHandleExpressData_BackfillsActiveAgentContext(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhasePostExploit

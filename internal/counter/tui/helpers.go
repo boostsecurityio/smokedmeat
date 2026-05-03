@@ -251,7 +251,7 @@ func (m Model) canPivotSecret(secret CollectedSecret) bool {
 		return true
 	}
 	if secret.ExpressMode {
-		return false
+		return m.expressModeSecretLiveInDwell(secret)
 	}
 	if secret.DwellDeadline != nil {
 		return time.Now().Before(*secret.DwellDeadline)
@@ -276,6 +276,9 @@ func (m Model) pivotUnavailableReason(secret CollectedSecret) string {
 		return ""
 	}
 	if secret.ExpressMode {
+		if m.expressModeSecretLiveInDwell(secret) {
+			return ""
+		}
 		return secret.Name + " expired when the workflow completed"
 	}
 	if secret.DwellDeadline != nil && time.Now().After(*secret.DwellDeadline) {
@@ -285,6 +288,41 @@ func (m Model) pivotUnavailableReason(secret CollectedSecret) string {
 		return secret.Name + " is no longer live"
 	}
 	return ""
+}
+
+func (m Model) expressModeSecretLiveInDwell(secret CollectedSecret) bool {
+	_, live := m.expressModeSecretDwellRemaining(secret)
+	return live
+}
+
+func (m Model) expressModeSecretDwellRemaining(secret CollectedSecret) (time.Duration, bool) {
+	if !secret.IsEphemeral() {
+		return 0, false
+	}
+	if secret.DwellDeadline != nil {
+		remaining := time.Until(*secret.DwellDeadline)
+		return remaining, remaining > 0
+	}
+	if m.activeAgent == nil || m.activeAgentMode() != agentModeDwell {
+		return 0, false
+	}
+	if !secretBelongsToAgent(secret, m.activeAgent.ID) {
+		return 0, false
+	}
+	if m.jobDeadline.IsZero() {
+		return 0, false
+	}
+	remaining := time.Until(m.jobDeadline)
+	return remaining, remaining > 0
+}
+
+func secretBelongsToAgent(secret CollectedSecret, agentID string) bool {
+	secretAgent := strings.TrimSpace(secret.AgentID)
+	agentID = strings.TrimSpace(agentID)
+	if secretAgent == "" || agentID == "" {
+		return false
+	}
+	return secretAgent == agentID || strings.HasPrefix(agentID, secretAgent) || strings.HasPrefix(secretAgent, agentID)
 }
 
 func (m Model) hasDispatchCredential() bool {

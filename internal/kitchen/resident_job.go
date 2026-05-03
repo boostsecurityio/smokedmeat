@@ -84,6 +84,10 @@ func (h *Handler) handleResidentJobBeacon(beacon BeaconRequest, express ExpressB
 	}
 
 	if h.operators != nil {
+		var dwellDeadline *time.Time
+		if h.sessions != nil {
+			dwellDeadline = h.sessions.GetSessionDwellDeadline(beacon.SessionID)
+		}
 		h.operators.BroadcastExpressData(ExpressDataPayload{
 			AgentID:          beacon.AgentID,
 			SessionID:        beacon.SessionID,
@@ -98,6 +102,7 @@ func (h *Handler) handleResidentJobBeacon(beacon BeaconRequest, express ExpressB
 			CallbackID:       beacon.CallbackID,
 			CallbackMode:     beacon.CallbackMode,
 			ResidentJob:      observed,
+			DwellDeadline:    dwellDeadline,
 		})
 	}
 }

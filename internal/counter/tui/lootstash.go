@@ -604,7 +604,7 @@ func (m *Model) renderCompactLootDetail(secret CollectedSecret, width int) []str
 			lines = append(lines, renderPermissionLines(perms, "  ")...)
 		}
 	case len(perms) > 0:
-		if secret.ExpressMode {
+		if secret.ExpressMode && !m.expressModeSecretLiveInDwell(secret) {
 			lines = append(lines, errorColor.Render("  ⚠ Expired")+mutedColor.Render(" (express mode)"))
 		}
 		lines = append(lines, renderPermissionLines(perms, "  ")...)
@@ -992,7 +992,11 @@ func (m *Model) formatLootSecretBadges(secret *CollectedSecret) string {
 
 	switch {
 	case secret.IsEphemeral() && secret.ExpressMode:
-		badges = append(badges, errorColor.Render("[expired]"))
+		if remaining, live := m.expressModeSecretDwellRemaining(*secret); live {
+			badges = append(badges, warningColor.Render("⏱"+formatDuration(remaining)))
+		} else {
+			badges = append(badges, errorColor.Render("[expired]"))
+		}
 	case secret.IsEphemeral() && m.dwellMode && !m.jobDeadline.IsZero():
 		remaining := time.Until(m.jobDeadline)
 		if remaining > 0 {

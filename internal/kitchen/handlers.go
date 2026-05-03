@@ -283,6 +283,7 @@ type ExpressDataPayload struct {
 	Job              string                         `json:"job,omitempty"`
 	CallbackID       string                         `json:"callback_id,omitempty"`
 	CallbackMode     string                         `json:"callback_mode,omitempty"`
+	DwellDeadline    *time.Time                     `json:"dwell_deadline,omitempty"`
 }
 
 func resolveOrigin(stagers *StagerStore, sessionID, callbackID string, env map[string]string) (repo, workflow, job string) {
@@ -830,6 +831,10 @@ func (h *Handler) handleBeacon(w http.ResponseWriter, r *http.Request) {
 						}
 
 						if h.operators != nil {
+							var dwellDeadline *time.Time
+							if h.sessions != nil {
+								dwellDeadline = h.sessions.GetSessionDwellDeadline(beacon.SessionID)
+							}
 							h.operators.BroadcastExpressData(ExpressDataPayload{
 								AgentID:          agentID,
 								SessionID:        beacon.SessionID,
@@ -844,6 +849,7 @@ func (h *Handler) handleBeacon(w http.ResponseWriter, r *http.Request) {
 								Job:              job,
 								CallbackID:       beacon.CallbackID,
 								CallbackMode:     beacon.CallbackMode,
+								DwellDeadline:    dwellDeadline,
 							})
 						}
 					}

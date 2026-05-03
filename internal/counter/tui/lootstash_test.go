@@ -667,3 +667,29 @@ func TestFormatLootSecretBadges_HidesPivotForExpiredExpressToken(t *testing.T) {
 	assert.Contains(t, badges, "[expired]")
 	assert.NotContains(t, badges, "[pivot]")
 }
+
+func TestFormatLootSecretBadges_UsesActiveDwellForStaleExpressFlag(t *testing.T) {
+	m := NewModel(Config{})
+	m.activeAgent = &AgentState{
+		ID:   "agt-deadbeefcafebabe",
+		Mode: agentModeDwell,
+	}
+	m.dwellMode = true
+	m.jobDeadline = time.Now().Add(2 * time.Minute)
+	secret := CollectedSecret{
+		Name:        "GITHUB_TOKEN",
+		Value:       "ghs_deadbeef",
+		Type:        "github_token",
+		Ephemeral:   true,
+		ExpressMode: true,
+		AgentID:     "agt-dead",
+	}
+	m.storeTokenDisplayPermissions(secret, map[string]string{"actions": "write"})
+
+	badges := m.formatLootSecretBadges(&secret)
+	detail := strings.Join(m.renderCompactLootDetail(secret, 80), "\n")
+
+	assert.NotContains(t, badges, "[expired]")
+	assert.Contains(t, badges, "⏱")
+	assert.NotContains(t, detail, "Expired")
+}

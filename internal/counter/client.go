@@ -267,6 +267,7 @@ type ExpressDataPayload struct {
 	Job              string                         `json:"job,omitempty"`
 	CallbackID       string                         `json:"callback_id,omitempty"`
 	CallbackMode     string                         `json:"callback_mode,omitempty"`
+	DwellDeadline    *time.Time                     `json:"dwell_deadline,omitempty"`
 }
 
 type LootSyncPayload struct {
