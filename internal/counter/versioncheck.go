@@ -106,7 +106,7 @@ func runVersionCheck(ctx context.Context, opts versionCheckOptions) (*VersionChe
 		client = &http.Client{Timeout: versionCheckTimeout}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
