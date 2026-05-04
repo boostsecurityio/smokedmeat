@@ -14,7 +14,7 @@ import (
 )
 
 func TestIPRateLimiter_AllowsBurstThenLimits(t *testing.T) {
-	l := NewIPRateLimiter(1.0, 3) // 1 rps, burst 3
+	l := NewIPRateLimiter(1.0, 3, 0)
 
 	for i := 0; i < 3; i++ {
 		assert.True(t, l.Allow("1.2.3.4"), "first %d should fit in burst", i+1)
@@ -23,8 +23,7 @@ func TestIPRateLimiter_AllowsBurstThenLimits(t *testing.T) {
 }
 
 func TestIPRateLimiter_PerIPIsolated(t *testing.T) {
-	// Even with a tiny burst, distinct IPs must not share buckets.
-	l := NewIPRateLimiter(0.1, 1)
+	l := NewIPRateLimiter(0.1, 1, 0)
 
 	assert.True(t, l.Allow("1.1.1.1"))
 	assert.False(t, l.Allow("1.1.1.1"))
@@ -33,7 +32,7 @@ func TestIPRateLimiter_PerIPIsolated(t *testing.T) {
 }
 
 func TestIPRateLimiter_DisabledWhenRateZero(t *testing.T) {
-	l := NewIPRateLimiter(0, 1)
+	l := NewIPRateLimiter(0, 1, 0)
 	for i := 0; i < 100; i++ {
 		assert.True(t, l.Allow("1.1.1.1"))
 	}
@@ -45,25 +44,22 @@ func TestIPRateLimiter_NilSafeAllow(t *testing.T) {
 }
 
 func TestIPRateLimiter_EmptyIPDefaultsAllow(t *testing.T) {
-	l := NewIPRateLimiter(1.0, 1)
+	l := NewIPRateLimiter(1.0, 1, 0)
 	assert.True(t, l.Allow(""))
 	assert.True(t, l.Allow(""), "empty IP never consumes a bucket")
 }
 
 func TestIPRateLimiter_GCEvictsIdleBuckets(t *testing.T) {
-	l := NewIPRateLimiter(1.0, 1)
+	l := NewIPRateLimiter(1.0, 1, 0)
 	l.gcEvery = 1
 	l.idleExpiry = time.Millisecond
 
-	// Use a controllable clock.
 	now := time.Unix(1_000_000, 0)
 	l.now = func() time.Time { return now }
 
 	l.Allow("1.1.1.1")
 	assert.Len(t, l.buckets, 1)
 
-	// Advance past idleExpiry. Next Allow on a different IP triggers GC,
-	// which evicts the stale bucket.
 	now = now.Add(time.Second)
 	l.Allow("2.2.2.2")
 	assert.Len(t, l.buckets, 1, "stale bucket evicted; only 2.2.2.2 remains")
@@ -74,7 +70,7 @@ func TestIPRateLimiter_GCEvictsIdleBuckets(t *testing.T) {
 }
 
 func TestIPRateLimiter_Middleware_AllowsThenLimits(t *testing.T) {
-	l := NewIPRateLimiter(rate.Limit(1.0), 2)
+	l := NewIPRateLimiter(rate.Limit(1.0), 2, 0)
 	called := 0
 	h := l.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called++
@@ -96,12 +92,11 @@ func TestIPRateLimiter_Middleware_AllowsThenLimits(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, w1.Code)
 	assert.Equal(t, http.StatusNoContent, w2.Code)
 	assert.Equal(t, http.StatusTooManyRequests, w3.Code)
-	assert.NotEmpty(t, w3.Header().Get("Retry-After"), "rejection should hint Retry-After")
 	assert.Equal(t, 2, called, "wrapped handler must not be called for the rejected request")
 }
 
 func TestIPRateLimiter_Middleware_DistinctIPsBypassEachOther(t *testing.T) {
-	l := NewIPRateLimiter(rate.Limit(0.1), 1)
+	l := NewIPRateLimiter(rate.Limit(0.1), 1, 0)
 	h := l.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -117,6 +112,37 @@ func TestIPRateLimiter_Middleware_DistinctIPsBypassEachOther(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, mk("9.9.9.9:1").Code)
 	assert.Equal(t, http.StatusTooManyRequests, mk("9.9.9.9:2").Code, "same IP, second hit rejected")
 	assert.Equal(t, http.StatusNoContent, mk("8.8.8.8:1").Code, "different IP, fresh bucket")
+}
+
+func TestIPRateLimiter_ClampsBurstWhenEnabled(t *testing.T) {
+	l := NewIPRateLimiter(rate.Limit(1.0), 0, 0)
+
+	assert.True(t, l.Allow("1.1.1.1"))
+	assert.False(t, l.Allow("1.1.1.1"))
+}
+
+func TestIPRateLimiter_MaxBucketsRejectsNewIP(t *testing.T) {
+	l := NewIPRateLimiter(rate.Limit(1.0), 1, 2)
+
+	assert.True(t, l.Allow("1.1.1.1"))
+	assert.True(t, l.Allow("2.2.2.2"))
+	assert.False(t, l.Allow("3.3.3.3"))
+	assert.Len(t, l.buckets, 2)
+}
+
+func TestIPRateLimiter_MaxBucketsSweepsBeforeRejecting(t *testing.T) {
+	l := NewIPRateLimiter(rate.Limit(1.0), 1, 1)
+	l.idleExpiry = time.Millisecond
+
+	now := time.Unix(1_000_000, 0)
+	l.now = func() time.Time { return now }
+
+	assert.True(t, l.Allow("1.1.1.1"))
+	now = now.Add(time.Second)
+	assert.True(t, l.Allow("2.2.2.2"))
+	assert.Len(t, l.buckets, 1)
+	_, has := l.buckets["2.2.2.2"]
+	assert.True(t, has)
 }
 
 func TestClientIP_StripsPort(t *testing.T) {

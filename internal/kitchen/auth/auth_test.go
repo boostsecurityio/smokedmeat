@@ -568,20 +568,16 @@ func TestStaticToken_DynamicTokenStillWorks(t *testing.T) {
 	assert.Equal(t, "quickstart", claims.OperatorID)
 }
 
-// TestCreateChallenge_RejectsBeyondMaxPending pins the in-memory challenge
-// map cap added for issue #62. With MaxPendingChallenges=2, the first two
-// CreateChallenge calls must succeed and the third must return
-// ErrTooManyChallenges before any nonce is allocated into the map.
 func TestCreateChallenge_RejectsBeyondMaxPending(t *testing.T) {
 	signer, pubKey := generateTestKey(t)
 	fingerprint := ssh.FingerprintSHA256(signer.PublicKey())
 
 	keysData := "alice ssh-ed25519 " + string(pubKey[:len(pubKey)-1]) + "\n"
 	a, err := New(Config{
-		AuthorizedKeysData:   keysData,
-		MaxPendingChallenges: 2,
-		// Long expiry so the in-place sweep cannot rescue capacity.
-		ChallengeExpiry: time.Hour,
+		AuthorizedKeysData:              keysData,
+		MaxPendingChallenges:            2,
+		MaxPendingChallengesPerOperator: 2,
+		ChallengeExpiry:                 time.Hour,
 	})
 	require.NoError(t, err)
 
@@ -593,27 +589,24 @@ func TestCreateChallenge_RejectsBeyondMaxPending(t *testing.T) {
 	_, err = a.CreateChallenge("alice", fingerprint)
 	assert.ErrorIs(t, err, ErrTooManyChallenges)
 
-	// Map size must not have grown past the cap.
 	a.mu.RLock()
 	got := len(a.challenges)
 	a.mu.RUnlock()
 	assert.Equal(t, 2, got)
 }
 
-// TestCreateChallenge_OpportunisticSweepRecoversCapacity verifies that when
-// the cap is hit, expired entries are purged before the request is rejected:
-// a long-running process that hit the cap during a transient burst should
-// recover capacity as soon as old challenges age out, without waiting for
-// the periodic CleanupExpired tick.
-func TestCreateChallenge_OpportunisticSweepRecoversCapacity(t *testing.T) {
+func TestCreateChallenge_RejectsBeyondMaxPendingPerOperator(t *testing.T) {
 	signer, pubKey := generateTestKey(t)
 	fingerprint := ssh.FingerprintSHA256(signer.PublicKey())
 
-	keysData := "alice ssh-ed25519 " + string(pubKey[:len(pubKey)-1]) + "\n"
+	keyLine := "ssh-ed25519 " + string(pubKey[:len(pubKey)-1])
+	keysData := "alice " + keyLine + "\n" +
+		"bob " + keyLine + "\n"
 	a, err := New(Config{
-		AuthorizedKeysData:   keysData,
-		MaxPendingChallenges: 2,
-		ChallengeExpiry:      time.Millisecond, // age out fast
+		AuthorizedKeysData:              keysData,
+		MaxPendingChallenges:            10,
+		MaxPendingChallengesPerOperator: 2,
+		ChallengeExpiry:                 time.Hour,
 	})
 	require.NoError(t, err)
 
@@ -622,28 +615,57 @@ func TestCreateChallenge_OpportunisticSweepRecoversCapacity(t *testing.T) {
 	_, err = a.CreateChallenge("alice", fingerprint)
 	require.NoError(t, err)
 
-	// Wait long enough for both prior challenges to expire.
+	_, err = a.CreateChallenge("alice", fingerprint)
+	assert.ErrorIs(t, err, ErrTooManyChallenges)
+
+	_, err = a.CreateChallenge("bob", fingerprint)
+	assert.NoError(t, err)
+}
+
+func TestCreateChallenge_OpportunisticSweepRecoversCapacity(t *testing.T) {
+	signer, pubKey := generateTestKey(t)
+	fingerprint := ssh.FingerprintSHA256(signer.PublicKey())
+
+	keysData := "alice ssh-ed25519 " + string(pubKey[:len(pubKey)-1]) + "\n"
+	a, err := New(Config{
+		AuthorizedKeysData:              keysData,
+		MaxPendingChallenges:            2,
+		MaxPendingChallengesPerOperator: 2,
+		ChallengeExpiry:                 time.Millisecond,
+	})
+	require.NoError(t, err)
+
+	_, err = a.CreateChallenge("alice", fingerprint)
+	require.NoError(t, err)
+	_, err = a.CreateChallenge("alice", fingerprint)
+	require.NoError(t, err)
+
 	time.Sleep(20 * time.Millisecond)
 
-	// Now the cap-hit branch should opportunistically clean both expired
-	// entries and admit this one.
 	_, err = a.CreateChallenge("alice", fingerprint)
 	assert.NoError(t, err, "cap-hit branch should sweep expired entries before rejecting")
 }
 
-// TestDefaultConfig_PopulatesMaxPendingChallenges keeps the documented
-// default discoverable from Config.
 func TestDefaultConfig_PopulatesMaxPendingChallenges(t *testing.T) {
 	c := DefaultConfig()
 	assert.Equal(t, defaultMaxPendingChallenges, c.MaxPendingChallenges)
+	assert.Equal(t, defaultMaxPendingChallengesPerOperator, c.MaxPendingChallengesPerOperator)
 	assert.Greater(t, c.MaxPendingChallenges, 0)
+	assert.Greater(t, c.MaxPendingChallengesPerOperator, 0)
 }
 
-// TestNew_ZeroMaxPendingChallengesFallsBackToDefault verifies the zero-value
-// path: callers who construct a Config{} without naming this field still get
-// protection rather than an unbounded map.
 func TestNew_ZeroMaxPendingChallengesFallsBackToDefault(t *testing.T) {
 	a, err := New(Config{})
 	require.NoError(t, err)
 	assert.Equal(t, defaultMaxPendingChallenges, a.maxPendingChallenges)
+	assert.Equal(t, defaultMaxPendingChallengesPerOperator, a.maxPendingPerOperator)
+}
+
+func TestNew_MaxPendingPerOperatorCannotExceedGlobal(t *testing.T) {
+	a, err := New(Config{
+		MaxPendingChallenges:            2,
+		MaxPendingChallengesPerOperator: 10,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 2, a.maxPendingPerOperator)
 }

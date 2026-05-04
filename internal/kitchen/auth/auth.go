@@ -109,19 +109,20 @@ type AgentClaims struct {
 
 // Auth manages operator authentication via SSH challenge-response or static token.
 type Auth struct {
-	mu                   sync.RWMutex
-	operators            map[string]*Operator   // keyed by name
-	byFingerprint        map[string]*Operator   // keyed by SHA256 fingerprint
-	challenges           map[string]*Challenge  // keyed by base64(nonce)
-	tokens               map[string]*Token      // keyed by token value
-	agentTokens          map[string]*AgentToken // keyed by token value
-	tokenExpiry          time.Duration
-	agentTokenExpiry     time.Duration
-	challengeExpiry      time.Duration
-	maxPendingChallenges int
-	keysPath             string
-	stopReload           chan struct{}
-	staticToken          string // shared secret for quickstart/E2E mode
+	mu                    sync.RWMutex
+	operators             map[string]*Operator   // keyed by name
+	byFingerprint         map[string]*Operator   // keyed by SHA256 fingerprint
+	challenges            map[string]*Challenge  // keyed by base64(nonce)
+	tokens                map[string]*Token      // keyed by token value
+	agentTokens           map[string]*AgentToken // keyed by token value
+	tokenExpiry           time.Duration
+	agentTokenExpiry      time.Duration
+	challengeExpiry       time.Duration
+	maxPendingChallenges  int
+	maxPendingPerOperator int
+	keysPath              string
+	stopReload            chan struct{}
+	staticToken           string // shared secret for quickstart/E2E mode
 }
 
 // Config holds authentication configuration.
@@ -147,29 +148,24 @@ type Config struct {
 	// ChallengeExpiry is how long challenges are valid. Default: 5 minutes.
 	ChallengeExpiry time.Duration
 
-	// MaxPendingChallenges caps the in-memory challenge map so an attacker
-	// cannot grow it unboundedly within ChallengeExpiry by spamming
-	// CreateChallenge with valid (operatorID, fingerprint) pairs. Once full,
-	// CreateChallenge returns ErrTooManyChallenges. Default: 10000.
 	MaxPendingChallenges int
+
+	MaxPendingChallengesPerOperator int
 }
 
-// defaultMaxPendingChallenges is the default upper bound on the
-// in-memory pending-challenge map. 10000 entries is well above the
-// realistic concurrent-operator load for any single Kitchen process
-// (each operator only needs one pending challenge during the ~5s
-// window between /auth/challenge and /auth/verify) but small enough
-// to be irrelevant memory pressure: ~32 B nonce + ~80 B operator/fp
-// + Go map overhead = ~1 MiB at saturation.
-const defaultMaxPendingChallenges = 10000
+const (
+	defaultMaxPendingChallenges            = 256
+	defaultMaxPendingChallengesPerOperator = 5
+)
 
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		TokenExpiry:          3 * time.Hour,
-		AgentTokenExpiry:     24 * time.Hour,
-		ChallengeExpiry:      5 * time.Minute,
-		MaxPendingChallenges: defaultMaxPendingChallenges,
+		TokenExpiry:                     3 * time.Hour,
+		AgentTokenExpiry:                24 * time.Hour,
+		ChallengeExpiry:                 5 * time.Minute,
+		MaxPendingChallenges:            defaultMaxPendingChallenges,
+		MaxPendingChallengesPerOperator: defaultMaxPendingChallengesPerOperator,
 	}
 }
 
@@ -187,20 +183,27 @@ func New(config Config) (*Auth, error) {
 	if config.MaxPendingChallenges <= 0 {
 		config.MaxPendingChallenges = defaultMaxPendingChallenges
 	}
+	if config.MaxPendingChallengesPerOperator <= 0 {
+		config.MaxPendingChallengesPerOperator = defaultMaxPendingChallengesPerOperator
+	}
+	if config.MaxPendingChallengesPerOperator > config.MaxPendingChallenges {
+		config.MaxPendingChallengesPerOperator = config.MaxPendingChallenges
+	}
 
 	a := &Auth{
-		operators:            make(map[string]*Operator),
-		byFingerprint:        make(map[string]*Operator),
-		challenges:           make(map[string]*Challenge),
-		tokens:               make(map[string]*Token),
-		agentTokens:          make(map[string]*AgentToken),
-		tokenExpiry:          config.TokenExpiry,
-		agentTokenExpiry:     config.AgentTokenExpiry,
-		challengeExpiry:      config.ChallengeExpiry,
-		maxPendingChallenges: config.MaxPendingChallenges,
-		keysPath:             config.AuthorizedKeysPath,
-		stopReload:           make(chan struct{}),
-		staticToken:          config.StaticToken,
+		operators:             make(map[string]*Operator),
+		byFingerprint:         make(map[string]*Operator),
+		challenges:            make(map[string]*Challenge),
+		tokens:                make(map[string]*Token),
+		agentTokens:           make(map[string]*AgentToken),
+		tokenExpiry:           config.TokenExpiry,
+		agentTokenExpiry:      config.AgentTokenExpiry,
+		challengeExpiry:       config.ChallengeExpiry,
+		maxPendingChallenges:  config.MaxPendingChallenges,
+		maxPendingPerOperator: config.MaxPendingChallengesPerOperator,
+		keysPath:              config.AuthorizedKeysPath,
+		stopReload:            make(chan struct{}),
+		staticToken:           config.StaticToken,
 	}
 
 	// Load authorized keys
@@ -328,29 +331,17 @@ func (a *Auth) CreateChallenge(operatorID, fingerprint string) ([]byte, error) {
 		ExpiresAt:   now.Add(a.challengeExpiry),
 	}
 
-	// Store challenge keyed by base64 nonce, but first cap the map so an
-	// attacker cannot grow it unboundedly within ChallengeExpiry. We do an
-	// opportunistic in-place cleanup of expired entries before declaring the
-	// map full so a long-running process slowly recovers from a transient
-	// burst without waiting for the periodic CleanupExpired tick.
 	nonceKey := base64.StdEncoding.EncodeToString(nonce)
 
 	a.mu.Lock()
-	if len(a.challenges) >= a.maxPendingChallenges {
-		now := time.Now()
-		for k, c := range a.challenges {
-			if now.After(c.ExpiresAt) {
-				delete(a.challenges, k)
-			}
-		}
-		if len(a.challenges) >= a.maxPendingChallenges {
-			a.mu.Unlock()
-			slog.Warn("challenge map at capacity; rejecting CreateChallenge",
-				"max_pending_challenges", a.maxPendingChallenges,
-				"operator", operatorID,
-			)
-			return nil, ErrTooManyChallenges
-		}
+	if a.pendingChallengeLimitReached(now, operatorID) {
+		a.mu.Unlock()
+		slog.Warn("challenge map at capacity; rejecting CreateChallenge",
+			"max_pending_challenges", a.maxPendingChallenges,
+			"max_pending_per_operator", a.maxPendingPerOperator,
+			"operator", operatorID,
+		)
+		return nil, ErrTooManyChallenges
 	}
 	a.challenges[nonceKey] = challenge
 	a.mu.Unlock()
@@ -358,6 +349,31 @@ func (a *Auth) CreateChallenge(operatorID, fingerprint string) ([]byte, error) {
 	slog.Debug("created challenge", "operator", operatorID, "fingerprint", fingerprint)
 
 	return nonce, nil
+}
+
+func (a *Auth) pendingChallengeLimitReached(now time.Time, operatorID string) bool {
+	if len(a.challenges) >= a.maxPendingChallenges || a.pendingChallengesForOperator(operatorID) >= a.maxPendingPerOperator {
+		a.deleteExpiredChallenges(now)
+	}
+	return len(a.challenges) >= a.maxPendingChallenges || a.pendingChallengesForOperator(operatorID) >= a.maxPendingPerOperator
+}
+
+func (a *Auth) deleteExpiredChallenges(now time.Time) {
+	for k, c := range a.challenges {
+		if now.After(c.ExpiresAt) {
+			delete(a.challenges, k)
+		}
+	}
+}
+
+func (a *Auth) pendingChallengesForOperator(operatorID string) int {
+	count := 0
+	for _, c := range a.challenges {
+		if c.OperatorID == operatorID {
+			count++
+		}
+	}
+	return count
 }
 
 // VerifyChallenge verifies a signed challenge and returns a session token.
