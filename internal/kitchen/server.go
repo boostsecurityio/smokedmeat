@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
+	"golang.org/x/time/rate"
 
 	"github.com/boostsecurityio/smokedmeat/internal/kitchen/auth"
 	"github.com/boostsecurityio/smokedmeat/internal/kitchen/db"
@@ -71,19 +72,41 @@ type Config struct {
 	// AuthToken is the shared secret token when AuthMode is "token".
 	// Must be a 64-character hex string (256 bits of entropy).
 	AuthToken string
+
+	AuthChallengeRatePerSecond float64
+
+	AuthChallengeBurst int
+
+	AuthChallengeMaxIPBuckets int
+
+	AuthMaxPendingChallenges int
+
+	AuthMaxPendingChallengesPerOperator int
 }
+
+const (
+	defaultAuthChallengeRatePerSecond = 1.0 / 6.0
+	defaultAuthChallengeBurst         = 3
+	defaultAuthChallengeMaxIPBuckets  = 128
+)
 
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
+	authDefaults := auth.DefaultConfig()
 	return Config{
-		Port:               8080,
-		NatsURL:            "nats://localhost:4222",
-		DBPath:             "data/kitchen.db",
-		ReadTimeout:        30 * time.Second,
-		WriteTimeout:       30 * time.Second,
-		IdleTimeout:        120 * time.Second,
-		AuthMode:           AuthModeSSH,
-		AuthorizedKeysPath: defaultAuthorizedKeysPath(),
+		Port:                                8080,
+		NatsURL:                             "nats://localhost:4222",
+		DBPath:                              "data/kitchen.db",
+		ReadTimeout:                         30 * time.Second,
+		WriteTimeout:                        30 * time.Second,
+		IdleTimeout:                         120 * time.Second,
+		AuthMode:                            AuthModeSSH,
+		AuthorizedKeysPath:                  defaultAuthorizedKeysPath(),
+		AuthChallengeRatePerSecond:          defaultAuthChallengeRatePerSecond,
+		AuthChallengeBurst:                  defaultAuthChallengeBurst,
+		AuthChallengeMaxIPBuckets:           defaultAuthChallengeMaxIPBuckets,
+		AuthMaxPendingChallenges:            authDefaults.MaxPendingChallenges,
+		AuthMaxPendingChallengesPerOperator: authDefaults.MaxPendingChallengesPerOperator,
 	}
 }
 
@@ -125,8 +148,10 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Initialize auth based on mode
 	authConfig := auth.Config{
-		TokenExpiry:     24 * time.Hour,
-		ChallengeExpiry: 5 * time.Minute,
+		TokenExpiry:                     24 * time.Hour,
+		ChallengeExpiry:                 5 * time.Minute,
+		MaxPendingChallenges:            s.config.AuthMaxPendingChallenges,
+		MaxPendingChallengesPerOperator: s.config.AuthMaxPendingChallengesPerOperator,
 	}
 
 	if s.config.AuthMode == AuthModeToken {
@@ -224,8 +249,14 @@ func (s *Server) Start(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 
+	authChallengeLimiter := auth.NewIPRateLimiter(
+		rate.Limit(s.config.AuthChallengeRatePerSecond),
+		s.config.AuthChallengeBurst,
+		s.config.AuthChallengeMaxIPBuckets,
+	)
+
 	// Auth routes (SSH challenge-response) - always public
-	mux.HandleFunc("POST /auth/challenge", s.handleAuthChallenge)
+	mux.Handle("POST /auth/challenge", authChallengeLimiter.Middleware(http.HandlerFunc(s.handleAuthChallenge)))
 	mux.HandleFunc("POST /auth/verify", s.handleAuthVerify)
 
 	// Health check - always public

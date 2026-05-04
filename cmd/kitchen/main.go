@@ -31,17 +31,25 @@ func run() error {
 
 	printBanner()
 
-	// Create context that cancels on interrupt
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// Load configuration from environment
+	config, err := loadConfigFromEnv()
+	if err != nil {
+		return err
+	}
+
+	server := kitchen.New(config)
+	return server.Start(ctx)
+}
+
+func loadConfigFromEnv() (kitchen.Config, error) {
 	config := kitchen.DefaultConfig()
 
 	if port := os.Getenv("KITCHEN_PORT"); port != "" {
 		p, err := strconv.Atoi(port)
 		if err != nil {
-			return fmt.Errorf("invalid KITCHEN_PORT: %w", err)
+			return config, fmt.Errorf("invalid KITCHEN_PORT: %w", err)
 		}
 		config.Port = p
 	}
@@ -54,7 +62,6 @@ func run() error {
 		config.DBPath = dbPath
 	}
 
-	// Auth configuration
 	if keysPath := os.Getenv("AUTHORIZED_KEYS_PATH"); keysPath != "" {
 		config.AuthorizedKeysPath = keysPath
 	}
@@ -63,9 +70,47 @@ func run() error {
 		config.AuthToken = os.Getenv("AUTH_TOKEN")
 	}
 
-	// Create and start server
-	server := kitchen.New(config)
-	return server.Start(ctx)
+	if ratePerSecond := os.Getenv("AUTH_CHALLENGE_RATE_PER_SECOND"); ratePerSecond != "" {
+		r, err := strconv.ParseFloat(ratePerSecond, 64)
+		if err != nil {
+			return config, fmt.Errorf("invalid AUTH_CHALLENGE_RATE_PER_SECOND: %w", err)
+		}
+		config.AuthChallengeRatePerSecond = r
+	}
+
+	if burst := os.Getenv("AUTH_CHALLENGE_BURST"); burst != "" {
+		b, err := strconv.Atoi(burst)
+		if err != nil {
+			return config, fmt.Errorf("invalid AUTH_CHALLENGE_BURST: %w", err)
+		}
+		config.AuthChallengeBurst = b
+	}
+
+	if maxIPBuckets := os.Getenv("AUTH_CHALLENGE_MAX_IP_BUCKETS"); maxIPBuckets != "" {
+		m, err := strconv.Atoi(maxIPBuckets)
+		if err != nil {
+			return config, fmt.Errorf("invalid AUTH_CHALLENGE_MAX_IP_BUCKETS: %w", err)
+		}
+		config.AuthChallengeMaxIPBuckets = m
+	}
+
+	if maxPending := os.Getenv("AUTH_MAX_PENDING_CHALLENGES"); maxPending != "" {
+		m, err := strconv.Atoi(maxPending)
+		if err != nil {
+			return config, fmt.Errorf("invalid AUTH_MAX_PENDING_CHALLENGES: %w", err)
+		}
+		config.AuthMaxPendingChallenges = m
+	}
+
+	if maxPendingPerOperator := os.Getenv("AUTH_MAX_PENDING_CHALLENGES_PER_OPERATOR"); maxPendingPerOperator != "" {
+		m, err := strconv.Atoi(maxPendingPerOperator)
+		if err != nil {
+			return config, fmt.Errorf("invalid AUTH_MAX_PENDING_CHALLENGES_PER_OPERATOR: %w", err)
+		}
+		config.AuthMaxPendingChallengesPerOperator = m
+	}
+
+	return config, nil
 }
 
 func printBanner() {

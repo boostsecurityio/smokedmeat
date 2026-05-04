@@ -36,6 +36,11 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, 30*time.Second, config.ReadTimeout)
 	assert.Equal(t, 30*time.Second, config.WriteTimeout)
 	assert.Equal(t, 120*time.Second, config.IdleTimeout)
+	assert.Equal(t, defaultAuthChallengeRatePerSecond, config.AuthChallengeRatePerSecond)
+	assert.Equal(t, defaultAuthChallengeBurst, config.AuthChallengeBurst)
+	assert.Equal(t, defaultAuthChallengeMaxIPBuckets, config.AuthChallengeMaxIPBuckets)
+	assert.Equal(t, auth.DefaultConfig().MaxPendingChallenges, config.AuthMaxPendingChallenges)
+	assert.Equal(t, auth.DefaultConfig().MaxPendingChallengesPerOperator, config.AuthMaxPendingChallengesPerOperator)
 }
 
 func TestDefaultConfig_TimeoutsArePositive(t *testing.T) {

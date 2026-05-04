@@ -567,3 +567,105 @@ func TestStaticToken_DynamicTokenStillWorks(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "quickstart", claims.OperatorID)
 }
+
+func TestCreateChallenge_RejectsBeyondMaxPending(t *testing.T) {
+	signer, pubKey := generateTestKey(t)
+	fingerprint := ssh.FingerprintSHA256(signer.PublicKey())
+
+	keysData := "alice ssh-ed25519 " + string(pubKey[:len(pubKey)-1]) + "\n"
+	a, err := New(Config{
+		AuthorizedKeysData:              keysData,
+		MaxPendingChallenges:            2,
+		MaxPendingChallengesPerOperator: 2,
+		ChallengeExpiry:                 time.Hour,
+	})
+	require.NoError(t, err)
+
+	_, err = a.CreateChallenge("alice", fingerprint)
+	require.NoError(t, err)
+	_, err = a.CreateChallenge("alice", fingerprint)
+	require.NoError(t, err)
+
+	_, err = a.CreateChallenge("alice", fingerprint)
+	assert.ErrorIs(t, err, ErrTooManyChallenges)
+
+	a.mu.RLock()
+	got := len(a.challenges)
+	a.mu.RUnlock()
+	assert.Equal(t, 2, got)
+}
+
+func TestCreateChallenge_RejectsBeyondMaxPendingPerOperator(t *testing.T) {
+	signer, pubKey := generateTestKey(t)
+	fingerprint := ssh.FingerprintSHA256(signer.PublicKey())
+
+	keyLine := "ssh-ed25519 " + string(pubKey[:len(pubKey)-1])
+	keysData := "alice " + keyLine + "\n" +
+		"bob " + keyLine + "\n"
+	a, err := New(Config{
+		AuthorizedKeysData:              keysData,
+		MaxPendingChallenges:            10,
+		MaxPendingChallengesPerOperator: 2,
+		ChallengeExpiry:                 time.Hour,
+	})
+	require.NoError(t, err)
+
+	_, err = a.CreateChallenge("alice", fingerprint)
+	require.NoError(t, err)
+	_, err = a.CreateChallenge("alice", fingerprint)
+	require.NoError(t, err)
+
+	_, err = a.CreateChallenge("alice", fingerprint)
+	assert.ErrorIs(t, err, ErrTooManyChallenges)
+
+	_, err = a.CreateChallenge("bob", fingerprint)
+	assert.NoError(t, err)
+}
+
+func TestCreateChallenge_OpportunisticSweepRecoversCapacity(t *testing.T) {
+	signer, pubKey := generateTestKey(t)
+	fingerprint := ssh.FingerprintSHA256(signer.PublicKey())
+
+	keysData := "alice ssh-ed25519 " + string(pubKey[:len(pubKey)-1]) + "\n"
+	a, err := New(Config{
+		AuthorizedKeysData:              keysData,
+		MaxPendingChallenges:            2,
+		MaxPendingChallengesPerOperator: 2,
+		ChallengeExpiry:                 time.Millisecond,
+	})
+	require.NoError(t, err)
+
+	_, err = a.CreateChallenge("alice", fingerprint)
+	require.NoError(t, err)
+	_, err = a.CreateChallenge("alice", fingerprint)
+	require.NoError(t, err)
+
+	time.Sleep(20 * time.Millisecond)
+
+	_, err = a.CreateChallenge("alice", fingerprint)
+	assert.NoError(t, err, "cap-hit branch should sweep expired entries before rejecting")
+}
+
+func TestDefaultConfig_PopulatesMaxPendingChallenges(t *testing.T) {
+	c := DefaultConfig()
+	assert.Equal(t, defaultMaxPendingChallenges, c.MaxPendingChallenges)
+	assert.Equal(t, defaultMaxPendingChallengesPerOperator, c.MaxPendingChallengesPerOperator)
+	assert.Greater(t, c.MaxPendingChallenges, 0)
+	assert.Greater(t, c.MaxPendingChallengesPerOperator, 0)
+}
+
+func TestNew_ZeroMaxPendingChallengesFallsBackToDefault(t *testing.T) {
+	a, err := New(Config{})
+	require.NoError(t, err)
+	assert.Equal(t, defaultMaxPendingChallenges, a.maxPendingChallenges)
+	assert.Equal(t, defaultMaxPendingChallengesPerOperator, a.maxPendingPerOperator)
+}
+
+func TestNew_MaxPendingPerOperatorCannotExceedGlobal(t *testing.T) {
+	a, err := New(Config{
+		MaxPendingChallenges:            2,
+		MaxPendingChallengesPerOperator: 10,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 2, a.maxPendingPerOperator)
+}
