@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
+	"golang.org/x/time/rate"
 
 	"github.com/boostsecurityio/smokedmeat/internal/kitchen/auth"
 	"github.com/boostsecurityio/smokedmeat/internal/kitchen/db"
@@ -70,19 +71,42 @@ type Config struct {
 	// AuthToken is the shared secret token when AuthMode is "token".
 	// Must be a 64-character hex string (256 bits of entropy).
 	AuthToken string
+
+	// AuthChallengeRatePerSecond caps how many /auth/challenge requests a
+	// single source IP may issue, on average. Zero disables per-IP rate
+	// limiting (existing behavior). Default: 1 req/sec, burst 10.
+	AuthChallengeRatePerSecond float64
+
+	// AuthChallengeBurst is the burst size paired with
+	// AuthChallengeRatePerSecond. Ignored when the rate is zero.
+	AuthChallengeBurst int
 }
+
+// Defaults for the per-IP rate limiter on /auth/challenge. 1 rps with a
+// burst of 10 allows a legitimate operator's retries / multi-tab dashboard
+// without friction (a normal SSH challenge-response round-trip uses a single
+// /auth/challenge call) while making memory exhaustion via single-IP spam
+// economically pointless: an attacker would need >10000 distinct source
+// IPs to fill the default in-memory challenge map within the 5-minute
+// expiry window.
+const (
+	defaultAuthChallengeRatePerSecond = 1.0
+	defaultAuthChallengeBurst         = 10
+)
 
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		Port:               8080,
-		NatsURL:            "nats://localhost:4222",
-		DBPath:             "data/kitchen.db",
-		ReadTimeout:        30 * time.Second,
-		WriteTimeout:       30 * time.Second,
-		IdleTimeout:        120 * time.Second,
-		AuthMode:           AuthModeSSH,
-		AuthorizedKeysPath: defaultAuthorizedKeysPath(),
+		Port:                       8080,
+		NatsURL:                    "nats://localhost:4222",
+		DBPath:                     "data/kitchen.db",
+		ReadTimeout:                30 * time.Second,
+		WriteTimeout:               30 * time.Second,
+		IdleTimeout:                120 * time.Second,
+		AuthMode:                   AuthModeSSH,
+		AuthorizedKeysPath:         defaultAuthorizedKeysPath(),
+		AuthChallengeRatePerSecond: defaultAuthChallengeRatePerSecond,
+		AuthChallengeBurst:         defaultAuthChallengeBurst,
 	}
 }
 
@@ -223,8 +247,17 @@ func (s *Server) Start(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 
+	// Per-IP rate limiter for the unauthenticated /auth/challenge endpoint.
+	// The limiter is disabled when AuthChallengeRatePerSecond <= 0 (allowing
+	// operators to opt out, e.g. when a trusted upstream proxy already
+	// throttles), and otherwise sized from Config.
+	authChallengeLimiter := auth.NewIPRateLimiter(
+		rate.Limit(s.config.AuthChallengeRatePerSecond),
+		s.config.AuthChallengeBurst,
+	)
+
 	// Auth routes (SSH challenge-response) - always public
-	mux.HandleFunc("POST /auth/challenge", s.handleAuthChallenge)
+	mux.Handle("POST /auth/challenge", authChallengeLimiter.Middleware(http.HandlerFunc(s.handleAuthChallenge)))
 	mux.HandleFunc("POST /auth/verify", s.handleAuthVerify)
 
 	// Health check - always public
