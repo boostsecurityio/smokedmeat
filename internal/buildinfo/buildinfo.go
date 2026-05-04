@@ -9,9 +9,10 @@ import (
 )
 
 var (
-	Version = "dev"
-	Commit  = "none"
-	Date    = "unknown"
+	Version         = "dev"
+	Commit          = "none"
+	Date            = "unknown"
+	VersionCheckURL = ""
 )
 
 func String() string {

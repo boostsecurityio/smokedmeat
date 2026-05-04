@@ -101,6 +101,24 @@ make dev-quickstart-purge  # Stop and delete all data
 
 More deployment modes and local development details are in [docs/deployment.md](docs/deployment.md).
 
+## Version Check
+
+Counter performs a lightweight version check at startup when the release binary is built with a version-check endpoint. It sends `project=smokedmeat`, the Counter component name, current version, a random `counter_id` as `instance_id`, `counter_start_count` as `start_count`, and starts since the previous successful report. The service can see the normal inbound HTTP metadata such as source IP address from its server logs.
+
+No tokens, targets, repository names, operator names, session IDs, or hostnames are sent. The `counter_id` is generated locally on first Counter startup and is not derived from any machine, user, repo, token, or engagement data. The check is rate-limited locally to once every 24 hours and stores `counter_id`, `counter_start_count`, `last_reported_counter_start_count`, and `last_version_check_timestamp` in `~/.smokedmeat/config.yaml`.
+
+If the service reports that a newer release is available, Counter shows a startup notice with the latest release URL.
+
+Disable it with:
+
+```bash
+SMOKEDMEAT_DISABLE_VERSION_CHECK=1 counter
+```
+
+When disabled, Counter does not send the request and does not create or update `counter_id`, `counter_start_count`, `last_reported_counter_start_count`, or `last_version_check_timestamp`.
+
+Release builds use `https://version-check.cicd.fun/v1/check`. Override the endpoint with `SMOKEDMEAT_VERSION_CHECK_URL`.
+
 ## Core Components
 
 | Standard term | SmokedMeat name | Description |

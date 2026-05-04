@@ -79,6 +79,8 @@ func run() error {
 		savedConfig.SessionID = sid
 		_ = counter.SaveConfig(savedConfig)
 	}
+	counter.RecordCounterStart(savedConfig)
+	versionCheckResult := counter.RunVersionCheck(savedConfig, buildinfo.Version, buildinfo.VersionCheckURL)
 
 	// If kitchen URL is set but no token, try SSH authentication
 	authToken := *token
@@ -125,6 +127,11 @@ func run() error {
 		AuthFailed:               authFailed,
 		InitialAccessToken:       initialToken,
 		InitialAccessTokenSource: initialTokenSource,
+	}
+	if versionCheckResult != nil {
+		config.LatestVersion = versionCheckResult.LatestVersion
+		config.LatestVersionURL = versionCheckResult.LatestURL
+		config.UpdateAvailable = versionCheckResult.UpdateAvailable
 	}
 
 	if savedConfig != nil && savedConfig.Theme != "" {
