@@ -1339,7 +1339,7 @@ func TestLatestWorkflowDispatchRun(t *testing.T) {
 		assert.Equal(t, "main", r.URL.Query().Get("branch"))
 		assert.Contains(t, r.URL.Query().Get("created"), ">=")
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"total_count":1,"workflow_runs":[{"id":123,"run_number":7,"run_attempt":1,"status":"completed","conclusion":"success","html_url":"https://github.com/acme/api/actions/runs/123","event":"workflow_dispatch","created_at":"2026-05-03T15:46:12Z","updated_at":"2026-05-03T15:47:12Z","run_started_at":"2026-05-03T15:46:20Z","actor":{"login":"testuser"}}]}`)
+		fmt.Fprint(w, `{"total_count":3,"workflow_runs":[{"id":123,"run_number":7,"run_attempt":1,"status":"completed","conclusion":"success","html_url":"https://github.com/acme/api/actions/runs/123","event":"workflow_dispatch","created_at":"2026-05-03T15:46:12Z","updated_at":"2026-05-03T15:47:12Z","run_started_at":"2026-05-03T15:46:20Z","actor":{"login":"testuser"}},{"id":124,"run_number":8,"run_attempt":1,"status":"completed","conclusion":"success","html_url":"https://github.com/acme/api/actions/runs/124","event":"workflow_dispatch","created_at":"2026-05-03T15:46:12Z","updated_at":"2026-05-03T15:47:12Z","run_started_at":"2026-05-03T15:46:20Z","actor":{"login":"testuser"}},{"id":999,"run_number":9,"run_attempt":1,"status":"completed","conclusion":"failure","html_url":"https://github.com/acme/api/actions/runs/999","event":"workflow_dispatch","created_at":"2026-05-03T15:46:11Z","updated_at":"2026-05-03T15:47:12Z","run_started_at":"2026-05-03T15:46:20Z","actor":{"login":"older"}}]}`)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -1354,11 +1354,11 @@ func TestLatestWorkflowDispatchRun(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, run)
-	assert.Equal(t, int64(123), run.ID)
-	assert.Equal(t, 7, run.RunNumber)
+	assert.Equal(t, int64(124), run.ID)
+	assert.Equal(t, 8, run.RunNumber)
 	assert.Equal(t, "completed", run.Status)
 	assert.Equal(t, "success", run.Conclusion)
-	assert.Equal(t, "https://github.com/acme/api/actions/runs/123", run.HTMLURL)
+	assert.Equal(t, "https://github.com/acme/api/actions/runs/124", run.HTMLURL)
 	assert.Equal(t, "testuser", run.Actor)
 }
 

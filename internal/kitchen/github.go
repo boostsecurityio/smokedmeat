@@ -909,7 +909,12 @@ func (c *gitHubClient) latestWorkflowDispatchRun(ctx context.Context, owner, rep
 		if !createdAfter.IsZero() && created.Before(createdFloor) {
 			continue
 		}
-		if best == nil || created.After(best.GetCreatedAt().Time) || run.GetID() > best.GetID() {
+		if best == nil {
+			best = run
+			continue
+		}
+		bestCreated := best.GetCreatedAt().Time
+		if created.After(bestCreated) || (created.Equal(bestCreated) && run.GetID() > best.GetID()) {
 			best = run
 		}
 	}

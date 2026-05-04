@@ -1377,7 +1377,7 @@ func (m *Model) renderWaitingView(height int) string {
 			lines = append(lines, centerText(fmt.Sprintf("Target: %s", m.waiting.TargetRepo), m.width))
 		}
 		if m.waiting.TargetWorkflow != "" && m.waiting.CachePoison == nil {
-			lines = append(lines, centerText(fmt.Sprintf("Workflow: %s", m.waiting.TargetWorkflow), m.width))
+			lines = append(lines, centerText(fmt.Sprintf("Workflow file: %s", m.waiting.TargetWorkflow), m.width))
 		}
 		lines = append(lines, centerText(fmt.Sprintf("Method: %s", m.waiting.Method), m.width))
 		if m.waiting.CachePoison != nil {

@@ -581,7 +581,9 @@ func TestRenderWaitingView_ShowsWorkflowOpenTarget(t *testing.T) {
 
 	out := stripANSI(m.renderWaitingView(24))
 
+	assert.Contains(t, out, "Workflow file: .github/workflows/deploy.yml")
 	assert.Contains(t, out, "Workflow: https://github.com/whooli/infrastructure-definitions/actions/workflows/deploy.yml")
+	assert.NotContains(t, out, "Workflow: .github/workflows/deploy.yml")
 	assert.NotContains(t, out, "PR:")
 }
 
