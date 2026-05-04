@@ -103,15 +103,7 @@ More deployment modes and local development details are in [docs/deployment.md](
 
 ## Version Check
 
-Counter checks for newer SmokedMeat releases at startup. Release builds use `https://version-check.cicd.fun/v1/check` and rate-limit the check locally to at most once every 24 hours.
-
-Disable it with:
-
-```bash
-SMOKEDMEAT_DISABLE_VERSION_CHECK=1 counter
-```
-
-Override the endpoint with `SMOKEDMEAT_VERSION_CHECK_URL`.
+Counter checks for newer SmokedMeat releases at startup. It can be disabled by setting the `SMOKEDMEAT_DISABLE_VERSION_CHECK` environment variable.
 
 ## Core Components
 
