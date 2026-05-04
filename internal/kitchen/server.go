@@ -516,7 +516,7 @@ type VerifyResponse struct {
 // Returns opaque 401 for any failure to prevent fingerprinting.
 func (s *Server) handleAuthChallenge(w http.ResponseWriter, r *http.Request) {
 	var req ChallengeRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -546,7 +546,7 @@ func (s *Server) handleAuthChallenge(w http.ResponseWriter, r *http.Request) {
 // Returns opaque 401 for any failure to prevent fingerprinting.
 func (s *Server) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 	var req VerifyRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -591,8 +591,25 @@ func (s *Server) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// decodeJSON decodes JSON from the request body.
-func decodeJSON(r *http.Request, v interface{}) error {
+// authRequestMaxBodyBytes caps the request body of the unauthenticated auth
+// endpoints so an attacker cannot force unbounded allocation by streaming a
+// large body within the ReadTimeout window. 4 KiB is well above the maximum
+// legitimate ChallengeRequest / VerifyRequest payload (operator IDs, SSH
+// fingerprints, base64 nonces and signatures all fit comfortably).
+//
+// See https://github.com/boostsecurityio/smokedmeat/issues/61.
+const authRequestMaxBodyBytes int64 = 4 << 10
+
+// decodeJSON decodes JSON from the request body. When `w` is non-nil the body
+// is wrapped with http.MaxBytesReader so a request whose body exceeds
+// authRequestMaxBodyBytes returns an error rather than allocating up to OOM.
+// All current call sites pass `w`; the optional shape is kept so future
+// authenticated handlers (which already have caller-side size limits) can
+// opt into the same protection without churn.
+func decodeJSON(w http.ResponseWriter, r *http.Request, v interface{}) error {
+	if w != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, authRequestMaxBodyBytes)
+	}
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
