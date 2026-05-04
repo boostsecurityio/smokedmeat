@@ -4,11 +4,21 @@
 package kitchen
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/boostsecurityio/smokedmeat/internal/kitchen/auth"
 	"github.com/boostsecurityio/smokedmeat/internal/kitchen/db"
@@ -152,4 +162,167 @@ func TestAuthMode_SSHMode(t *testing.T) {
 	}
 	server := New(config)
 	assert.Equal(t, AuthModeSSH, server.config.AuthMode)
+}
+
+func TestDecodeJSON_RejectsOversizedBody(t *testing.T) {
+	body := paddedAuthJSON(t, `{"operator":"alice","pubkey_fp":"SHA256:abc","padding":"`, `"}`, authRequestMaxBodyBytes+1)
+
+	r := httptest.NewRequest(http.MethodPost, "/auth/challenge", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	var req ChallengeRequest
+	err := decodeJSON(w, r, &req)
+	require.Error(t, err, "decodeJSON must reject body larger than authRequestMaxBodyBytes")
+	assertMaxBytesError(t, err)
+}
+
+func TestDecodeJSON_AcceptsBodyAtCap(t *testing.T) {
+	body := paddedAuthJSON(t, `{"operator":"alice","pubkey_fp":"SHA256:abc","padding":"`, `"}`, authRequestMaxBodyBytes)
+
+	r := httptest.NewRequest(http.MethodPost, "/auth/challenge", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	var req ChallengeRequest
+	require.NoError(t, decodeJSON(w, r, &req))
+	assert.Equal(t, "alice", req.Operator)
+	assert.Equal(t, "SHA256:abc", req.Fingerprint)
+}
+
+func TestDecodeJSON_RejectsTrailingJSON(t *testing.T) {
+	body := []byte(`{"operator":"alice","pubkey_fp":"SHA256:abc"}{}`)
+	r := httptest.NewRequest(http.MethodPost, "/auth/challenge", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	var req ChallengeRequest
+	require.Error(t, decodeJSON(w, r, &req))
+}
+
+func TestHandleAuthChallenge_OversizedBodyReturns401(t *testing.T) {
+	server, _, fingerprint, _ := newAuthServerWithOperator(t)
+
+	body := paddedAuthJSON(t, `{"operator":"alice","pubkey_fp":"`+fingerprint+`","padding":"`, `"}`, authRequestMaxBodyBytes+1)
+
+	r := httptest.NewRequest(http.MethodPost, "/auth/challenge", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleAuthChallenge(w, r)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestHandleAuthChallenge_BodyAtCapSucceeds(t *testing.T) {
+	server, _, fingerprint, _ := newAuthServerWithOperator(t)
+
+	body := paddedAuthJSON(t, `{"operator":"alice","pubkey_fp":"`+fingerprint+`","padding":"`, `"}`, authRequestMaxBodyBytes)
+
+	r := httptest.NewRequest(http.MethodPost, "/auth/challenge", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleAuthChallenge(w, r)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp ChallengeResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	nonce, err := base64.StdEncoding.DecodeString(resp.Nonce)
+	require.NoError(t, err)
+	assert.Len(t, nonce, 32)
+}
+
+func TestHandleAuthVerify_OversizedBodyReturns401(t *testing.T) {
+	server, signer, _, authProvider := newAuthServerWithOperator(t)
+	nonce, signature := signedChallenge(t, authProvider, signer)
+
+	body := paddedAuthJSON(t,
+		`{"nonce":"`+base64.StdEncoding.EncodeToString(nonce)+`","signature":"`+base64.StdEncoding.EncodeToString(signature)+`","padding":"`,
+		`"}`,
+		authRequestMaxBodyBytes+1,
+	)
+
+	r := httptest.NewRequest(http.MethodPost, "/auth/verify", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleAuthVerify(w, r)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	_, err := authProvider.VerifyChallenge(nonce, signature)
+	require.NoError(t, err)
+}
+
+func TestHandleAuthVerify_BodyAtCapSucceeds(t *testing.T) {
+	server, signer, _, authProvider := newAuthServerWithOperator(t)
+	nonce, signature := signedChallenge(t, authProvider, signer)
+
+	body := paddedAuthJSON(t,
+		`{"nonce":"`+base64.StdEncoding.EncodeToString(nonce)+`","signature":"`+base64.StdEncoding.EncodeToString(signature)+`","padding":"`,
+		`"}`,
+		authRequestMaxBodyBytes,
+	)
+
+	r := httptest.NewRequest(http.MethodPost, "/auth/verify", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleAuthVerify(w, r)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp VerifyResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, "alice", resp.Operator)
+	claims, err := authProvider.ValidateToken(resp.Token)
+	require.NoError(t, err)
+	assert.Equal(t, "alice", claims.OperatorID)
+}
+
+func paddedAuthJSON(t *testing.T, prefix, suffix string, size int64) []byte {
+	t.Helper()
+
+	paddingLen := int(size) - len(prefix) - len(suffix)
+	require.GreaterOrEqual(t, paddingLen, 0)
+
+	body := []byte(prefix + strings.Repeat("a", paddingLen) + suffix)
+	require.Len(t, body, int(size))
+
+	return body
+}
+
+func newAuthServerWithOperator(t *testing.T) (*Server, ssh.Signer, string, *auth.Auth) {
+	t.Helper()
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	signer, err := ssh.NewSignerFromKey(priv)
+	require.NoError(t, err)
+
+	pubKey, err := ssh.NewPublicKey(pub)
+	require.NoError(t, err)
+
+	keysData := "alice " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pubKey))) + "\n"
+	authProvider, err := auth.New(auth.Config{AuthorizedKeysData: keysData})
+	require.NoError(t, err)
+
+	server := New(DefaultConfig())
+	server.auth = authProvider
+
+	return server, signer, ssh.FingerprintSHA256(pubKey), authProvider
+}
+
+func signedChallenge(t *testing.T, authProvider *auth.Auth, signer ssh.Signer) ([]byte, []byte) {
+	t.Helper()
+
+	nonce, err := authProvider.CreateChallenge("alice", ssh.FingerprintSHA256(signer.PublicKey()))
+	require.NoError(t, err)
+
+	sig, err := signer.Sign(rand.Reader, nonce)
+	require.NoError(t, err)
+
+	return nonce, ssh.Marshal(sig)
+}
+
+func assertMaxBytesError(t *testing.T, err error) {
+	t.Helper()
+
+	var maxBytesErr *http.MaxBytesError
+	require.Truef(t, errors.As(err, &maxBytesErr), "expected MaxBytesError, got %T: %v", err, err)
 }

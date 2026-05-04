@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -517,7 +518,7 @@ type VerifyResponse struct {
 // Returns opaque 401 for any failure to prevent fingerprinting.
 func (s *Server) handleAuthChallenge(w http.ResponseWriter, r *http.Request) {
 	var req ChallengeRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -547,7 +548,7 @@ func (s *Server) handleAuthChallenge(w http.ResponseWriter, r *http.Request) {
 // Returns opaque 401 for any failure to prevent fingerprinting.
 func (s *Server) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 	var req VerifyRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -592,9 +593,24 @@ func (s *Server) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// decodeJSON decodes JSON from the request body.
-func decodeJSON(r *http.Request, v interface{}) error {
-	return json.NewDecoder(r.Body).Decode(v)
+const authRequestMaxBodyBytes int64 = 4 << 10
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, v interface{}) error {
+	r.Body = http.MaxBytesReader(w, r.Body, authRequestMaxBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+
+	var extra struct{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("request body must contain a single JSON value")
+		}
+		return err
+	}
+
+	return nil
 }
 
 // writeJSON writes JSON to the response.
