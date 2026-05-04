@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/boostsecurityio/smokedmeat/internal/models"
 )
 
 func TestOperationHistory_AddAndEntries(t *testing.T) {
@@ -65,6 +67,9 @@ func TestIconForHistoryType(t *testing.T) {
 		{"agent.connected", IconAgent},
 		{"secret.extracted", IconSecret},
 		{"purge.executed", IconWarning},
+		{"resident_job.observed", IconAgent},
+		{"resident_job.harvested", IconSuccess},
+		{"resident_job.harvest_failed", IconError},
 		{"unknown.type", IconInfo},
 		{"", IconInfo},
 	}
@@ -162,6 +167,16 @@ func TestMessageForHistoryEntry(t *testing.T) {
 			"Purged repo:acme/api → 3 pantry assets, 1 known entities",
 		},
 		{
+			"resident observed with attribution",
+			HistoryEntry{Type: "resident_job.observed", Repository: "acme/public-pinata", Workflow: ".github/workflows/dispatch.yml", Job: "test", RunID: "25223159810"},
+			"Resident job observed acme/public-pinata .github/workflows/dispatch.yml test #25223159810",
+		},
+		{
+			"resident harvest failed with detail",
+			HistoryEntry{Type: "resident_job.harvest_failed", Repository: "acme/public-pinata", ErrorDetail: "ptrace denied"},
+			"Resident job harvest failed acme/public-pinata: ptrace denied",
+		},
+		{
 			"unknown type",
 			HistoryEntry{Type: "custom.event"},
 			"custom.event",
@@ -172,4 +187,31 @@ func TestMessageForHistoryEntry(t *testing.T) {
 			assert.Equal(t, tt.want, messageForHistoryEntry(tt.entry))
 		})
 	}
+}
+
+func TestNoteResidentHistoryUpdatesActiveAgent(t *testing.T) {
+	ts := time.Date(2026, 5, 1, 16, 42, 1, 0, time.UTC)
+	m := Model{activeAgent: &AgentState{ID: "agent-1"}}
+
+	m.noteResidentHistory(HistoryEntry{
+		Type:                  "resident_job.harvested",
+		Timestamp:             ts,
+		AgentID:               "agent-1",
+		Repository:            "acme/public-pinata",
+		Workflow:              ".github/workflows/dispatch.yml",
+		Job:                   "test",
+		RunID:                 "25223159810",
+		AttributionConfidence: models.ResidentJobConfidenceStrong,
+		HarvestProfile:        "resident-lite",
+		SignalSource:          "runner_worker_process",
+	})
+
+	assert.Equal(t, "harvested", m.activeAgent.ResidentWatchStatus)
+	assert.Equal(t, ts, m.activeAgent.ResidentLastHarvested)
+	assert.Equal(t, "acme/public-pinata", m.activeAgent.ResidentLastRepository)
+	assert.Equal(t, ".github/workflows/dispatch.yml", m.activeAgent.ResidentLastWorkflow)
+	assert.Equal(t, "test", m.activeAgent.ResidentLastJob)
+	assert.Equal(t, "25223159810", m.activeAgent.ResidentLastRunID)
+	assert.Equal(t, models.ResidentJobConfidenceStrong, m.activeAgent.ResidentLastConfidence)
+	assert.Equal(t, "runner_worker_process", m.activeAgent.ResidentSignalSource)
 }

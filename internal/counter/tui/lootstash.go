@@ -358,21 +358,26 @@ func (m Model) handleLootSync(msg LootSyncMsg) (tea.Model, tea.Cmd) {
 func collectedSecretFromLootSyncEntry(entry counter.LootSyncEntry) CollectedSecret {
 	origin := strings.TrimSpace(entry.Origin)
 	expressOrigin := origin == "express"
+	residentOrigin := origin == "resident_job"
 	agentID := strings.TrimSpace(entry.AgentID)
-	if expressOrigin && len(agentID) > 8 {
+	if (expressOrigin || residentOrigin) && len(agentID) > 8 {
 		agentID = agentID[:8]
 	}
 
 	source := strings.TrimSpace(entry.Source)
-	if expressOrigin && agentID != "" {
+	if (expressOrigin || residentOrigin) && agentID != "" {
+		prefix := "agent:"
+		if residentOrigin {
+			prefix = "resident:"
+		}
 		if source != "" {
-			source = "agent:" + agentID + ":" + source
+			source = prefix + agentID + ":" + source
 		} else {
-			source = "agent:" + agentID
+			source = prefix + agentID
 		}
 	}
 
-	ephemeral := expressOrigin && (!entry.HighValue || isEphemeralSecretName(entry.Name))
+	ephemeral := (expressOrigin || residentOrigin) && (!entry.HighValue || isEphemeralSecretName(entry.Name))
 	secret := CollectedSecret{
 		Name:        entry.Name,
 		Value:       entry.Value,
@@ -599,7 +604,7 @@ func (m *Model) renderCompactLootDetail(secret CollectedSecret, width int) []str
 			lines = append(lines, renderPermissionLines(perms, "  ")...)
 		}
 	case len(perms) > 0:
-		if secret.ExpressMode {
+		if secret.ExpressMode && !m.expressModeSecretLiveInDwell(secret) {
 			lines = append(lines, errorColor.Render("  ⚠ Expired")+mutedColor.Render(" (express mode)"))
 		}
 		lines = append(lines, renderPermissionLines(perms, "  ")...)
@@ -987,7 +992,11 @@ func (m *Model) formatLootSecretBadges(secret *CollectedSecret) string {
 
 	switch {
 	case secret.IsEphemeral() && secret.ExpressMode:
-		badges = append(badges, errorColor.Render("[expired]"))
+		if remaining, live := m.expressModeSecretDwellRemaining(*secret); live {
+			badges = append(badges, warningColor.Render("⏱"+formatDuration(remaining)))
+		} else {
+			badges = append(badges, errorColor.Render("[expired]"))
+		}
 	case secret.IsEphemeral() && m.dwellMode && !m.jobDeadline.IsZero():
 		remaining := time.Until(m.jobDeadline)
 		if remaining > 0 {

@@ -27,6 +27,13 @@ type HistoryEntry struct {
 	Outcome     string
 	ErrorDetail string
 	AgentID     string
+
+	Workflow              string
+	Job                   string
+	RunID                 string
+	AttributionConfidence string
+	HarvestProfile        string
+	SignalSource          string
 }
 
 type OperationHistory struct {
@@ -80,6 +87,12 @@ func iconForHistoryType(t string) string {
 		return IconSecret
 	case "purge.executed":
 		return IconWarning
+	case "resident_job.observed":
+		return IconAgent
+	case "resident_job.harvested":
+		return IconSuccess
+	case "resident_job.harvest_failed":
+		return IconError
 	default:
 		return IconInfo
 	}
@@ -139,7 +152,43 @@ func messageForHistoryEntry(e HistoryEntry) string {
 			msg += " → " + e.Outcome
 		}
 		return msg
+	case "resident_job.observed":
+		return residentHistoryMessage("Resident job observed", e)
+	case "resident_job.harvested":
+		return residentHistoryMessage("Resident job harvested", e)
+	case "resident_job.harvest_failed":
+		msg := residentHistoryMessage("Resident job harvest failed", e)
+		if e.ErrorDetail != "" {
+			msg += ": " + e.ErrorDetail
+		}
+		return msg
 	default:
 		return e.Type
 	}
+}
+
+func residentHistoryMessage(prefix string, e HistoryEntry) string {
+	target := e.Repository
+	if e.Workflow != "" {
+		if target != "" {
+			target += " "
+		}
+		target += e.Workflow
+	}
+	if e.Job != "" {
+		if target != "" {
+			target += " "
+		}
+		target += e.Job
+	}
+	if e.RunID != "" {
+		if target != "" {
+			target += " "
+		}
+		target += "#" + e.RunID
+	}
+	if target == "" {
+		return prefix
+	}
+	return prefix + " " + target
 }

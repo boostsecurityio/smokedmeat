@@ -75,6 +75,13 @@ type HistoryPayload struct {
 	Outcome     string `json:"outcome,omitempty"`
 	ErrorDetail string `json:"error_detail,omitempty"`
 	AgentID     string `json:"agent_id,omitempty"`
+
+	Workflow              string `json:"workflow,omitempty"`
+	Job                   string `json:"job,omitempty"`
+	RunID                 string `json:"run_id,omitempty"`
+	AttributionConfidence string `json:"attribution_confidence,omitempty"`
+	HarvestProfile        string `json:"harvest_profile,omitempty"`
+	SignalSource          string `json:"signal_source,omitempty"`
 }
 
 type AnalysisProgressPayload struct {
@@ -127,6 +134,13 @@ type LootSyncEntry struct {
 	Job        string `json:"job,omitempty"`
 
 	TokenPermissions map[string]string `json:"token_permissions,omitempty"`
+
+	ResidentJobKey        string `json:"resident_job_key,omitempty"`
+	RunID                 string `json:"run_id,omitempty"`
+	RunAttempt            string `json:"run_attempt,omitempty"`
+	AttributionConfidence string `json:"attribution_confidence,omitempty"`
+	HarvestProfile        string `json:"harvest_profile,omitempty"`
+	SignalSource          string `json:"signal_source,omitempty"`
 }
 
 // BeaconPayload represents agent beacon data sent to operators.
@@ -238,20 +252,26 @@ func (h *OperatorHub) sendStoredLoot(op *OperatorConn) {
 	payload := LootSyncPayload{Entries: make([]LootSyncEntry, 0, len(lootRows))}
 	for _, row := range lootRows {
 		payload.Entries = append(payload.Entries, LootSyncEntry{
-			SessionID:        row.SessionID,
-			AgentID:          row.AgentID,
-			Hostname:         row.Hostname,
-			Timestamp:        row.Timestamp,
-			Origin:           row.Origin,
-			Name:             row.Name,
-			Value:            row.Value,
-			Type:             row.Type,
-			Source:           row.Source,
-			HighValue:        row.HighValue,
-			Repository:       row.Repository,
-			Workflow:         row.Workflow,
-			Job:              row.Job,
-			TokenPermissions: row.TokenPermissions,
+			SessionID:             row.SessionID,
+			AgentID:               row.AgentID,
+			Hostname:              row.Hostname,
+			Timestamp:             row.Timestamp,
+			Origin:                row.Origin,
+			Name:                  row.Name,
+			Value:                 row.Value,
+			Type:                  row.Type,
+			Source:                row.Source,
+			HighValue:             row.HighValue,
+			Repository:            row.Repository,
+			Workflow:              row.Workflow,
+			Job:                   row.Job,
+			TokenPermissions:      row.TokenPermissions,
+			ResidentJobKey:        row.ResidentJobKey,
+			RunID:                 row.RunID,
+			RunAttempt:            row.RunAttempt,
+			AttributionConfidence: row.AttributionConfidence,
+			HarvestProfile:        row.HarvestProfile,
+			SignalSource:          row.SignalSource,
 		})
 	}
 

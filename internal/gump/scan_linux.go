@@ -63,11 +63,7 @@ func (ls *LinuxScanner) ScanWithStats(pid int, results chan<- Result) (ScanStats
 
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
-		if len(fields) < 2 || !strings.Contains(fields[1], "r") {
-			continue
-		}
-
-		if isFileBacked(fields) {
+		if !shouldScanLinuxMapping(fields) {
 			continue
 		}
 
@@ -96,6 +92,20 @@ func (ls *LinuxScanner) ScanWithStats(pid int, results chan<- Result) (ScanStats
 		return stats, err
 	}
 	return stats, nil
+}
+
+func shouldScanLinuxMapping(fields []string) bool {
+	if len(fields) < 2 {
+		return false
+	}
+	perms := fields[1]
+	if !strings.Contains(perms, "r") {
+		return false
+	}
+	if isFileBacked(fields) && !strings.Contains(perms, "w") {
+		return false
+	}
+	return true
 }
 
 func isFileBacked(fields []string) bool {

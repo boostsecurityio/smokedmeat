@@ -472,6 +472,17 @@ type AgentState struct {
 	Mode      string
 	EntryVuln string
 	StartTime time.Time
+
+	ResidentWatchStatus      string
+	ResidentSignalSource     string
+	ResidentLastObserved     time.Time
+	ResidentLastHarvested    time.Time
+	ResidentLastConfidence   string
+	ResidentLastRunID        string
+	ResidentLastRepository   string
+	ResidentLastWorkflow     string
+	ResidentLastJob          string
+	ResidentLastHarvestError string
 }
 
 type CollectedSecret struct {

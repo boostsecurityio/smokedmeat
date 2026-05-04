@@ -174,6 +174,21 @@ func (m *Model) buildCallbackDetailLines(width, height int) []string {
 		if route := callbackMetadataValue(callback, runnerTargetMetadataRouteKey); route != "" {
 			lines = append(lines, padRight("Route: "+truncate(route, max(width-7, 8)), width))
 		}
+		watchStatus := callbackMetadataValue(callback, "resident_watch_status")
+		if watchStatus == "" {
+			watchStatus = "watching"
+		}
+		watchLine := "Watch: " + watchStatus
+		if confidence := callbackMetadataValue(callback, "resident_confidence"); confidence != "" {
+			watchLine += " " + confidence
+		}
+		lines = append(lines, padRight(truncate(watchLine, width), width))
+		if lastJob := residentCallbackLastJob(callback); lastJob != "" {
+			lines = append(lines, padRight("Last job: "+truncate(lastJob, max(width-10, 8)), width))
+		}
+		if lastHarvest := callbackMetadataValue(callback, "resident_last_harvested_at"); lastHarvest != "" {
+			lines = append(lines, padRight("Last harvest: "+truncate(lastHarvest, max(width-14, 8)), width))
+		}
 		status := "offline"
 		if callback.RevokedAt != nil {
 			status = "revoked"
@@ -250,6 +265,27 @@ func (m *Model) buildCallbackDetailLines(width, height int) []string {
 		lines = append(lines, strings.Repeat(" ", width))
 	}
 	return lines
+}
+
+func residentCallbackLastJob(callback *counter.CallbackPayload) string {
+	parts := []string{
+		callbackMetadataValue(callback, "resident_last_repository"),
+		callbackMetadataValue(callback, "resident_last_workflow"),
+		callbackMetadataValue(callback, "resident_last_job"),
+	}
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			filtered = append(filtered, part)
+		}
+	}
+	if len(filtered) == 0 {
+		return ""
+	}
+	if runID := callbackMetadataValue(callback, "resident_last_run_id"); runID != "" {
+		filtered = append(filtered, "#"+runID)
+	}
+	return strings.Join(filtered, " ")
 }
 
 func callbackListLabel(callback counter.CallbackPayload) string {

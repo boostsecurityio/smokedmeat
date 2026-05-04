@@ -31,3 +31,26 @@ func TestIsFileBacked(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldScanLinuxMapping(t *testing.T) {
+	cases := []struct {
+		name   string
+		fields []string
+		want   bool
+	}{
+		{"anonymous writable", []string{"7f00-7f01", "rw-p", "00000000", "00:00", "0"}, true},
+		{"heap writable", []string{"7f00-7f01", "rw-p", "00000000", "00:00", "0", "[heap]"}, true},
+		{"file backed read only", []string{"7f00-7f01", "r--p", "00000000", "08:01", "42", "/opt/runner/bin/Runner.Worker.dll"}, false},
+		{"file backed executable", []string{"7f00-7f01", "r-xp", "00000000", "08:01", "42", "/opt/runner/bin/Runner.Worker.dll"}, false},
+		{"file backed writable", []string{"7f00-7f01", "rw-p", "00000000", "08:01", "42", "/tmp/CoreFxPipe"}, true},
+		{"write only", []string{"7f00-7f01", "-w-p", "00000000", "00:00", "0"}, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldScanLinuxMapping(tc.fields); got != tc.want {
+				t.Errorf("shouldScanLinuxMapping(%v) = %v, want %v", tc.fields, got, tc.want)
+			}
+		})
+	}
+}
