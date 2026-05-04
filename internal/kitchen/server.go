@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -591,26 +592,24 @@ func (s *Server) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// authRequestMaxBodyBytes caps the request body of the unauthenticated auth
-// endpoints so an attacker cannot force unbounded allocation by streaming a
-// large body within the ReadTimeout window. 4 KiB is well above the maximum
-// legitimate ChallengeRequest / VerifyRequest payload (operator IDs, SSH
-// fingerprints, base64 nonces and signatures all fit comfortably).
-//
-// See https://github.com/boostsecurityio/smokedmeat/issues/61.
 const authRequestMaxBodyBytes int64 = 4 << 10
 
-// decodeJSON decodes JSON from the request body. When `w` is non-nil the body
-// is wrapped with http.MaxBytesReader so a request whose body exceeds
-// authRequestMaxBodyBytes returns an error rather than allocating up to OOM.
-// All current call sites pass `w`; the optional shape is kept so future
-// authenticated handlers (which already have caller-side size limits) can
-// opt into the same protection without churn.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v interface{}) error {
-	if w != nil {
-		r.Body = http.MaxBytesReader(w, r.Body, authRequestMaxBodyBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, authRequestMaxBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(v); err != nil {
+		return err
 	}
-	return json.NewDecoder(r.Body).Decode(v)
+
+	var extra struct{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("request body must contain a single JSON value")
+		}
+		return err
+	}
+
+	return nil
 }
 
 // writeJSON writes JSON to the response.

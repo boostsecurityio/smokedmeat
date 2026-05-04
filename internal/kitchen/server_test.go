@@ -5,6 +5,11 @@ package kitchen
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +18,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/boostsecurityio/smokedmeat/internal/kitchen/auth"
 	"github.com/boostsecurityio/smokedmeat/internal/kitchen/db"
@@ -158,38 +164,20 @@ func TestAuthMode_SSHMode(t *testing.T) {
 	assert.Equal(t, AuthModeSSH, server.config.AuthMode)
 }
 
-// =============================================================================
-// Auth Body-Size Limit Tests (issue #61)
-//
-// The /auth/challenge and /auth/verify endpoints are unauthenticated and must
-// not allow an attacker to force unbounded allocation by streaming a huge body
-// within the ReadTimeout window. decodeJSON wraps the body with
-// http.MaxBytesReader(authRequestMaxBodyBytes); these tests pin that contract.
-// =============================================================================
-
 func TestDecodeJSON_RejectsOversizedBody(t *testing.T) {
-	// Build a body that is one byte over the cap. The contents don't matter
-	// because the size cap fires before the JSON decoder sees a complete value.
-	oversized := bytes.Repeat([]byte("a"), int(authRequestMaxBodyBytes)+1)
-	body := append([]byte(`{"x":"`), oversized...)
-	body = append(body, []byte(`"}`)...)
+	body := paddedAuthJSON(t, `{"operator":"alice","pubkey_fp":"SHA256:abc","padding":"`, `"}`, authRequestMaxBodyBytes+1)
 
 	r := httptest.NewRequest(http.MethodPost, "/auth/challenge", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 
-	var dst struct {
-		X string `json:"x"`
-	}
-	err := decodeJSON(w, r, &dst)
+	var req ChallengeRequest
+	err := decodeJSON(w, r, &req)
 	require.Error(t, err, "decodeJSON must reject body larger than authRequestMaxBodyBytes")
-	assert.Contains(t, strings.ToLower(err.Error()), "request body too large",
-		"error should come from http.MaxBytesReader")
+	assertMaxBytesError(t, err)
 }
 
 func TestDecodeJSON_AcceptsBodyAtCap(t *testing.T) {
-	// A small, well-formed JSON object well under the cap must decode normally.
-	body := []byte(`{"operator":"alice","pubkey_fp":"SHA256:abc"}`)
-	require.LessOrEqual(t, int64(len(body)), authRequestMaxBodyBytes)
+	body := paddedAuthJSON(t, `{"operator":"alice","pubkey_fp":"SHA256:abc","padding":"`, `"}`, authRequestMaxBodyBytes)
 
 	r := httptest.NewRequest(http.MethodPost, "/auth/challenge", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -200,34 +188,19 @@ func TestDecodeJSON_AcceptsBodyAtCap(t *testing.T) {
 	assert.Equal(t, "SHA256:abc", req.Fingerprint)
 }
 
-func TestDecodeJSON_NilWriterStillDecodes(t *testing.T) {
-	// The optional-writer shape lets future authenticated handlers (which do
-	// their own size limiting) reuse decodeJSON without churn. Pass nil and
-	// confirm the body is decoded as-is, with no panic.
-	body := []byte(`{"operator":"bob","fingerprint":"SHA256:xyz"}`)
-	r := httptest.NewRequest(http.MethodPost, "/whatever", bytes.NewReader(body))
+func TestDecodeJSON_RejectsTrailingJSON(t *testing.T) {
+	body := []byte(`{"operator":"alice","pubkey_fp":"SHA256:abc"}{}`)
+	r := httptest.NewRequest(http.MethodPost, "/auth/challenge", bytes.NewReader(body))
+	w := httptest.NewRecorder()
 
 	var req ChallengeRequest
-	require.NoError(t, decodeJSON(nil, r, &req))
-	assert.Equal(t, "bob", req.Operator)
+	require.Error(t, decodeJSON(w, r, &req))
 }
 
-// TestHandleAuthChallenge_OversizedBodyReturns401 exercises the fix end-to-end:
-// the handler maps any decode error to an opaque 401 (per its existing
-// fingerprinting-resistant policy), so a >cap body must short-circuit before
-// reaching auth.CreateChallenge.
 func TestHandleAuthChallenge_OversizedBodyReturns401(t *testing.T) {
-	authProvider, err := auth.New(auth.Config{
-		StaticToken: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-	})
-	require.NoError(t, err)
+	server, _, fingerprint, _ := newAuthServerWithOperator(t)
 
-	server := New(DefaultConfig())
-	server.auth = authProvider
-
-	oversized := bytes.Repeat([]byte("a"), int(authRequestMaxBodyBytes)+1)
-	body := append([]byte(`{"operator":"alice","fingerprint":"`), oversized...)
-	body = append(body, []byte(`"}`)...)
+	body := paddedAuthJSON(t, `{"operator":"alice","pubkey_fp":"`+fingerprint+`","padding":"`, `"}`, authRequestMaxBodyBytes+1)
 
 	r := httptest.NewRequest(http.MethodPost, "/auth/challenge", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -237,18 +210,34 @@ func TestHandleAuthChallenge_OversizedBodyReturns401(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
-func TestHandleAuthVerify_OversizedBodyReturns401(t *testing.T) {
-	authProvider, err := auth.New(auth.Config{
-		StaticToken: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-	})
+func TestHandleAuthChallenge_BodyAtCapSucceeds(t *testing.T) {
+	server, _, fingerprint, _ := newAuthServerWithOperator(t)
+
+	body := paddedAuthJSON(t, `{"operator":"alice","pubkey_fp":"`+fingerprint+`","padding":"`, `"}`, authRequestMaxBodyBytes)
+
+	r := httptest.NewRequest(http.MethodPost, "/auth/challenge", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleAuthChallenge(w, r)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp ChallengeResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	nonce, err := base64.StdEncoding.DecodeString(resp.Nonce)
 	require.NoError(t, err)
+	assert.Len(t, nonce, 32)
+}
 
-	server := New(DefaultConfig())
-	server.auth = authProvider
+func TestHandleAuthVerify_OversizedBodyReturns401(t *testing.T) {
+	server, signer, _, authProvider := newAuthServerWithOperator(t)
+	nonce, signature := signedChallenge(t, authProvider, signer)
 
-	oversized := bytes.Repeat([]byte("a"), int(authRequestMaxBodyBytes)+1)
-	body := append([]byte(`{"nonce":"abc","signature":"`), oversized...)
-	body = append(body, []byte(`"}`)...)
+	body := paddedAuthJSON(t,
+		`{"nonce":"`+base64.StdEncoding.EncodeToString(nonce)+`","signature":"`+base64.StdEncoding.EncodeToString(signature)+`","padding":"`,
+		`"}`,
+		authRequestMaxBodyBytes+1,
+	)
 
 	r := httptest.NewRequest(http.MethodPost, "/auth/verify", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -256,4 +245,84 @@ func TestHandleAuthVerify_OversizedBodyReturns401(t *testing.T) {
 	server.handleAuthVerify(w, r)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	_, err := authProvider.VerifyChallenge(nonce, signature)
+	require.NoError(t, err)
+}
+
+func TestHandleAuthVerify_BodyAtCapSucceeds(t *testing.T) {
+	server, signer, _, authProvider := newAuthServerWithOperator(t)
+	nonce, signature := signedChallenge(t, authProvider, signer)
+
+	body := paddedAuthJSON(t,
+		`{"nonce":"`+base64.StdEncoding.EncodeToString(nonce)+`","signature":"`+base64.StdEncoding.EncodeToString(signature)+`","padding":"`,
+		`"}`,
+		authRequestMaxBodyBytes,
+	)
+
+	r := httptest.NewRequest(http.MethodPost, "/auth/verify", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleAuthVerify(w, r)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp VerifyResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, "alice", resp.Operator)
+	claims, err := authProvider.ValidateToken(resp.Token)
+	require.NoError(t, err)
+	assert.Equal(t, "alice", claims.OperatorID)
+}
+
+func paddedAuthJSON(t *testing.T, prefix, suffix string, size int64) []byte {
+	t.Helper()
+
+	paddingLen := int(size) - len(prefix) - len(suffix)
+	require.GreaterOrEqual(t, paddingLen, 0)
+
+	body := []byte(prefix + strings.Repeat("a", paddingLen) + suffix)
+	require.Len(t, body, int(size))
+
+	return body
+}
+
+func newAuthServerWithOperator(t *testing.T) (*Server, ssh.Signer, string, *auth.Auth) {
+	t.Helper()
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	signer, err := ssh.NewSignerFromKey(priv)
+	require.NoError(t, err)
+
+	pubKey, err := ssh.NewPublicKey(pub)
+	require.NoError(t, err)
+
+	keysData := "alice " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pubKey))) + "\n"
+	authProvider, err := auth.New(auth.Config{AuthorizedKeysData: keysData})
+	require.NoError(t, err)
+
+	server := New(DefaultConfig())
+	server.auth = authProvider
+
+	return server, signer, ssh.FingerprintSHA256(pubKey), authProvider
+}
+
+func signedChallenge(t *testing.T, authProvider *auth.Auth, signer ssh.Signer) ([]byte, []byte) {
+	t.Helper()
+
+	nonce, err := authProvider.CreateChallenge("alice", ssh.FingerprintSHA256(signer.PublicKey()))
+	require.NoError(t, err)
+
+	sig, err := signer.Sign(rand.Reader, nonce)
+	require.NoError(t, err)
+
+	return nonce, ssh.Marshal(sig)
+}
+
+func assertMaxBytesError(t *testing.T, err error) {
+	t.Helper()
+
+	var maxBytesErr *http.MaxBytesError
+	require.Truef(t, errors.As(err, &maxBytesErr), "expected MaxBytesError, got %T: %v", err, err)
 }
