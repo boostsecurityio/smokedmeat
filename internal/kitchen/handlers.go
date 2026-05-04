@@ -190,6 +190,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /github/repos", h.handleGitHubListRepos)
 	mux.HandleFunc("POST /github/repos/info", h.handleGitHubListReposWithInfo)
 	mux.HandleFunc("POST /github/workflows", h.handleGitHubListWorkflows)
+	mux.HandleFunc("POST /github/workflow-runs", h.handleGitHubWorkflowDispatchRun)
 	mux.HandleFunc("POST /github/user", h.handleGitHubGetUser)
 	mux.HandleFunc("POST /github/token/info", h.handleGitHubTokenInfo)
 	mux.HandleFunc("POST /github/app/installations", h.handleGitHubAppInstallations)

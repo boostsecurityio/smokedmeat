@@ -573,6 +573,44 @@ func TestRenderWaitingView_ShowsETA(t *testing.T) {
 	assert.Contains(t, out, "stg-123")
 }
 
+func TestRenderWaitingView_ShowsWorkflowOpenTarget(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 140
+	m.waiting = NewWaitingState("", "whooli/infrastructure-definitions", "V001", ".github/workflows/deploy.yml", "sync", waitingMethodWorkflowDispatch, 0)
+	m.waiting.WorkflowRun = &WorkflowDispatchWaitingState{}
+
+	out := stripANSI(m.renderWaitingView(24))
+
+	assert.Contains(t, out, "Workflow file: .github/workflows/deploy.yml")
+	assert.Contains(t, out, "Workflow: https://github.com/whooli/infrastructure-definitions/actions/workflows/deploy.yml")
+	assert.NotContains(t, out, "Workflow: .github/workflows/deploy.yml")
+	assert.NotContains(t, out, "PR:")
+}
+
+func TestRenderWaitingView_ShowsRunOpenTarget(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 140
+	m.waiting = NewWaitingState("", "whooli/infrastructure-definitions", "V001", ".github/workflows/deploy.yml", "sync", waitingMethodWorkflowDispatch, 0)
+	m.waiting.WorkflowRun = &WorkflowDispatchWaitingState{RunURL: "https://github.com/whooli/infrastructure-definitions/actions/runs/123"}
+
+	out := stripANSI(m.renderWaitingView(24))
+
+	assert.Contains(t, out, "Run: https://github.com/whooli/infrastructure-definitions/actions/runs/123")
+	assert.NotContains(t, out, "PR:")
+}
+
+func TestRenderWaitingView_ShowsIssueOpenTarget(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 140
+	m.waiting = NewWaitingState("stg-123", "whooli/infrastructure-definitions", "V001", ".github/workflows/deploy.yml", "sync", "Issue", 0)
+	m.waiting.PRURL = "https://github.com/whooli/infrastructure-definitions/issues/7"
+
+	out := stripANSI(m.renderWaitingView(24))
+
+	assert.Contains(t, out, "Issue: https://github.com/whooli/infrastructure-definitions/issues/7")
+	assert.NotContains(t, out, "PR:")
+}
+
 func TestRenderWaitingView_ShowsWriterCacheStatus(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.width = 120
@@ -586,6 +624,99 @@ func TestRenderWaitingView_ShowsWriterCacheStatus(t *testing.T) {
 	out := stripANSI(m.renderWaitingView(24))
 
 	assert.Contains(t, out, "Writer cache: armed")
+}
+
+func TestRenderWaitingView_FlashesVictimWaitingHint(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 120
+	m.waiting = NewWaitingState("stg-123", "acme/api", "V001", ".github/workflows/lint.yml", "lint", "Add Comment", 0)
+	m.waiting.CachePoison = &CachePoisonWaitingState{
+		Victim:                  cachepoison.VictimCandidate{Workflow: ".github/workflows/deploy.yml"},
+		WriterAgentID:           "agt-writer",
+		WriterStatus:            &models.CachePoisonStatus{Status: "armed"},
+		VictimStagerID:          "victim-stg",
+		VictimDwellTime:         time.Minute,
+		VictimWaitingFlashUntil: time.Now().Add(time.Second),
+	}
+
+	out := stripANSI(m.renderWaitingView(24))
+
+	assert.Contains(t, out, "Victim callback: waiting")
+	assert.Contains(t, out, "Press Shift+I to arm next dwell callback")
+}
+
+func TestRenderWaitingView_FlashesExpressVictimWaitingHint(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 120
+	m.waiting = NewWaitingState("stg-123", "acme/api", "V001", ".github/workflows/lint.yml", "lint", "Add Comment", 0)
+	m.waiting.CachePoison = &CachePoisonWaitingState{
+		Victim:                  cachepoison.VictimCandidate{Workflow: ".github/workflows/deploy.yml"},
+		WriterAgentID:           "agt-writer",
+		WriterStatus:            &models.CachePoisonStatus{Status: "armed"},
+		VictimStagerID:          "victim-stg",
+		VictimWaitingFlashUntil: time.Now().Add(time.Second),
+	}
+
+	out := stripANSI(m.renderWaitingView(24))
+
+	assert.Contains(t, out, "Victim callback: waiting")
+	assert.Contains(t, out, "Express callback will run when victim workflow triggers")
+	assert.NotContains(t, out, "Press Shift+I")
+}
+
+func TestRenderToastOverlay_CanRenderCenteredToast(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 80
+	m.height = 20
+	m.flashMessage = cachePoisonVictimWaitingDwellHint
+	m.flashUntil = time.Now().Add(time.Second)
+	m.flashCenterUntil = m.flashUntil
+	background := strings.Join([]string{
+		"top",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"middle",
+	}, "\n")
+
+	out := stripANSI(m.renderToastOverlay(background))
+
+	assert.Contains(t, out, cachePoisonVictimWaitingDwellHint)
+	lines := strings.Split(out, "\n")
+	require.Greater(t, len(lines), 8)
+	assert.NotContains(t, strings.Join(lines[:4], "\n"), cachePoisonVictimWaitingDwellHint)
+}
+
+func TestBuildCallbacksModal_HidesDwellControlsWithoutDwellDuration(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 120
+	m.callbackModal = &CallbackModalState{Cursor: 0}
+	m.callbacks = []counter.CallbackPayload{{ID: "cb-express", DefaultMode: "express"}}
+
+	out := stripANSI(m.buildCallbacksModal(100, 20))
+
+	assert.Contains(t, out, "Dwell: not configured")
+	assert.NotContains(t, out, "default dwell")
+	assert.NotContains(t, out, "next dwell")
+}
+
+func TestBuildCallbacksModal_ShowsDwellControlsWithDwellDuration(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 120
+	m.callbackModal = &CallbackModalState{Cursor: 0}
+	m.callbacks = []counter.CallbackPayload{{ID: "cb-dwell", DefaultMode: "express", DwellTime: "1m0s"}}
+
+	out := stripANSI(m.buildCallbacksModal(100, 20))
+
+	assert.Contains(t, out, "Dwell: 1m0s")
+	assert.Contains(t, out, "default dwell")
+	assert.Contains(t, out, "next dwell")
 }
 
 func TestRenderNewStatusBar_ShowsFilterHintWhenFindingsPaneFocused(t *testing.T) {
@@ -829,6 +960,32 @@ func TestRenderNewStatusBar_ShowsThemeAndLogHintsInAgentView(t *testing.T) {
 	assert.Contains(t, out, "Shift+L:log")
 	assert.Contains(t, out, "Shift+I:implants")
 	assert.Contains(t, out, "t:theme")
+}
+
+func TestRenderNewStatusBar_WaitingOpenHintMatchesTarget(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	m.width = 180
+	m.view = ViewWaiting
+	m.waiting = NewWaitingState("", "whooli/infrastructure-definitions", "V001", ".github/workflows/deploy.yml", "sync", waitingMethodWorkflowDispatch, 0)
+	m.waiting.WorkflowRun = &WorkflowDispatchWaitingState{}
+
+	out := stripANSI(m.renderNewStatusBar())
+	assert.Contains(t, out, "o:open workflow")
+	assert.NotContains(t, out, "o:open PR")
+
+	m.waiting.WorkflowRun.RunURL = "https://github.com/whooli/infrastructure-definitions/actions/runs/123"
+	out = stripANSI(m.renderNewStatusBar())
+	assert.Contains(t, out, "o:open run")
+	assert.NotContains(t, out, "o:open workflow")
+
+	m.waiting.WorkflowRun = nil
+	m.waiting.PRURL = "https://github.com/whooli/infrastructure-definitions/pull/1"
+	out = stripANSI(m.renderNewStatusBar())
+	assert.Contains(t, out, "o:open PR")
+
+	m.waiting.PRURL = "https://github.com/whooli/infrastructure-definitions/issues/1"
+	out = stripANSI(m.renderNewStatusBar())
+	assert.Contains(t, out, "o:open Issue")
 }
 
 func TestRenderNewStatusBar_PrioritizesThemeHintAtWalkthroughWidth(t *testing.T) {

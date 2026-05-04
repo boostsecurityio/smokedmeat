@@ -185,6 +185,7 @@ func (m Model) deployWorkflowDispatch(target WorkflowDispatchSelection, stagerID
 		if len(parts) != 2 {
 			return AutoDispatchFailedMsg{StagerID: stagerID, Err: fmt.Errorf("invalid repository format")}
 		}
+		triggeredAt := time.Now().UTC()
 		err := m.kitchenClient.TriggerDispatch(context.Background(), counter.DeployDispatchRequest{
 			Token:        token.Value,
 			Owner:        parts[0],
@@ -197,12 +198,53 @@ func (m Model) deployWorkflowDispatch(target WorkflowDispatchSelection, stagerID
 			return AutoDispatchFailedMsg{StagerID: stagerID, Err: err}
 		}
 		return AutoDispatchSuccessMsg{
-			StagerID:   stagerID,
-			Repository: target.Repository,
-			Workflow:   target.Workflow,
-			InputName:  dispatchInputSummary(inputs),
-			DwellTime:  dwellTime,
+			StagerID:    stagerID,
+			Repository:  target.Repository,
+			Workflow:    target.Workflow,
+			Ref:         target.Ref,
+			InputName:   dispatchInputSummary(inputs),
+			DwellTime:   dwellTime,
+			Token:       token.Value,
+			TriggeredAt: triggeredAt,
 		}
+	}
+}
+
+const workflowDispatchRunPollInterval = 5 * time.Second
+
+func (m *Model) workflowDispatchRunPollCmd(now time.Time) tea.Cmd {
+	if m.waiting == nil || m.waiting.WorkflowRun == nil || m.kitchenClient == nil {
+		return nil
+	}
+	state := m.waiting.WorkflowRun
+	if state.Token == "" || state.Owner == "" || state.Repo == "" || state.WorkflowFile == "" {
+		return nil
+	}
+	if state.PollInFlight || state.CompletedSeen {
+		return nil
+	}
+	if !state.LastPollAt.IsZero() && now.Sub(state.LastPollAt) < workflowDispatchRunPollInterval {
+		return nil
+	}
+	state.LastPollAt = now
+	state.PollInFlight = true
+
+	req := counter.WorkflowDispatchRunRequest{
+		Token:        state.Token,
+		Owner:        state.Owner,
+		Repo:         state.Repo,
+		WorkflowFile: state.WorkflowFile,
+		Ref:          state.Ref,
+		CreatedAfter: state.RequestedAt,
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		run, err := m.kitchenClient.GetWorkflowDispatchRun(ctx, req)
+		if err != nil {
+			return WorkflowDispatchRunStatusFailedMsg{Err: err}
+		}
+		return WorkflowDispatchRunStatusMsg{Run: run}
 	}
 }
 

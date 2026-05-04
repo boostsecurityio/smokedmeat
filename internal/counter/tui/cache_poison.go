@@ -112,6 +112,10 @@ func (m *Model) prepareWizardStager(vuln *Vulnerability, injCtx rye.InjectionCon
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	purgeToken, purgeKey, purgeKeyPrefix := m.cachePoisonPurgeRequest(victim)
+	victimDwellTime := ""
+	if victimDwell > 0 {
+		victimDwellTime = victimDwell.String()
+	}
 	resp, err := m.kitchenClient.PrepareCachePoisonDeployment(ctx, counter.PrepareCachePoisonRequest{
 		SessionID:        m.config.SessionID,
 		ExternalURL:      m.config.ExternalURL(),
@@ -120,7 +124,7 @@ func (m *Model) prepareWizardStager(vuln *Vulnerability, injCtx rye.InjectionCon
 		WriterWorkflow:   vuln.Workflow,
 		WriterJob:        vuln.Job,
 		Victim:           *victim,
-		VictimDwellTime:  victimDwell.String(),
+		VictimDwellTime:  victimDwellTime,
 		PurgeToken:       purgeToken,
 		PurgeKey:         purgeKey,
 		PurgeKeyPrefix:   purgeKeyPrefix,
@@ -136,9 +140,10 @@ func (m *Model) prepareWizardStager(vuln *Vulnerability, injCtx rye.InjectionCon
 	}
 
 	m.pendingCachePoison = &CachePoisonWaitingState{
-		WriterStagerID: stager.ID,
-		Victim:         *victim,
-		VictimStagerID: resp.VictimStagerID,
+		WriterStagerID:  stager.ID,
+		Victim:          *victim,
+		VictimStagerID:  resp.VictimStagerID,
+		VictimDwellTime: victimDwell,
 	}
 	m.wizard.VictimStagerID = resp.VictimStagerID
 	if resp.PurgedKey != "" {

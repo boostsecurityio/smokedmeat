@@ -227,17 +227,28 @@ type LOTPDeploymentFailedMsg struct {
 }
 
 type AutoDispatchSuccessMsg struct {
-	StagerID   string
-	Vuln       *Vulnerability
-	Repository string
-	Workflow   string
-	InputName  string
-	DwellTime  time.Duration
+	StagerID    string
+	Vuln        *Vulnerability
+	Repository  string
+	Workflow    string
+	Ref         string
+	InputName   string
+	DwellTime   time.Duration
+	Token       string
+	TriggeredAt time.Time
 }
 
 type AutoDispatchFailedMsg struct {
 	StagerID string
 	Err      error
+}
+
+type WorkflowDispatchRunStatusMsg struct {
+	Run *counter.WorkflowDispatchRun
+}
+
+type WorkflowDispatchRunStatusFailedMsg struct {
+	Err error
 }
 
 // Operation History messages

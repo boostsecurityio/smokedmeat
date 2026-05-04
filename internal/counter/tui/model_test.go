@@ -388,6 +388,47 @@ func TestStartWaitingForRunnerTarget_AttachesExistingResidentFoothold(t *testing
 	assert.Nil(t, m.waiting)
 }
 
+func TestWaitingOpenURLLabelsGitHubDeliveryTargets(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{
+			name: "pull request",
+			url:  "https://github.com/org/repo/pull/1",
+			want: "PR",
+		},
+		{
+			name: "issue",
+			url:  "https://github.com/org/repo/issues/1",
+			want: "Issue",
+		},
+		{
+			name: "issue comment",
+			url:  "https://github.com/org/repo/issues/1#issuecomment-123",
+			want: "Issue comment",
+		},
+		{
+			name: "pull request comment",
+			url:  "https://github.com/org/repo/pull/1#issuecomment-123",
+			want: "PR comment",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			waiting := NewWaitingState("stg-1", "org/repo", "V001", "ci.yml", "build", "Issue", 0)
+			waiting.PRURL = tt.url
+
+			targetURL, label := waitingOpenURL(waiting)
+
+			assert.Equal(t, tt.url, targetURL)
+			assert.Equal(t, tt.want, label)
+		})
+	}
+}
+
 // =============================================================================
 // Focus Enum Tests
 // =============================================================================

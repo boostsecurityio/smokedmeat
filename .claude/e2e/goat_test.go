@@ -33,7 +33,7 @@ const (
 	founderPreviewWorkflow = ".github/workflows/founder-preview-intake.yml"
 	flagBucket             = "whooli-newcleus-benchmarks"
 	flagXYZHash            = "2c90d898d0924d8d5cf3f4094fd446bb0f1deea61c4b41f9b40215852dfe1414"
-	oidcDwellAdjustments   = 2
+	oidcDwellAdjustments   = 1
 )
 
 var (
@@ -200,8 +200,8 @@ func TestGOATFlagPath(t *testing.T) {
 	require.NotEmpty(t, cacheActivity, "Cache poison deployment should report cache replacement activity or arm the writer cache")
 	requireContent(t, tmux, "Writer cache: armed", 2*time.Minute, "Cache poison flow should arm the writer cache before the victim workflow runs")
 	requireContent(t, tmux, "Victim callback: waiting", 5*time.Second, "Victim callback should still be pending before the victim workflow runs")
+	requireContent(t, tmux, "Phase:Recon", 10*time.Second, "Should return to Recon phase after arming the writer cache")
 	armNextImplantWithDwell(t, tmux, deployWorkflow)
-	require.NoError(t, tmux.SendKeys("Escape"))
 	requireContent(t, tmux, "Phase:Recon", 10*time.Second, "Should return to Recon phase before triggering the victim workflow through Counter")
 
 	runCounterCommand(t, tmux, "pivot github "+infraRepo)

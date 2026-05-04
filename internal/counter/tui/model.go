@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"sort"
 	"strings"
@@ -252,8 +253,9 @@ type Model struct {
 	appPermissionView   map[string]map[string]string
 
 	// Flash message (temporary notification in status bar)
-	flashMessage string
-	flashUntil   time.Time
+	flashMessage     string
+	flashUntil       time.Time
+	flashCenterUntil time.Time
 
 	// Loot flash (highlight loot panel briefly)
 	lootFlash      bool
@@ -1810,6 +1812,113 @@ func (m *Model) StartWaiting(stagerID, prURL string, vuln *Vulnerability, method
 	m.waiting.PRURL = prURL
 	m.TransitionToPhase(PhaseWaiting)
 	m.activateWaitingResidentFootholdIfLive()
+}
+
+func (m *Model) StartWaitingForWorkflowDispatch(repository, workflow, ref, token string, triggeredAt time.Time, vuln *Vulnerability) {
+	repo := strings.TrimSpace(repository)
+	vulnID := ""
+	job := ""
+	if vuln != nil {
+		if repo == "" {
+			repo = vuln.Repository
+		}
+		if workflow == "" {
+			workflow = vuln.Workflow
+		}
+		vulnID = vuln.ID
+		job = vuln.Job
+	}
+	m.waiting = NewWaitingState("", repo, vulnID, strings.TrimSpace(workflow), job, waitingMethodWorkflowDispatch, 0)
+	if owner, repoName, ok := splitGitHubRepository(repo); ok {
+		if triggeredAt.IsZero() {
+			triggeredAt = time.Now().UTC()
+		}
+		m.waiting.WorkflowRun = &WorkflowDispatchWaitingState{
+			Token:        token,
+			Owner:        owner,
+			Repo:         repoName,
+			WorkflowFile: strings.TrimSpace(workflow),
+			Ref:          strings.TrimSpace(ref),
+			RequestedAt:  triggeredAt,
+		}
+	}
+	m.pendingCachePoison = nil
+	m.TransitionToPhase(PhaseWaiting)
+}
+
+func splitGitHubRepository(repository string) (owner, repo string, ok bool) {
+	parts := strings.SplitN(strings.TrimSpace(repository), "/", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", "", false
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), true
+}
+
+func workflowActionsURL(repository, workflow string) string {
+	owner, repo, ok := splitGitHubRepository(repository)
+	if !ok {
+		return ""
+	}
+	workflowFile := strings.TrimSpace(workflow)
+	workflowFile = strings.TrimPrefix(workflowFile, ".github/workflows/")
+	if workflowFile == "" {
+		return fmt.Sprintf("https://github.com/%s/%s/actions", url.PathEscape(owner), url.PathEscape(repo))
+	}
+	return fmt.Sprintf("https://github.com/%s/%s/actions/workflows/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(workflowFile))
+}
+
+func waitingOpenURL(waiting *WaitingState) (targetURL, label string) {
+	if waiting == nil {
+		return "", ""
+	}
+	if waiting.WorkflowRun != nil {
+		if waiting.WorkflowRun.RunURL != "" {
+			return waiting.WorkflowRun.RunURL, "run"
+		}
+		if actionsURL := workflowActionsURL(waiting.TargetRepo, waiting.TargetWorkflow); actionsURL != "" {
+			return actionsURL, "workflow"
+		}
+	}
+	if waiting.PRURL != "" {
+		return waiting.PRURL, waitingOpenLabelForGitHubURL(waiting.PRURL)
+	}
+	return "", ""
+}
+
+func waitingOpenLabelForGitHubURL(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return "link"
+	}
+	if strings.Contains(parsed.Fragment, "issuecomment-") {
+		if githubPathSegment(parsed.Path, "pull") {
+			return "PR comment"
+		}
+		if githubPathSegment(parsed.Path, "issues") {
+			return "Issue comment"
+		}
+		return "comment"
+	}
+	if githubPathSegment(parsed.Path, "pull") {
+		return "PR"
+	}
+	if githubPathSegment(parsed.Path, "issues") {
+		return "Issue"
+	}
+	if githubPathSegment(parsed.Path, "tree") {
+		return "branch"
+	}
+	return "link"
+}
+
+func githubPathSegment(path, want string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	for _, part := range parts {
+		if part == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) StartWaitingForRunnerTarget(stagerID string, target *RunnerTargetSelection, method string, dwellTime time.Duration) {

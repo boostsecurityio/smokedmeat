@@ -16,6 +16,11 @@ import (
 	"github.com/boostsecurityio/smokedmeat/internal/rye"
 )
 
+func TestCachePoisonPersistentDwell_NoImplicitDwell(t *testing.T) {
+	assert.Equal(t, time.Duration(0), cachePoisonPersistentDwell(0))
+	assert.Equal(t, time.Minute, cachePoisonPersistentDwell(time.Minute))
+}
+
 func TestWizardKeyMsg_CachePoisonToggleAndCycle(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhaseWizard
@@ -304,6 +309,7 @@ func TestPrepareWizardStager_CachePoisonEncodesDeploymentConfig(t *testing.T) {
 	require.NotNil(t, stager)
 	require.NotNil(t, m.pendingCachePoison)
 	assert.Equal(t, m.wizard.VictimStagerID, m.pendingCachePoison.VictimStagerID)
+	assert.Equal(t, 45*time.Second, m.pendingCachePoison.VictimDwellTime)
 	require.Len(t, m.callbacks, 2)
 
 	req := mock.lastPrepareCachePoisonReq

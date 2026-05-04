@@ -402,6 +402,7 @@ type WaitingState struct {
 	Method         string
 	DwellTime      time.Duration
 	CachePoison    *CachePoisonWaitingState
+	WorkflowRun    *WorkflowDispatchWaitingState
 	PendingAgents  map[string]time.Time
 }
 
@@ -434,14 +435,41 @@ func (w *WaitingState) IsTimedOut() bool {
 }
 
 type CachePoisonWaitingState struct {
-	Victim         cachepoison.VictimCandidate
-	WriterStagerID string
-	VictimStagerID string
-	WriterAgentID  string
-	VictimAgentID  string
-	PendingVictim  string
-	PendingDwell   map[string]struct{}
-	WriterStatus   *models.CachePoisonStatus
+	Victim                    cachepoison.VictimCandidate
+	WriterStagerID            string
+	VictimStagerID            string
+	WriterAgentID             string
+	VictimAgentID             string
+	VictimDwellTime           time.Duration
+	PendingVictim             string
+	PendingDwell              map[string]struct{}
+	WriterStatus              *models.CachePoisonStatus
+	VictimWaitingHinted       bool
+	VictimWaitingFlashUntil   time.Time
+	VictimWaitingAutoReturnAt time.Time
+	VictimWaitingAutoReturned bool
+}
+
+type WorkflowDispatchWaitingState struct {
+	Token         string
+	Owner         string
+	Repo          string
+	WorkflowFile  string
+	Ref           string
+	RequestedAt   time.Time
+	LastPollAt    time.Time
+	PollInFlight  bool
+	RunID         int64
+	RunNumber     int
+	RunURL        string
+	Status        string
+	Conclusion    string
+	Actor         string
+	RunCreatedAt  time.Time
+	RunUpdatedAt  time.Time
+	RunStartedAt  time.Time
+	CompletedSeen bool
+	ErrorLogged   bool
 }
 
 type CallbackModalState struct {
@@ -461,6 +489,8 @@ const (
 	agentModeExpress  = "express"
 	agentModeDwell    = "dwell"
 	agentModeResident = "resident"
+
+	waitingMethodWorkflowDispatch = "Workflow Dispatch"
 )
 
 type AgentState struct {

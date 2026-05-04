@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -47,6 +48,7 @@ type KitchenAPI interface {
 	FetchDeployPreflight(ctx context.Context, req DeployPreflightRequest) (*DeployPreflightResponse, error)
 	ListReposWithInfo(ctx context.Context, token string) ([]RepoInfo, error)
 	ListWorkflowsWithDispatch(ctx context.Context, token, owner, repo string) ([]DispatchableWorkflow, error)
+	GetWorkflowDispatchRun(ctx context.Context, req WorkflowDispatchRunRequest) (*WorkflowDispatchRun, error)
 	GetAuthenticatedUser(ctx context.Context, token string) (GetUserResponse, error)
 	FetchTokenInfo(ctx context.Context, token, source string) (*FetchTokenInfoResponse, error)
 	ListAppInstallations(ctx context.Context, pem, appID string) ([]AppInstallation, error)
@@ -1017,6 +1019,10 @@ func (k *KitchenClient) ControlCallback(ctx context.Context, callbackID string, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		detailBytes, _ := io.ReadAll(resp.Body)
+		if detail := strings.TrimSpace(string(detailBytes)); detail != "" {
+			return nil, fmt.Errorf("callback control failed: %s: %s", resp.Status, detail)
+		}
 		return nil, fmt.Errorf("callback control failed: %s", resp.Status)
 	}
 
@@ -1235,6 +1241,33 @@ type DeployDispatchRequest struct {
 
 type DeployDispatchResponse struct {
 	Error string `json:"error,omitempty"`
+}
+
+type WorkflowDispatchRunRequest struct {
+	Token        string    `json:"token"`
+	Owner        string    `json:"owner"`
+	Repo         string    `json:"repo"`
+	WorkflowFile string    `json:"workflow_file"`
+	Ref          string    `json:"ref,omitempty"`
+	CreatedAfter time.Time `json:"created_after,omitempty"`
+}
+
+type WorkflowDispatchRun struct {
+	ID           int64     `json:"id"`
+	RunNumber    int       `json:"run_number,omitempty"`
+	RunAttempt   int       `json:"run_attempt,omitempty"`
+	Status       string    `json:"status,omitempty"`
+	Conclusion   string    `json:"conclusion,omitempty"`
+	HTMLURL      string    `json:"html_url,omitempty"`
+	Actor        string    `json:"actor,omitempty"`
+	Event        string    `json:"event,omitempty"`
+	CreatedAt    time.Time `json:"created_at,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+	RunStartedAt time.Time `json:"run_started_at,omitempty"`
+}
+
+type WorkflowDispatchRunResponse struct {
+	Run *WorkflowDispatchRun `json:"run,omitempty"`
 }
 
 type DeployPreflightRequest struct {
@@ -1472,6 +1505,12 @@ func (k *KitchenClient) ListWorkflowsWithDispatch(ctx context.Context, token, ow
 	var resp ListWorkflowsResponse
 	err := k.doPostJSON(ctx, "/github/workflows", ListWorkflowsRequest{Token: token, Owner: owner, Repo: repo}, &resp, 60*time.Second)
 	return resp.Workflows, err
+}
+
+func (k *KitchenClient) GetWorkflowDispatchRun(ctx context.Context, req WorkflowDispatchRunRequest) (*WorkflowDispatchRun, error) {
+	var resp WorkflowDispatchRunResponse
+	err := k.doPostJSON(ctx, "/github/workflow-runs", req, &resp, 30*time.Second)
+	return resp.Run, err
 }
 
 func (k *KitchenClient) GetAuthenticatedUser(ctx context.Context, token string) (GetUserResponse, error) {

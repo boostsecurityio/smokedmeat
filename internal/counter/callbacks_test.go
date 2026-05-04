@@ -84,3 +84,19 @@ func TestKitchenClient_RegisterCallback_PropagatesError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected status: 500")
 }
+
+func TestKitchenClient_ControlCallback_PropagatesErrorBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/callbacks/cb-1", r.URL.Path)
+		http.Error(w, "callback has no dwell duration configured", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	client := NewKitchenClient(KitchenConfig{URL: srv.URL})
+	resp, err := client.ControlCallback(t.Context(), "cb-1", CallbackControlRequest{Action: "arm_next_dwell"})
+
+	assert.Nil(t, resp)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "400 Bad Request")
+	assert.Contains(t, err.Error(), "callback has no dwell duration configured")
+}

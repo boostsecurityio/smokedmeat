@@ -253,6 +253,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.Handle("POST /github/repos", opAuth(http.HandlerFunc(s.handler.handleGitHubListRepos)))
 	mux.Handle("POST /github/repos/info", opAuth(http.HandlerFunc(s.handler.handleGitHubListReposWithInfo)))
 	mux.Handle("POST /github/workflows", opAuth(http.HandlerFunc(s.handler.handleGitHubListWorkflows)))
+	mux.Handle("POST /github/workflow-runs", opAuth(http.HandlerFunc(s.handler.handleGitHubWorkflowDispatchRun)))
 	mux.Handle("POST /github/user", opAuth(http.HandlerFunc(s.handler.handleGitHubGetUser)))
 	mux.Handle("POST /github/token/info", opAuth(http.HandlerFunc(s.handler.handleGitHubTokenInfo)))
 	mux.Handle("POST /github/app/installations", opAuth(http.HandlerFunc(s.handler.handleGitHubAppInstallations)))
