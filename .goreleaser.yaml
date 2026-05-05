@@ -22,7 +22,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Version={{ .Version }} -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Commit={{ .Commit }} -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Date={{ .Date }}
+      - -s -w -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Version={{ .Version }} -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Commit={{ .Commit }} -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Date={{ .Date }} -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.VersionCheckURL={{ .Env.SMOKEDMEAT_VERSION_CHECK_URL }}
 
   - id: kitchen
     main: ./cmd/kitchen

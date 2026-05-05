@@ -113,6 +113,9 @@ type Config struct {
 	AuthFailed               bool
 	InitialAccessToken       string
 	InitialAccessTokenSource string
+	LatestVersion            string
+	LatestVersionURL         string
+	UpdateAvailable          bool
 }
 
 // ExternalURL returns the external Kitchen URL for stagers and display.
@@ -436,6 +439,14 @@ func NewModel(config Config) Model {
 			Source:    config.InitialAccessTokenSource,
 			FetchedAt: time.Now(),
 		}
+	}
+
+	if config.UpdateAvailable && config.LatestVersion != "" {
+		message := fmt.Sprintf("SmokedMeat %s is available", config.LatestVersion)
+		if config.LatestVersionURL != "" {
+			message += ": " + config.LatestVersionURL
+		}
+		m.AddOutput("info", message)
 	}
 
 	m.updatePlaceholder()

@@ -22,6 +22,8 @@ This is the right path for demos, local testing, and validating the full workflo
 
 `make quickstart` uses the pinned release in `configs/quickstart-release.mk`. That pin can intentionally lag the newest tag until a release has been validated. Use `make quickstart-version` to inspect it. Maintainers update it with `make quickstart-pin VERSION=v...`, which verifies the immutable GitHub release plus the signed GHCR image digests before writing the pin. `make quickstart-pin` requires `gh`, `cosign`, and `docker` in `PATH`. Use `make quickstart-up` / `make quickstart-counter` if you want to split infrastructure startup from the Counter launch.
 
+Counter checks for newer SmokedMeat releases at startup. It can be disabled by setting the `SMOKEDMEAT_DISABLE_VERSION_CHECK` environment variable.
+
 ### Self-Hosted Kitchen
 
 Use this when you want a stable Kitchen with your own domain and SSH challenge-response auth.

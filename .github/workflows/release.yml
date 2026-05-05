@@ -53,3 +53,4 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SMOKEDMEAT_VERSION_CHECK_URL: ${{ vars.SMOKEDMEAT_VERSION_CHECK_URL }}

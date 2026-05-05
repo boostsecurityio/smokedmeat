@@ -101,6 +101,10 @@ make dev-quickstart-purge  # Stop and delete all data
 
 More deployment modes and local development details are in [docs/deployment.md](docs/deployment.md).
 
+## Version Check
+
+Counter checks for newer SmokedMeat releases at startup. It can be disabled by setting the `SMOKEDMEAT_DISABLE_VERSION_CHECK` environment variable.
+
 ## Core Components
 
 | Standard term | SmokedMeat name | Description |
