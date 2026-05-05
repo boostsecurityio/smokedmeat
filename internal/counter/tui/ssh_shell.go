@@ -268,12 +268,14 @@ func sshShellEnv(ss *SSHState, shellHome string) []string {
 		"-o", "StrictHostKeyChecking=yes",
 		"-o", "LogLevel=ERROR",
 	}, " ")
+	basePath := "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	helperPath := filepath.Join(shellHome, "bin")
 	env := []string{
 		"HOME=" + shellHome,
 		"SM_SHELL_HOME=" + shellHome,
 		"SM_PROVIDER=ssh",
 		"SM_METHOD=git",
-		"PATH=" + filepath.Join(shellHome, "bin") + ":" + os.Getenv("PATH"),
+		"PATH=" + helperPath + ":" + basePath,
 		"GIT_CONFIG_GLOBAL=" + filepath.Join(shellHome, ".gitconfig"),
 		"GIT_SSH_COMMAND=" + sshCommand,
 		"SM_SSH_IDENTITY=" + identityPath,
@@ -339,7 +341,7 @@ func writeSSHShellHelpers(ss *SSHState) error {
 	}
 
 	contextScript := strings.Join([]string{
-		"#!/bin/sh",
+		"#!/usr/bin/env sh",
 		"set -eu",
 		"echo \"SSH shell ready\"",
 		"echo \"Scope: ${SM_SSH_SCOPE:-all discovered repos}\"",
@@ -368,7 +370,7 @@ func writeSSHShellHelpers(ss *SSHState) error {
 	}
 
 	cloneScript := strings.Join([]string{
-		"#!/bin/sh",
+		"#!/usr/bin/env sh",
 		"set -eu",
 		"if [ $# -ne 1 ]; then",
 		"  echo \"usage: sm-clone owner/repo\" >&2",
@@ -389,7 +391,7 @@ func writeSSHShellHelpers(ss *SSHState) error {
 	}
 
 	editorWrapper := strings.Join([]string{
-		"#!/bin/sh",
+		"#!/usr/bin/env sh",
 		"exec vi \"$@\"",
 		"",
 	}, "\n")

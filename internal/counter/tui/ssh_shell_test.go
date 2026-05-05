@@ -174,7 +174,7 @@ func TestSSHShellEnv_UsesRuntimeScopedKeyPaths(t *testing.T) {
 	joined := "\n" + strings.Join(env, "\n") + "\n"
 
 	assert.Contains(t, joined, "\nHOME=/shell\n")
-	assert.Contains(t, joined, "\nPATH=/shell/bin:")
+	assert.Contains(t, joined, "\nPATH=/shell/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n")
 	assert.Contains(t, joined, "\nSM_SSH_IDENTITY=/shell/.ssh/id_smokedmeat\n")
 	assert.Contains(t, joined, "\nSM_SSH_KNOWN_HOSTS=/shell/.ssh/known_hosts\n")
 	assert.Contains(t, joined, "\nGIT_SSH_COMMAND=ssh -o IdentitiesOnly=yes -o IdentityFile=/shell/.ssh/id_smokedmeat -o UserKnownHostsFile=/shell/.ssh/known_hosts -o StrictHostKeyChecking=yes -o LogLevel=ERROR\n")
