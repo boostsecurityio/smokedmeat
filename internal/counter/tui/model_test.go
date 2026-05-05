@@ -62,9 +62,9 @@ func TestNewModel_ShowsUpdateNotice(t *testing.T) {
 
 	require.Len(t, m.output, 1)
 	assert.Equal(t, "info", m.output[0].Type)
-	assert.Equal(t, "SmokedMeat v0.2.1 is available: https://github.com/boostsecurityio/smokedmeat/releases/tag/v0.2.1", m.output[0].Content)
+	assert.Equal(t, "A new version of SmokedMeat is available (v0.2.1)", m.output[0].Content)
 	require.NotEmpty(t, m.activityLog.Entries())
-	assert.Equal(t, "SmokedMeat v0.2.1 is available: https://github.com/boostsecurityio/smokedmeat/releases/tag/v0.2.1", m.activityLog.Entries()[0].Message)
+	assert.Equal(t, "A new version of SmokedMeat is available (v0.2.1)", m.activityLog.Entries()[0].Message)
 }
 
 func TestNewModel_ActivityLogAutoExpandEnabled(t *testing.T) {
