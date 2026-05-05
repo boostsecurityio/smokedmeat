@@ -442,11 +442,7 @@ func NewModel(config Config) Model {
 	}
 
 	if config.UpdateAvailable && config.LatestVersion != "" {
-		message := fmt.Sprintf("SmokedMeat %s is available", config.LatestVersion)
-		if config.LatestVersionURL != "" {
-			message += ": " + config.LatestVersionURL
-		}
-		m.AddOutput("info", message)
+		m.AddOutput("info", fmt.Sprintf("A new version of SmokedMeat is available (%s)", config.LatestVersion))
 	}
 
 	m.updatePlaceholder()
