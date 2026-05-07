@@ -193,9 +193,12 @@ endef
 # =============================================================================
 
 QUICKSTART_BROWSER_PORT_DEFAULT := 18180
-QUICKSTART_BROWSER_PORT_FILE := /tmp/smokedmeat-kitchen-browser-port
-QUICKSTART_TUNNEL_URL_FILE := /tmp/smokedmeat-quickstart-tunnel-url
-QUICKSTART_COMPOSE := KITCHEN_BROWSER_PORT=$$(cat $(QUICKSTART_BROWSER_PORT_FILE) 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)) DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose -p smokedmeat-qs -f deployments/docker-compose.quickstart.yml
+SMOKEDMEAT_RUNTIME_DIR ?= $(HOME)/.smokedmeat/run
+QUICKSTART_BROWSER_PORT_FILE := $(SMOKEDMEAT_RUNTIME_DIR)/quickstart-kitchen-browser-port
+QUICKSTART_TUNNEL_URL_FILE := $(SMOKEDMEAT_RUNTIME_DIR)/quickstart-tunnel-url
+QUICKSTART_LEGACY_BROWSER_PORT_FILE := /tmp/smokedmeat-kitchen-browser-port
+QUICKSTART_LEGACY_TUNNEL_URL_FILE := /tmp/smokedmeat-quickstart-tunnel-url
+QUICKSTART_COMPOSE := KITCHEN_BROWSER_PORT=$$(cat "$(QUICKSTART_BROWSER_PORT_FILE)" 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)) DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose -p smokedmeat-qs -f deployments/docker-compose.quickstart.yml
 QUICKSTART_RELEASE_CONFIG := configs/quickstart-release.mk
 -include $(QUICKSTART_RELEASE_CONFIG)
 QUICKSTART_RELEASE_VERSION ?=
@@ -212,9 +215,11 @@ QUICKSTART_RELEASE_CACHE_DIR := $(HOME)/.smokedmeat/releases/$(QUICKSTART_RELEAS
 QUICKSTART_RELEASE_DOWNLOAD_DIR := $(QUICKSTART_RELEASE_CACHE_DIR)/downloads
 QUICKSTART_RELEASE_BIN_DIR := $(QUICKSTART_RELEASE_CACHE_DIR)/counter
 QUICKSTART_RELEASE_COUNTER_BIN := $(QUICKSTART_RELEASE_BIN_DIR)/counter
-QUICKSTART_ACTIVE_VERSION_FILE := /tmp/smokedmeat-quickstart-release-version
+QUICKSTART_ACTIVE_VERSION_FILE := $(SMOKEDMEAT_RUNTIME_DIR)/quickstart-release-version
 QUICKSTART_AUTH_TOKEN_FILE := $(HOME)/.smokedmeat/quickstart-auth-token
-QUICKSTART_CLOUD_SHELL_PULL_PID_FILE := /tmp/smokedmeat-quickstart-cloud-shell-pull.pid
+QUICKSTART_CLOUD_SHELL_PULL_PID_FILE := $(SMOKEDMEAT_RUNTIME_DIR)/quickstart-cloud-shell-pull.pid
+QUICKSTART_LEGACY_ACTIVE_VERSION_FILE := /tmp/smokedmeat-quickstart-release-version
+QUICKSTART_LEGACY_CLOUD_SHELL_PULL_PID_FILE := /tmp/smokedmeat-quickstart-cloud-shell-pull.pid
 QUICKSTART_COUNTER_DARWIN_ARM64_SHA256 ?=
 QUICKSTART_COUNTER_DARWIN_X86_64_SHA256 ?=
 QUICKSTART_COUNTER_LINUX_ARM64_SHA256 ?=
@@ -225,7 +230,7 @@ QUICKSTART_KITCHEN_IMAGE_REF ?=
 QUICKSTART_CLOUD_SHELL_IMAGE_REF ?=
 QUICKSTART_KITCHEN_IMAGE := $(if $(strip $(QUICKSTART_KITCHEN_IMAGE_REF)),$(QUICKSTART_KITCHEN_IMAGE_REF),$(QUICKSTART_RELEASE_REGISTRY)/smokedmeat-kitchen:$(QUICKSTART_RELEASE_VERSION))
 QUICKSTART_CLOUD_SHELL_IMAGE := $(if $(strip $(QUICKSTART_CLOUD_SHELL_IMAGE_REF)),$(QUICKSTART_CLOUD_SHELL_IMAGE_REF),$(QUICKSTART_RELEASE_REGISTRY)/smokedmeat-cloud-shell:$(QUICKSTART_RELEASE_VERSION))
-QUICKSTART_RELEASE_COMPOSE := AUTH_TOKEN=$$(cat $(QUICKSTART_AUTH_TOKEN_FILE) 2>/dev/null || true) SMOKEDMEAT_KITCHEN_IMAGE=$(QUICKSTART_KITCHEN_IMAGE) KITCHEN_BROWSER_PORT=$$(cat $(QUICKSTART_BROWSER_PORT_FILE) 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)) docker compose -p smokedmeat-qs -f deployments/docker-compose.quickstart.release.yml
+QUICKSTART_RELEASE_COMPOSE := AUTH_TOKEN=$$(cat "$(QUICKSTART_AUTH_TOKEN_FILE)" 2>/dev/null || true) SMOKEDMEAT_KITCHEN_IMAGE=$(QUICKSTART_KITCHEN_IMAGE) KITCHEN_BROWSER_PORT=$$(cat "$(QUICKSTART_BROWSER_PORT_FILE)" 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)) docker compose -p smokedmeat-qs -f deployments/docker-compose.quickstart.release.yml
 SEMVER_TAG_PATTERN := ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$$
 RELEASE_VERSION ?= dev
 RELEASE_COMMIT ?= none
@@ -245,9 +250,9 @@ UPX_TOOL_IMAGE := smokedmeat-upx:5.1.1-r1
 UPX_DOCKERFILE := deployments/Dockerfile.upx
 RELEASE_KITCHEN_AGENT_LDFLAGS := -w -s -extldflags "-static" -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Version=$(RELEASE_VERSION) -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Commit=$(RELEASE_COMMIT) -X github.com/boostsecurityio/smokedmeat/internal/buildinfo.Date=$(RELEASE_DATE)
 E2E_BROWSER_PORT_DEFAULT := 18280
-E2E_BROWSER_PORT_FILE := /tmp/smokedmeat-e2e-kitchen-browser-port
-E2E_TUNNEL_URL_FILE := /tmp/smokedmeat-e2e-tunnel-url
-E2E_COMPOSE := KITCHEN_BROWSER_PORT=$$(cat $(E2E_BROWSER_PORT_FILE) 2>/dev/null || echo $(E2E_BROWSER_PORT_DEFAULT)) DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose -p smokedmeat-e2e -f deployments/docker-compose.e2e.yml
+E2E_BROWSER_PORT_FILE := $(SMOKEDMEAT_RUNTIME_DIR)/e2e-kitchen-browser-port
+E2E_TUNNEL_URL_FILE := $(SMOKEDMEAT_RUNTIME_DIR)/e2e-tunnel-url
+E2E_COMPOSE := KITCHEN_BROWSER_PORT=$$(cat "$(E2E_BROWSER_PORT_FILE)" 2>/dev/null || echo $(E2E_BROWSER_PORT_DEFAULT)) DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose -p smokedmeat-e2e -f deployments/docker-compose.e2e.yml
 E2E_ENV := .claude/e2e/.env
 E2E_TMUX_SOCKET := smokedmeat-e2e
 E2E_TMUX := tmux -L $(E2E_TMUX_SOCKET)
@@ -336,16 +341,56 @@ define require_semver_tag_version
 endef
 
 define ensure_quickstart_auth_token
-	@mkdir -p $(HOME)/.smokedmeat
-	@if ! grep -qE '^[0-9a-f]{64}$$' $(QUICKSTART_AUTH_TOKEN_FILE) 2>/dev/null; then \
-		TOKEN=$$(openssl rand -hex 32 2>/dev/null) || true; \
-		if ! echo "$$TOKEN" | grep -qE '^[0-9a-f]{64}$$'; then \
+	@mkdir -p "$(HOME)/.smokedmeat" "$(SMOKEDMEAT_RUNTIME_DIR)"
+	@CURRENT_TOKEN=$$(cat "$(QUICKSTART_AUTH_TOKEN_FILE)" 2>/dev/null || true); \
+	KITCHEN_CONTAINER=$$(docker ps --filter label=com.docker.compose.project=smokedmeat-qs --filter label=com.docker.compose.service=kitchen -q 2>/dev/null | head -1); \
+	RUNNING_TOKEN=""; \
+	if [ -n "$$KITCHEN_CONTAINER" ]; then \
+		RUNNING_TOKEN=$$(docker inspect "$$KITCHEN_CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | awk -F= '$$1 == "AUTH_TOKEN" {print substr($$0, 12); exit}'); \
+	fi; \
+	if echo "$$RUNNING_TOKEN" | grep -qE '^[0-9a-f]{64}$$' && [ "$$CURRENT_TOKEN" != "$$RUNNING_TOKEN" ]; then \
+		echo "$$RUNNING_TOKEN" > "$(QUICKSTART_AUTH_TOKEN_FILE)"; \
+		chmod 600 "$(QUICKSTART_AUTH_TOKEN_FILE)"; \
+		printf "\033[1;34m[auth]\033[0m Adopted quickstart auth token from running Kitchen in \033[36m%s\033[0m\n" "$(QUICKSTART_AUTH_TOKEN_FILE)"; \
+	elif ! echo "$$CURRENT_TOKEN" | grep -qE '^[0-9a-f]{64}$$'; then \
+		NEW_TOKEN=$$(openssl rand -hex 32 2>/dev/null) || true; \
+		if ! echo "$$NEW_TOKEN" | grep -qE '^[0-9a-f]{64}$$'; then \
 			echo "ERROR: Failed to generate secure quickstart token (is openssl installed?)"; \
 			exit 1; \
 		fi; \
-		echo "$$TOKEN" > $(QUICKSTART_AUTH_TOKEN_FILE); \
-		chmod 600 $(QUICKSTART_AUTH_TOKEN_FILE); \
+		echo "$$NEW_TOKEN" > "$(QUICKSTART_AUTH_TOKEN_FILE)"; \
+		chmod 600 "$(QUICKSTART_AUTH_TOKEN_FILE)"; \
 		printf "\033[1;34m[auth]\033[0m Generated quickstart auth token in \033[36m%s\033[0m\n" "$(QUICKSTART_AUTH_TOKEN_FILE)"; \
+	fi
+endef
+
+define migrate_quickstart_runtime_state
+	@mkdir -p "$(SMOKEDMEAT_RUNTIME_DIR)"
+	@MIGRATED=0; \
+	STALE=""; \
+	for pair in \
+		"$(QUICKSTART_LEGACY_BROWSER_PORT_FILE)|$(QUICKSTART_BROWSER_PORT_FILE)" \
+		"$(QUICKSTART_LEGACY_TUNNEL_URL_FILE)|$(QUICKSTART_TUNNEL_URL_FILE)" \
+		"$(QUICKSTART_LEGACY_ACTIVE_VERSION_FILE)|$(QUICKSTART_ACTIVE_VERSION_FILE)" \
+		"$(QUICKSTART_LEGACY_CLOUD_SHELL_PULL_PID_FILE)|$(QUICKSTART_CLOUD_SHELL_PULL_PID_FILE)"; do \
+		LEGACY=$${pair%%|*}; \
+		CURRENT=$${pair#*|}; \
+		if [ ! -f "$$CURRENT" ] && [ -r "$$LEGACY" ]; then \
+			cp "$$LEGACY" "$$CURRENT" 2>/dev/null && MIGRATED=1 || true; \
+		fi; \
+		if [ -e "$$LEGACY" ]; then \
+			rm -f "$$LEGACY" 2>/dev/null || true; \
+		fi; \
+		if [ -e "$$LEGACY" ]; then \
+			STALE="$$STALE $$LEGACY"; \
+		fi; \
+	done; \
+	if [ "$$MIGRATED" = "1" ]; then \
+		printf "\033[1;34m[compat]\033[0m Migrated legacy quickstart state to \033[36m%s\033[0m\n" "$(SMOKEDMEAT_RUNTIME_DIR)"; \
+	fi; \
+	if [ -n "$$STALE" ]; then \
+		printf "\033[1;33m[compat]\033[0m Legacy quickstart state is owned by another account and will be ignored: %s\n" "$$STALE"; \
+		printf "  \033[90mClean it up from the owning account with: \033[36mrm -f%s\033[0m\n" "$$STALE"; \
 	fi
 endef
 
@@ -433,6 +478,7 @@ worktree-prune:
 	@git worktree prune
 
 define warm_quickstart_release_image
+	@mkdir -p "$(SMOKEDMEAT_RUNTIME_DIR)"
 	@IMAGE_REF="$(1)"; \
 	IMAGE_LABEL="$(2)"; \
 	if docker image inspect "$$IMAGE_REF" >/dev/null 2>&1; then \
@@ -454,7 +500,7 @@ endef
 define wait_for_release_quickstart_tunnel_health
 	@LAST_KITCHEN=""; \
 	LAST_CODE=""; \
-	BROWSER_PORT=$$(cat $(QUICKSTART_BROWSER_PORT_FILE) 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)); \
+	BROWSER_PORT=$$(cat "$(QUICKSTART_BROWSER_PORT_FILE)" 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)); \
 	for i in $$(seq 1 60); do \
 		if [ "$$i" = "1" ]; then \
 			printf "\033[1;33m[quickstart]\033[0m \033[36mWaiting for quickstart Kitchen and tunnel readiness...\033[0m\n"; \
@@ -518,7 +564,7 @@ endef
 define wait_for_quickstart_tunnel_health
 	@LAST_KITCHEN=""; \
 	LAST_CODE=""; \
-	BROWSER_PORT=$$(cat $(QUICKSTART_BROWSER_PORT_FILE) 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)); \
+	BROWSER_PORT=$$(cat "$(QUICKSTART_BROWSER_PORT_FILE)" 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)); \
 	for i in $$(seq 1 60); do \
 		if [ "$$i" = "1" ]; then \
 			echo "Waiting for quickstart Kitchen and tunnel readiness..."; \
@@ -553,6 +599,7 @@ define wait_for_quickstart_tunnel_health
 endef
 
 define select_quickstart_browser_port
+	@mkdir -p "$(SMOKEDMEAT_RUNTIME_DIR)"
 	@BROWSER_PORT=$${KITCHEN_BROWSER_PORT:-$(QUICKSTART_BROWSER_PORT_DEFAULT)}; \
 	while nc -z 127.0.0.1 $$BROWSER_PORT >/dev/null 2>&1; do \
 		BROWSER_PORT=$$((BROWSER_PORT + 1)); \
@@ -561,11 +608,12 @@ define select_quickstart_browser_port
 			exit 1; \
 		fi; \
 	done; \
-	echo "$$BROWSER_PORT" > $(QUICKSTART_BROWSER_PORT_FILE); \
+	echo "$$BROWSER_PORT" > "$(QUICKSTART_BROWSER_PORT_FILE)"; \
 	printf "\033[1;34m[local]\033[0m Kitchen browser URL \033[36mhttp://127.0.0.1:$$BROWSER_PORT\033[0m\n"
 endef
 
 define select_e2e_browser_port
+	@mkdir -p "$(SMOKEDMEAT_RUNTIME_DIR)"
 	@BROWSER_PORT=$${KITCHEN_BROWSER_PORT:-$(E2E_BROWSER_PORT_DEFAULT)}; \
 	while nc -z 127.0.0.1 $$BROWSER_PORT >/dev/null 2>&1; do \
 		BROWSER_PORT=$$((BROWSER_PORT + 1)); \
@@ -574,16 +622,16 @@ define select_e2e_browser_port
 			exit 1; \
 		fi; \
 	done; \
-	echo "$$BROWSER_PORT" > $(E2E_BROWSER_PORT_FILE); \
+	echo "$$BROWSER_PORT" > "$(E2E_BROWSER_PORT_FILE)"; \
 	echo "Local E2E Kitchen URL: http://127.0.0.1:$$BROWSER_PORT"
 endef
 
 define run_dev_quickstart_counter
-	@mkdir -p $(HOME)/.smokedmeat
+	@mkdir -p "$(HOME)/.smokedmeat" "$(SMOKEDMEAT_RUNTIME_DIR)"
 	@OPERATOR_TOKEN=$$(grep '^AUTH_TOKEN=' $(E2E_ENV) | cut -d= -f2) \
-	KITCHEN_URL=http://127.0.0.1:$$(cat $(QUICKSTART_BROWSER_PORT_FILE) 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)) \
-	KITCHEN_EXTERNAL_URL=$$(cat $(QUICKSTART_TUNNEL_URL_FILE)) \
-	KITCHEN_BROWSER_URL=http://127.0.0.1:$$(cat $(QUICKSTART_BROWSER_PORT_FILE) 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)) \
+	KITCHEN_URL=http://127.0.0.1:$$(cat "$(QUICKSTART_BROWSER_PORT_FILE)" 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)) \
+	KITCHEN_EXTERNAL_URL=$$(cat "$(QUICKSTART_TUNNEL_URL_FILE)") \
+	KITCHEN_BROWSER_URL=http://127.0.0.1:$$(cat "$(QUICKSTART_BROWSER_PORT_FILE)" 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)) \
 	COLORTERM=$${COLORTERM:-truecolor} \
 	env -u NO_COLOR go run ./cmd/counter
 endef
@@ -659,15 +707,15 @@ define ensure_quickstart_release_binaries
 endef
 
 define run_quickstart_counter
-	@mkdir -p $(HOME)/.smokedmeat
+	@mkdir -p "$(HOME)/.smokedmeat" "$(SMOKEDMEAT_RUNTIME_DIR)"
 	@COUNTER_BIN="$(QUICKSTART_RELEASE_COUNTER_BIN)"; \
 	if [ ! -x "$$COUNTER_BIN" ] && [ -x "$$COUNTER_BIN.exe" ]; then \
 		COUNTER_BIN="$$COUNTER_BIN.exe"; \
 	fi; \
-	OPERATOR_TOKEN=$$(cat $(QUICKSTART_AUTH_TOKEN_FILE)) \
-	KITCHEN_URL=http://127.0.0.1:$$(cat $(QUICKSTART_BROWSER_PORT_FILE) 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)) \
-	KITCHEN_EXTERNAL_URL=$$(cat $(QUICKSTART_TUNNEL_URL_FILE)) \
-	KITCHEN_BROWSER_URL=http://127.0.0.1:$$(cat $(QUICKSTART_BROWSER_PORT_FILE) 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)) \
+	OPERATOR_TOKEN=$$(cat "$(QUICKSTART_AUTH_TOKEN_FILE)") \
+	KITCHEN_URL=http://127.0.0.1:$$(cat "$(QUICKSTART_BROWSER_PORT_FILE)" 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)) \
+	KITCHEN_EXTERNAL_URL=$$(cat "$(QUICKSTART_TUNNEL_URL_FILE)") \
+	KITCHEN_BROWSER_URL=http://127.0.0.1:$$(cat "$(QUICKSTART_BROWSER_PORT_FILE)" 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)) \
 	SMOKEDMEAT_CLOUD_SHELL_IMAGE=$(QUICKSTART_CLOUD_SHELL_IMAGE) \
 	COLORTERM=$${COLORTERM:-truecolor} \
 	env -u NO_COLOR "$$COUNTER_BIN"
@@ -689,7 +737,7 @@ endef
 
 define wait_for_quickstart_kitchen_health
 	@LAST_CODE=""; \
-	BROWSER_PORT=$$(cat $(QUICKSTART_BROWSER_PORT_FILE) 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)); \
+	BROWSER_PORT=$$(cat "$(QUICKSTART_BROWSER_PORT_FILE)" 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)); \
 	for i in $$(seq 1 30); do \
 		if [ "$$i" = "1" ]; then \
 			echo "Waiting for quickstart Kitchen readiness..."; \
@@ -718,10 +766,12 @@ endef
 
 quickstart:
 	$(call ensure_quickstart_release_pin)
+	$(call migrate_quickstart_runtime_state)
+	$(call ensure_quickstart_auth_token)
 	$(call print_release_quickstart_banner)
-	@BROWSER_PORT=$$(cat $(QUICKSTART_BROWSER_PORT_FILE) 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)); \
-	TUNNEL_URL=$$(cat $(QUICKSTART_TUNNEL_URL_FILE) 2>/dev/null || true); \
-	ACTIVE_VERSION=$$(cat $(QUICKSTART_ACTIVE_VERSION_FILE) 2>/dev/null || true); \
+	@BROWSER_PORT=$$(cat "$(QUICKSTART_BROWSER_PORT_FILE)" 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)); \
+	TUNNEL_URL=$$(cat "$(QUICKSTART_TUNNEL_URL_FILE)" 2>/dev/null || true); \
+	ACTIVE_VERSION=$$(cat "$(QUICKSTART_ACTIVE_VERSION_FILE)" 2>/dev/null || true); \
 	CODE=$$(curl -sk --connect-timeout 2 --max-time 3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$$BROWSER_PORT/health" || true); \
 	if [ -n "$$TUNNEL_URL" ] && [ "$$CODE" = "200" ] && [ "$$ACTIVE_VERSION" = "$(QUICKSTART_RELEASE_VERSION)" ]; then \
 		printf "\033[1;35m[reuse]\033[0m Reusing running SmokedMeat quick start %s.\n" "$(QUICKSTART_RELEASE_TAG)"; \
@@ -736,11 +786,12 @@ quickstart:
 
 quickstart-up:
 	$(call ensure_quickstart_release_pin)
+	$(call migrate_quickstart_runtime_state)
 	$(call ensure_quickstart_auth_token)
 	$(call print_release_quickstart_banner)
 	$(call print_quickstart_step,Starting SmokedMeat quick start $(QUICKSTART_RELEASE_TAG)...)
-	@mkdir -p $(HOME)/.smokedmeat
-	@rm -f $(QUICKSTART_TUNNEL_URL_FILE)
+	@mkdir -p "$(HOME)/.smokedmeat" "$(SMOKEDMEAT_RUNTIME_DIR)"
+	@rm -f "$(QUICKSTART_TUNNEL_URL_FILE)"
 	$(call select_quickstart_browser_port)
 	$(call print_quickstart_step,Preparing Docker services...)
 	$(call print_quickstart_note,nats carries orders and beacons between Kitchen and agents.)
@@ -766,8 +817,8 @@ quickstart-up:
 	if [ -n "$$TUNNEL_URL" ]; then \
 		printf "\033[1;32m[tunnel]\033[0m \033[36m%s\033[0m\n" "$$TUNNEL_URL"; \
 		echo ""; \
-		echo "$$TUNNEL_URL" > $(QUICKSTART_TUNNEL_URL_FILE); \
-		echo "$(QUICKSTART_RELEASE_VERSION)" > $(QUICKSTART_ACTIVE_VERSION_FILE); \
+		echo "$$TUNNEL_URL" > "$(QUICKSTART_TUNNEL_URL_FILE)"; \
+		echo "$(QUICKSTART_RELEASE_VERSION)" > "$(QUICKSTART_ACTIVE_VERSION_FILE)"; \
 	else \
 		echo "ERROR: Could not find tunnel URL"; \
 		$(QUICKSTART_RELEASE_COMPOSE) logs cloudflared; \
@@ -777,8 +828,9 @@ quickstart-up:
 
 quickstart-counter:
 	$(call ensure_quickstart_release_pin)
+	$(call migrate_quickstart_runtime_state)
 	$(call print_release_quickstart_banner)
-	@if [ ! -f $(QUICKSTART_TUNNEL_URL_FILE) ]; then \
+	@if [ ! -f "$(QUICKSTART_TUNNEL_URL_FILE)" ]; then \
 		echo "Run 'make quickstart-up' first"; \
 		exit 1; \
 	fi
@@ -791,17 +843,19 @@ quickstart-counter:
 
 quickstart-down:
 	$(call ensure_quickstart_release_pin)
+	$(call migrate_quickstart_runtime_state)
 	$(QUICKSTART_RELEASE_COMPOSE) down
-	rm -f $(QUICKSTART_TUNNEL_URL_FILE)
-	rm -f $(QUICKSTART_BROWSER_PORT_FILE)
-	rm -f $(QUICKSTART_ACTIVE_VERSION_FILE)
+	rm -f "$(QUICKSTART_TUNNEL_URL_FILE)"
+	rm -f "$(QUICKSTART_BROWSER_PORT_FILE)"
+	rm -f "$(QUICKSTART_ACTIVE_VERSION_FILE)"
 
 quickstart-purge:
 	$(call ensure_quickstart_release_pin)
+	$(call migrate_quickstart_runtime_state)
 	$(QUICKSTART_RELEASE_COMPOSE) down -v
-	rm -f $(QUICKSTART_TUNNEL_URL_FILE)
-	rm -f $(QUICKSTART_BROWSER_PORT_FILE)
-	rm -f $(QUICKSTART_ACTIVE_VERSION_FILE)
+	rm -f "$(QUICKSTART_TUNNEL_URL_FILE)"
+	rm -f "$(QUICKSTART_BROWSER_PORT_FILE)"
+	rm -f "$(QUICKSTART_ACTIVE_VERSION_FILE)"
 
 quickstart-version:
 	@if [ -z "$(strip $(QUICKSTART_RELEASE_VERSION))" ]; then \
@@ -941,8 +995,9 @@ tag:
 	@echo "Tagged, signed, and pushed $(VERSION)"
 
 dev-quickstart:
-	@BROWSER_PORT=$$(cat $(QUICKSTART_BROWSER_PORT_FILE) 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)); \
-	TUNNEL_URL=$$(cat $(QUICKSTART_TUNNEL_URL_FILE) 2>/dev/null || true); \
+	$(call migrate_quickstart_runtime_state)
+	@BROWSER_PORT=$$(cat "$(QUICKSTART_BROWSER_PORT_FILE)" 2>/dev/null || echo $(QUICKSTART_BROWSER_PORT_DEFAULT)); \
+	TUNNEL_URL=$$(cat "$(QUICKSTART_TUNNEL_URL_FILE)" 2>/dev/null || true); \
 	CODE=$$(curl -sk --connect-timeout 2 --max-time 3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$$BROWSER_PORT/health" || true); \
 	if [ -n "$$TUNNEL_URL" ] && [ "$$CODE" = "200" ]; then \
 		echo "Reusing running SmokedMeat dev quick start."; \
@@ -954,11 +1009,12 @@ dev-quickstart:
 	$(call run_dev_quickstart_counter)
 
 dev-quickstart-up:
+	$(call migrate_quickstart_runtime_state)
 	@$(call ensure_cloud_shell_image)
 	@echo "Starting SmokedMeat dev quick start..."
 	$(call ensure_auth_token)
-	@mkdir -p $(HOME)/.smokedmeat
-	@rm -f $(QUICKSTART_TUNNEL_URL_FILE)
+	@mkdir -p "$(HOME)/.smokedmeat" "$(SMOKEDMEAT_RUNTIME_DIR)"
+	@rm -f "$(QUICKSTART_TUNNEL_URL_FILE)"
 	$(call select_quickstart_browser_port)
 	@AUTH_TOKEN=$$(grep '^AUTH_TOKEN=' $(E2E_ENV) | cut -d= -f2) \
 	$(QUICKSTART_COMPOSE) up -d --build cloudflared nats
@@ -982,7 +1038,7 @@ dev-quickstart-up:
 		echo ""; \
 		echo "Tunnel URL: $$TUNNEL_URL"; \
 		echo ""; \
-		echo "$$TUNNEL_URL" > $(QUICKSTART_TUNNEL_URL_FILE); \
+		echo "$$TUNNEL_URL" > "$(QUICKSTART_TUNNEL_URL_FILE)"; \
 	else \
 		echo "ERROR: Could not find tunnel URL"; \
 		$(QUICKSTART_COMPOSE) logs cloudflared; \
@@ -996,7 +1052,8 @@ dev-quickstart-refresh:
 	$(call wait_for_quickstart_kitchen_health)
 
 dev-quickstart-counter:
-	@if [ ! -f $(QUICKSTART_TUNNEL_URL_FILE) ]; then \
+	$(call migrate_quickstart_runtime_state)
+	@if [ ! -f "$(QUICKSTART_TUNNEL_URL_FILE)" ]; then \
 		echo "Run 'make dev-quickstart-up' first"; \
 		exit 1; \
 	fi
@@ -1004,14 +1061,16 @@ dev-quickstart-counter:
 	$(call run_dev_quickstart_counter)
 
 dev-quickstart-down:
+	$(call migrate_quickstart_runtime_state)
 	$(QUICKSTART_COMPOSE) down
-	rm -f $(QUICKSTART_TUNNEL_URL_FILE)
-	rm -f $(QUICKSTART_BROWSER_PORT_FILE)
+	rm -f "$(QUICKSTART_TUNNEL_URL_FILE)"
+	rm -f "$(QUICKSTART_BROWSER_PORT_FILE)"
 
 dev-quickstart-purge:
+	$(call migrate_quickstart_runtime_state)
 	$(QUICKSTART_COMPOSE) down -v
-	rm -f $(QUICKSTART_TUNNEL_URL_FILE)
-	rm -f $(QUICKSTART_BROWSER_PORT_FILE)
+	rm -f "$(QUICKSTART_TUNNEL_URL_FILE)"
+	rm -f "$(QUICKSTART_BROWSER_PORT_FILE)"
 
 # =============================================================================
 # Counter (Remote Kitchen)
@@ -1134,7 +1193,7 @@ e2e-up:
 		$(E2E_COMPOSE) logs cloudflared; \
 		exit 1; \
 	fi; \
-	E2E_KITCHEN_URL=http://127.0.0.1:$$(cat $(E2E_BROWSER_PORT_FILE) 2>/dev/null || echo $(E2E_BROWSER_PORT_DEFAULT)); \
+	E2E_KITCHEN_URL=http://127.0.0.1:$$(cat "$(E2E_BROWSER_PORT_FILE)" 2>/dev/null || echo $(E2E_BROWSER_PORT_DEFAULT)); \
 	grep -v '^KITCHEN_URL=' $(E2E_ENV) | grep -v '^KITCHEN_EXTERNAL_URL=' > $(E2E_ENV).tmp 2>/dev/null || true; \
 	echo "KITCHEN_URL=$$E2E_KITCHEN_URL" >> $(E2E_ENV).tmp; \
 	echo "KITCHEN_EXTERNAL_URL=$$TUNNEL_URL" >> $(E2E_ENV).tmp; \
@@ -1142,24 +1201,24 @@ e2e-up:
 	echo ""; \
 	echo "Kitchen URL: $$E2E_KITCHEN_URL"; \
 	echo "Tunnel URL: $$TUNNEL_URL"; \
-	echo "$$TUNNEL_URL" > $(E2E_TUNNEL_URL_FILE)
+	echo "$$TUNNEL_URL" > "$(E2E_TUNNEL_URL_FILE)"
 	$(call wait_for_tunnel_health)
 	@echo "E2E infrastructure ready. Tunnel URL:"
-	@cat $(E2E_TUNNEL_URL_FILE)
+	@cat "$(E2E_TUNNEL_URL_FILE)"
 
 e2e-down:
 	$(E2E_COMPOSE) down
 	@tmux kill-session -t $(E2E_SESSION) 2>/dev/null || true
 	@$(E2E_TMUX) kill-server 2>/dev/null || true
-	rm -f $(E2E_TUNNEL_URL_FILE)
-	rm -f $(E2E_BROWSER_PORT_FILE)
+	rm -f "$(E2E_TUNNEL_URL_FILE)"
+	rm -f "$(E2E_BROWSER_PORT_FILE)"
 
 e2e-purge:
 	$(E2E_COMPOSE) down -v
 	@tmux kill-session -t $(E2E_SESSION) 2>/dev/null || true
 	@$(E2E_TMUX) kill-server 2>/dev/null || true
-	rm -f $(E2E_TUNNEL_URL_FILE)
-	rm -f $(E2E_BROWSER_PORT_FILE)
+	rm -f "$(E2E_TUNNEL_URL_FILE)"
+	rm -f "$(E2E_BROWSER_PORT_FILE)"
 	@rm -rf ./data/kitchen.db
 
 e2e-counter:
