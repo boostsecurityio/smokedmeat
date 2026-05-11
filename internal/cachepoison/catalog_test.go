@@ -408,6 +408,28 @@ func TestComputeSetupGoEntry(t *testing.T) {
 	assert.Equal(t, CalculateCacheVersion([]string{moduleCache, buildCache}), version)
 }
 
+func TestComputeSetupGoEntry_LinuxWithoutImageOS(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.sum"), []byte("example.com/mod v1.0.0 h1:abc\n"), 0o644))
+
+	moduleCache := filepath.Join(root, "gomodcache")
+	buildCache := filepath.Join(root, "gocache")
+	require.NoError(t, os.MkdirAll(moduleCache, 0o755))
+	require.NoError(t, os.MkdirAll(buildCache, 0o755))
+	t.Setenv("RUNNER_OS", "Linux")
+	t.Setenv("RUNNER_ARCH", "x64")
+	t.Setenv("GOMODCACHE", moduleCache)
+	t.Setenv("GOCACHE", buildCache)
+
+	key, version, err := ComputeSetupGoEntry(root, "1.24.3", "go.sum")
+	require.NoError(t, err)
+
+	fileHash, err := HashFiles(root, []string{"go.sum"})
+	require.NoError(t, err)
+	assert.Equal(t, "setup-go-Linux-x64--go-1.24.3-"+fileHash, key)
+	assert.Equal(t, CalculateCacheVersion([]string{moduleCache, buildCache}), version)
+}
+
 func TestComputeSetupGoEntry_DefaultsToGoSum(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "go.sum"), []byte("example.com/mod v1.0.0 h1:abc\n"), 0o644))

@@ -10,8 +10,11 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 type LinuxScanner struct{}
@@ -41,6 +44,24 @@ func (ls *LinuxScanner) Scan(pid int, results chan<- Result) error {
 }
 
 func (ls *LinuxScanner) ScanWithStats(pid int, results chan<- Result) (ScanStats, error) {
+	stats, err := ls.scanWithStatsCurrentCreds(pid, results)
+	if !linuxScanShouldRetryWithTargetFSIDs(stats, err) {
+		return stats, err
+	}
+
+	retryStats, retryErr := scanWithLinuxTargetFSIDs(pid, func() (ScanStats, error) {
+		return ls.scanWithStatsCurrentCreds(pid, results)
+	})
+	if retryErr == nil || retryStats.BytesRead > 0 {
+		return retryStats, retryErr
+	}
+	if err != nil {
+		return stats, err
+	}
+	return retryStats, retryErr
+}
+
+func (ls *LinuxScanner) scanWithStatsCurrentCreds(pid int, results chan<- Result) (ScanStats, error) {
 	var stats ScanStats
 
 	mapPath := fmt.Sprintf("/proc/%d/maps", pid)
@@ -92,6 +113,75 @@ func (ls *LinuxScanner) ScanWithStats(pid int, results chan<- Result) (ScanStats
 		return stats, err
 	}
 	return stats, nil
+}
+
+func linuxScanShouldRetryWithTargetFSIDs(stats ScanStats, err error) bool {
+	if os.Geteuid() != 0 {
+		return false
+	}
+	if err != nil {
+		return os.IsPermission(err)
+	}
+	return stats.BytesRead == 0 && stats.ReadErrors > 0
+}
+
+func scanWithLinuxTargetFSIDs(pid int, scan func() (ScanStats, error)) (ScanStats, error) {
+	uid, gid, err := linuxProcessUIDGID(pid)
+	if err != nil {
+		return ScanStats{}, err
+	}
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	previousGID, err := unix.SetfsgidRetGid(gid)
+	if err != nil {
+		return ScanStats{}, err
+	}
+	previousUID, err := unix.SetfsuidRetUid(uid)
+	if err != nil {
+		_ = unix.Setfsgid(previousGID)
+		return ScanStats{}, err
+	}
+	defer func() {
+		_ = unix.Setfsuid(previousUID)
+		_ = unix.Setfsgid(previousGID)
+	}()
+
+	return scan()
+}
+
+func linuxProcessUIDGID(pid int) (int, int, error) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return 0, 0, err
+	}
+	return linuxProcessUIDGIDFromStatus(string(data))
+}
+
+func linuxProcessUIDGIDFromStatus(status string) (int, int, error) {
+	uid := -1
+	gid := -1
+	for _, line := range strings.Split(status, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		var err error
+		switch fields[0] {
+		case "Uid:":
+			uid, err = strconv.Atoi(fields[1])
+		case "Gid:":
+			gid, err = strconv.Atoi(fields[1])
+		}
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	if uid < 0 || gid < 0 {
+		return 0, 0, fmt.Errorf("process uid/gid not found")
+	}
+	return uid, gid, nil
 }
 
 func shouldScanLinuxMapping(fields []string) bool {
