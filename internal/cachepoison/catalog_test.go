@@ -418,6 +418,7 @@ func TestComputeSetupGoEntry_LinuxWithoutImageOS(t *testing.T) {
 	require.NoError(t, os.MkdirAll(buildCache, 0o755))
 	t.Setenv("RUNNER_OS", "Linux")
 	t.Setenv("RUNNER_ARCH", "x64")
+	t.Setenv("ImageOS", "")
 	t.Setenv("GOMODCACHE", moduleCache)
 	t.Setenv("GOCACHE", buildCache)
 
