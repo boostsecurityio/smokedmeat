@@ -33,6 +33,7 @@ type Endpoint struct {
 	InternalKey string
 	EnvName     string
 	Value       string
+	Source      string `json:"source,omitempty"`
 }
 
 type Scanner interface {

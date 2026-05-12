@@ -54,3 +54,21 @@ func TestShouldScanLinuxMapping(t *testing.T) {
 		})
 	}
 }
+
+func TestLinuxProcessUIDGIDFromStatus(t *testing.T) {
+	status := "Name:\tRunner.Worker\nUid:\t1001\t1001\t1001\t1001\nGid:\t1002\t1002\t1002\t1002\n"
+
+	uid, gid, err := linuxProcessUIDGIDFromStatus(status)
+	if err != nil {
+		t.Fatalf("linuxProcessUIDGIDFromStatus returned error: %v", err)
+	}
+	if uid != 1001 || gid != 1002 {
+		t.Fatalf("linuxProcessUIDGIDFromStatus = (%d, %d), want (1001, 1002)", uid, gid)
+	}
+}
+
+func TestLinuxProcessUIDGIDFromStatusMissingFields(t *testing.T) {
+	if _, _, err := linuxProcessUIDGIDFromStatus("Name:\tRunner.Worker\n"); err == nil {
+		t.Fatal("expected missing uid/gid error")
+	}
+}

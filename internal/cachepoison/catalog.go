@@ -576,9 +576,7 @@ func ComputeSetupGoEntry(root, versionSpec, dependencyPath string) (key, version
 	arch := setupGoArch()
 	linuxVersion := ""
 	if platform == "Linux" {
-		if imageOS := strings.TrimSpace(os.Getenv("ImageOS")); imageOS != "" {
-			linuxVersion = imageOS + "-"
-		}
+		linuxVersion = strings.TrimSpace(os.Getenv("ImageOS")) + "-"
 	}
 
 	key = fmt.Sprintf("setup-go-%s-%s-%sgo-%s-%s", platform, arch, linuxVersion, versionSpec, fileHash)
