@@ -95,6 +95,8 @@ type Handler struct {
 	pantry         *pantry.Pantry
 	auth           *auth.Auth
 	preflightCache *deployPreflightCache
+	sourceCache    *sourceCache
+	sourceTokens   *sourceTokenCache
 	analysisMu     sync.Mutex
 	analysisRuns   map[string]*cachedAnalysisResult
 }
@@ -107,6 +109,8 @@ func NewHandler(publisher *pass.Publisher, store *OrderStore, sessions *SessionR
 		stagerStore:    NewStagerStore(DefaultStagerStoreConfig()),
 		sessions:       sessions,
 		preflightCache: newDeployPreflightCache(),
+		sourceCache:    newMemorySourceCache(),
+		sourceTokens:   newSourceTokenCache(),
 		analysisRuns:   make(map[string]*cachedAnalysisResult),
 	}
 }
@@ -119,6 +123,8 @@ func NewHandlerWithPublisher(publisher Publisher, store *OrderStore) *Handler {
 		stagerStore:    NewStagerStore(DefaultStagerStoreConfig()),
 		sessions:       NewSessionRegistry(DefaultSessionRegistryConfig()),
 		preflightCache: newDeployPreflightCache(),
+		sourceCache:    newMemorySourceCache(),
+		sourceTokens:   newSourceTokenCache(),
 		analysisRuns:   make(map[string]*cachedAnalysisResult),
 	}
 }
@@ -191,6 +197,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /github/repos/info", h.handleGitHubListReposWithInfo)
 	mux.HandleFunc("POST /github/workflows", h.handleGitHubListWorkflows)
 	mux.HandleFunc("POST /github/workflow-runs", h.handleGitHubWorkflowDispatchRun)
+	mux.HandleFunc("POST /github/source/token", h.handleGitHubSourceToken)
+	mux.HandleFunc("POST /github/source/content", h.handleGitHubSourceContent)
 	mux.HandleFunc("POST /github/user", h.handleGitHubGetUser)
 	mux.HandleFunc("POST /github/token/info", h.handleGitHubTokenInfo)
 	mux.HandleFunc("POST /github/app/installations", h.handleGitHubAppInstallations)
@@ -202,6 +210,18 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /purge", h.handlePurge)
 	mux.HandleFunc("GET /known-entities", h.handleGetKnownEntities)
 	mux.HandleFunc("POST /known-entities", h.handlePostKnownEntities)
+	mux.HandleFunc("GET /browser/session", h.handleBrowserSession)
+	mux.HandleFunc("GET /viewer/session", h.handleSourceViewerSession)
+	mux.HandleFunc("GET /viewer/assets/{name}", h.handleBrowserAsset)
+	mux.HandleFunc("GET /viewer/github.com", h.handleSourceGraphRootViewer)
+	mux.HandleFunc("GET /viewer/github.com/", h.handleSourceGraphRootViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}", h.handleSourceOwnerViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/", h.handleSourceOwnerViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}", h.handleSourceRepositoryViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/", h.handleSourceRepositoryViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/blob/{ref}/{path...}", h.handleSourceViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/tree/{ref}", h.handleSourceTreeViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/tree/{ref}/{path...}", h.handleSourceTreeViewer)
 }
 
 // handleGetPantry returns the current attack graph state.

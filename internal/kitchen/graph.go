@@ -19,12 +19,20 @@ type graphData struct {
 }
 
 func (h *Handler) handleGraph(w http.ResponseWriter, _ *http.Request) {
+	body, err := renderGraphPage()
+	if err != nil {
+		writeGraphSecurityHeaders(w)
+		http.Error(w, "failed to render graph", http.StatusInternalServerError)
+		return
+	}
+	writeGraphSecurityHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(graphCytoscapeHTML))
+	_, _ = w.Write([]byte(body))
 }
 
 func (h *Handler) handleGraphData(w http.ResponseWriter, r *http.Request) {
+	writeGraphSecurityHeaders(w)
 	p := h.Pantry()
 	snapshot := buildGraphSnapshot(p, p.Version(), r.URL.Query().Get("mode"))
 	data := graphData{

@@ -49,6 +49,8 @@ type KitchenAPI interface {
 	ListReposWithInfo(ctx context.Context, token string) ([]RepoInfo, error)
 	ListWorkflowsWithDispatch(ctx context.Context, token, owner, repo string) ([]DispatchableWorkflow, error)
 	GetWorkflowDispatchRun(ctx context.Context, req WorkflowDispatchRunRequest) (*WorkflowDispatchRun, error)
+	RegisterSourceToken(ctx context.Context, req SourceTokenRequest) (*SourceTokenResponse, error)
+	FetchSourceContent(ctx context.Context, req SourceContentRequest) (*SourceContentResponse, error)
 	GetAuthenticatedUser(ctx context.Context, token string) (GetUserResponse, error)
 	FetchTokenInfo(ctx context.Context, token, source string) (*FetchTokenInfoResponse, error)
 	ListAppInstallations(ctx context.Context, pem, appID string) ([]AppInstallation, error)
@@ -1270,6 +1272,42 @@ type WorkflowDispatchRunResponse struct {
 	Run *WorkflowDispatchRun `json:"run,omitempty"`
 }
 
+type SourceTokenRequest struct {
+	Token     string `json:"token"`
+	Source    string `json:"source,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
+type SourceTokenResponse struct {
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type SourceContentRequest struct {
+	Token     string `json:"token,omitempty"`
+	Host      string `json:"host,omitempty"`
+	Owner     string `json:"owner"`
+	Repo      string `json:"repo"`
+	Ref       string `json:"ref,omitempty"`
+	Path      string `json:"path"`
+	Line      int    `json:"line,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
+type SourceContentResponse struct {
+	Host       string    `json:"host"`
+	Repository string    `json:"repository"`
+	Owner      string    `json:"owner"`
+	Repo       string    `json:"repo"`
+	Ref        string    `json:"ref"`
+	Path       string    `json:"path"`
+	SHA        string    `json:"sha,omitempty"`
+	HTMLURL    string    `json:"html_url,omitempty"`
+	Content    string    `json:"content"`
+	Size       int       `json:"size"`
+	FetchedAt  time.Time `json:"fetched_at"`
+	CacheHit   bool      `json:"cache_hit"`
+}
+
 type DeployPreflightRequest struct {
 	Token            string            `json:"token"`
 	Vuln             VulnerabilityInfo `json:"vuln"`
@@ -1511,6 +1549,30 @@ func (k *KitchenClient) GetWorkflowDispatchRun(ctx context.Context, req Workflow
 	var resp WorkflowDispatchRunResponse
 	err := k.doPostJSON(ctx, "/github/workflow-runs", req, &resp, 30*time.Second)
 	return resp.Run, err
+}
+
+func (k *KitchenClient) RegisterSourceToken(ctx context.Context, req SourceTokenRequest) (*SourceTokenResponse, error) {
+	if req.SessionID == "" {
+		req.SessionID = k.sessionID
+	}
+	var resp SourceTokenResponse
+	err := k.doPostJSON(ctx, "/github/source/token", req, &resp, 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (k *KitchenClient) FetchSourceContent(ctx context.Context, req SourceContentRequest) (*SourceContentResponse, error) {
+	if req.SessionID == "" {
+		req.SessionID = k.sessionID
+	}
+	var resp SourceContentResponse
+	err := k.doPostJSON(ctx, "/github/source/content", req, &resp, 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 func (k *KitchenClient) GetAuthenticatedUser(ctx context.Context, token string) (GetUserResponse, error) {

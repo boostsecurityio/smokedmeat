@@ -110,6 +110,17 @@ type PurgePreviewMsg struct {
 	Response counter.PurgeResponse
 }
 
+type SourceTokenRegisteredMsg struct{}
+
+type SourceTokenRegisterErrorMsg struct {
+	Err error
+}
+
+type SourceBrowserOpenedMsg struct {
+	URL string
+	Err error
+}
+
 type KnownEntitiesFetchedMsg struct {
 	Entities []counter.KnownEntityPayload
 }

@@ -1,0 +1,81 @@
+{{/*
+Copyright (C) 2026 boostsecurity.io
+SPDX-License-Identifier: AGPL-3.0-or-later
+*/}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/viewer/assets/source-viewer.css">
+</head>
+<body>
+<main class="page">
+{{template "sourceHeader" .Header}}
+{{template "sourceBody" .}}
+</main>
+</body>
+</html>
+
+{{define "sourceHeader"}}
+<div class="repo-bar" aria-label="{{.AriaLabel}}">
+  {{if .Description}}
+  <div>
+    {{template "sourceRepoName" .RepoName}}
+    <div class="repo-description">{{.Description}}</div>
+  </div>
+  {{else}}
+  {{template "sourceRepoName" .RepoName}}
+  {{end}}
+</div>
+<div class="file-bar">
+  <div class="file-left">
+    {{if .Ref}}<div class="ref-pill">{{.Ref}}</div>{{end}}
+    <div class="file-path">{{.PathText}}</div>
+  </div>
+  <div class="file-actions">
+    {{if .SizeText}}<span class="file-size">{{.SizeText}}</span>{{end}}
+    {{if .ParentHref}}<a class="button" href="{{.ParentHref}}">View directory</a>{{end}}
+    {{if .GitHubURL}}<a class="button" href="{{.GitHubURL}}">View on GitHub</a>{{end}}
+  </div>
+</div>
+{{end}}
+
+{{define "sourceRepoName"}}
+{{if .Repo}}
+<div class="repo-name"><a class="repo-host" href="{{.RootHref}}">github.com</a><span class="slash">/</span><a class="repo-owner" href="{{.OwnerHref}}">{{.Owner}}</a><span class="slash">/</span><a class="repo-link" href="{{.RepoHref}}"><strong>{{.Repo}}</strong></a></div>
+{{else if .Owner}}
+<div class="repo-name"><a class="repo-host" href="{{.RootHref}}">github.com</a><span class="slash">/</span><strong>{{.Owner}}</strong></div>
+{{else}}
+<div class="repo-name"><strong>github.com</strong></div>
+{{end}}
+{{end}}
+
+{{define "sourceBody"}}
+{{if .Error}}
+<div class="empty-state">{{.Error}}</div>
+{{else if .File}}
+  {{if .File.MarkdownHTML}}
+  <div class="markdown-file-view"><div class="markdown-body">{{.File.MarkdownHTML}}</div></div>
+  {{else}}
+  <div class="file-view"><table class="blob"><tbody>
+    {{range .File.Lines}}
+    <tr id="L{{.Number}}" class="line-row{{if .Highlight}} line-highlight{{end}}"><td class="line-num"><a href="#L{{.Number}}">{{.Number}}</a></td><td class="line-code"><pre>{{.Text}}</pre></td></tr>
+    {{end}}
+  </tbody></table></div>
+  {{end}}
+{{else if .Table}}
+<div class="directory-view"><table class="directory-table"><tbody>
+  {{range .Table.Rows}}
+  <tr class="directory-row"><td class="directory-type">{{.Type}}</td><td class="directory-name">{{if .Href}}<a href="{{.Href}}">{{.Name}}</a>{{else}}<span class="{{.NameClass}}">{{.Name}}</span>{{end}}{{if .Description}}<div class="repo-row-description">{{.Description}}</div>{{end}}</td><td class="directory-size">{{.Size}}</td></tr>
+  {{end}}
+</tbody></table></div>
+{{with .Table.Readme}}
+<div class="readme-view">
+  <div class="readme-title">{{.Title}}</div>
+  {{if .MarkdownHTML}}<div class="markdown-body">{{.MarkdownHTML}}</div>{{else}}<pre>{{.Text}}</pre>{{end}}
+</div>
+{{end}}
+{{end}}
+{{end}}

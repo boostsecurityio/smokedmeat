@@ -29,9 +29,11 @@ require (
 	github.com/hmdsefi/gograph v0.7.0
 	github.com/klauspost/compress v1.18.5
 	github.com/lestrrat-go/jwx/v3 v3.0.13
+	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/nats-io/nats.go v1.38.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go/modules/nats v0.40.0
+	github.com/yuin/goldmark v1.8.2
 	github.com/zricethezav/gitleaks/v8 v8.30.0
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/crypto v0.49.0
@@ -65,6 +67,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.18 // indirect
 	github.com/aws/smithy-go v1.24.1 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
+	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bodgit/plumbing v1.3.0 // indirect
 	github.com/bodgit/sevenzip v1.6.1 // indirect
 	github.com/bodgit/windows v1.0.1 // indirect
@@ -113,6 +116,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/go-github/v84 v84.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
+	github.com/gorilla/css v1.0.1 // indirect
 	github.com/h2non/filetype v1.1.3 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect

@@ -36,6 +36,12 @@ func TestExtractToken_QueryParam(t *testing.T) {
 	assert.Equal(t, "qptoken", extractToken(r))
 }
 
+func TestExtractToken_Cookie(t *testing.T) {
+	r := httptest.NewRequest("GET", "/viewer/github.com", nil)
+	r.AddCookie(&http.Cookie{Name: OperatorTokenCookie, Value: "cookietoken"})
+	assert.Equal(t, "cookietoken", extractToken(r))
+}
+
 func TestExtractToken_Empty(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	assert.Empty(t, extractToken(r))

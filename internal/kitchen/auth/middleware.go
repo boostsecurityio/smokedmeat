@@ -20,6 +20,8 @@ const (
 	AgentClaimsKey ContextKey = "agent_claims"
 	// AgentTokenHeader is the HTTP header for agent authentication.
 	AgentTokenHeader = "X-Agent-Token"
+	// OperatorTokenCookie is the cookie used by browser-only operator pages.
+	OperatorTokenCookie = "smokedmeat_operator"
 )
 
 // StagerValidator validates stager IDs. Implemented by StagerStore.
@@ -38,6 +40,10 @@ func extractToken(r *http.Request) string {
 	// Check query param (useful for WebSocket connections)
 	if token := r.URL.Query().Get("token"); token != "" {
 		return token
+	}
+
+	if cookie, err := r.Cookie(OperatorTokenCookie); err == nil && cookie.Value != "" {
+		return cookie.Value
 	}
 
 	return ""
