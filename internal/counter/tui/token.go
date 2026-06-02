@@ -340,9 +340,9 @@ func (m Model) handleTokenInfoFetched(msg TokenInfoFetchedMsg) (tea.Model, tea.C
 
 	m.refreshAuthDrivenViews()
 	if m.view == ViewWizard && m.wizard != nil {
-		return m, m.startWizardPreflight(false)
+		return m, tea.Batch(m.registerActiveSourceTokenCmd(), m.startWizardPreflight(false))
 	}
-	return m, nil
+	return m, m.registerActiveSourceTokenCmd()
 }
 
 func (m Model) handleTokenInfoError(msg TokenInfoErrorMsg) (tea.Model, tea.Cmd) {
@@ -354,9 +354,9 @@ func (m Model) handleTokenInfoError(msg TokenInfoErrorMsg) (tea.Model, tea.Cmd) 
 	m.AddOutput("warning", fmt.Sprintf("Could not fetch token info: %v", msg.Err))
 	m.refreshAuthDrivenViews()
 	if m.view == ViewWizard && m.wizard != nil {
-		return m, m.startWizardPreflight(false)
+		return m, tea.Batch(m.registerActiveSourceTokenCmd(), m.startWizardPreflight(false))
 	}
-	return m, nil
+	return m, m.registerActiveSourceTokenCmd()
 }
 
 func (m *Model) swapActiveToken(secret CollectedSecret) {

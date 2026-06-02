@@ -71,6 +71,12 @@ type mockKitchenClient struct {
 	workflowRunResp       *counter.WorkflowDispatchRun
 	workflowRunErr        error
 	lastWorkflowRunReq    counter.WorkflowDispatchRunRequest
+	sourceTokenResp       *counter.SourceTokenResponse
+	sourceTokenErr        error
+	lastSourceTokenReq    counter.SourceTokenRequest
+	sourceContentResp     *counter.SourceContentResponse
+	sourceContentErr      error
+	lastSourceContentReq  counter.SourceContentRequest
 
 	getAuthUserResp    counter.GetUserResponse
 	getAuthUserErr     error
@@ -191,6 +197,16 @@ func (m *mockKitchenClient) ListWorkflowsWithDispatch(_ context.Context, _, _, _
 func (m *mockKitchenClient) GetWorkflowDispatchRun(_ context.Context, req counter.WorkflowDispatchRunRequest) (*counter.WorkflowDispatchRun, error) {
 	m.lastWorkflowRunReq = req
 	return m.workflowRunResp, m.workflowRunErr
+}
+
+func (m *mockKitchenClient) RegisterSourceToken(_ context.Context, req counter.SourceTokenRequest) (*counter.SourceTokenResponse, error) {
+	m.lastSourceTokenReq = req
+	return m.sourceTokenResp, m.sourceTokenErr
+}
+
+func (m *mockKitchenClient) FetchSourceContent(_ context.Context, req counter.SourceContentRequest) (*counter.SourceContentResponse, error) {
+	m.lastSourceContentReq = req
+	return m.sourceContentResp, m.sourceContentErr
 }
 
 func (m *mockKitchenClient) GetAuthenticatedUser(_ context.Context, _ string) (counter.GetUserResponse, error) {

@@ -1,0 +1,56 @@
+{{/*
+Copyright (C) 2026 boostsecurity.io
+SPDX-License-Identifier: AGPL-3.0-or-later
+*/}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmokedMeat - Attack Graph</title>
+    <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+    <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+    <link rel="stylesheet" href="/graph/assets/graph.css">
+</head>
+<body>
+    <div id="cy"></div>
+    <div id="tooltip"></div>
+    <div id="controls">
+        <h3>SmokedMeat</h3>
+        <div class="control-section">
+            <h4>Layout</h4>
+            <button class="layout-btn active" data-layout="dagre">Hierarchical</button>
+            <button class="layout-btn" data-layout="concentric">Radial</button>
+            <button class="layout-btn" data-layout="cose">Force</button>
+        </div>
+        <div class="control-section">
+            <h4>Scope</h4>
+            <div id="filter-status" class="scope-text">Loading graph...</div>
+            <div class="button-row">
+                <button class="mode-btn" data-mode="filtered">Vuln Paths</button>
+                <button class="mode-btn" data-mode="full">Full Graph</button>
+            </div>
+            <div id="filter-description" class="scope-text"></div>
+            <div id="layout-warning" class="scope-text"></div>
+        </div>
+        <div class="control-section">
+            <h4>Types</h4>
+            <div class="legend-item" data-type="organization"><div class="legend-color legend-organization"></div>Organization</div>
+            <div class="legend-item" data-type="repository"><div class="legend-color legend-repository"></div>Repository</div>
+            <div class="legend-item" data-type="workflow"><div class="legend-color legend-workflow"></div>Workflow</div>
+            <div class="legend-item" data-type="secret"><div class="legend-color legend-secret"></div>Secret</div>
+            <div class="legend-item" data-type="cloud"><div class="legend-color legend-cloud"></div>Cloud</div>
+            <div class="legend-item" data-type="loot"><div class="legend-color legend-loot"></div>Vulnerability</div>
+            <div class="legend-item" data-type="private-repo"><div class="legend-color legend-private-repo"></div>Private Repo</div>
+            <div class="legend-item" data-type="ssh-read"><div class="legend-color legend-ssh-read"></div>SSH Read</div>
+            <div class="legend-item" data-type="ssh-write"><div class="legend-color legend-ssh-write"></div>SSH Write</div>
+            <div class="legend-item" data-type="agent"><div class="legend-color legend-agent"></div>Agent</div>
+        </div>
+    </div>
+    <div id="stats">Loading...</div>
+    <div id="connection-status" class="connecting">Connecting...</div>
+
+    <script src="/graph/assets/graph.js"></script>
+</body>
+</html>

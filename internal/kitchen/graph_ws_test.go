@@ -5,10 +5,13 @@ package kitchen
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
 	"github.com/boostsecurityio/smokedmeat/internal/pantry"
@@ -136,10 +139,29 @@ func TestFormatTooltipValue_SummarizesDeepNestedCollections(t *testing.T) {
 	assert.Equal(t, "{outer: {inner: {1 fields}, items: [5 items]}}", formatted)
 }
 
-func TestGraphCytoscapeHTML_UsesTooltipProperties(t *testing.T) {
-	assert.Contains(t, graphCytoscapeHTML, "tooltipProperties: node.tooltip_properties")
-	assert.Contains(t, graphCytoscapeHTML, "Object.entries(data.tooltipProperties)")
-	assert.False(t, strings.Contains(graphCytoscapeHTML, "String(v)"))
+func TestGraphScriptUsesTooltipProperties(t *testing.T) {
+	graphJS, err := browserAssetFS.ReadFile("browser_assets/graph.js")
+	require.NoError(t, err)
+	body := string(graphJS)
+
+	assert.Contains(t, body, "tooltipProperties: node.tooltip_properties")
+	assert.Contains(t, body, "Object.entries(data.tooltipProperties)")
+	assert.False(t, strings.Contains(body, "String(v)"))
+}
+
+func TestHandleGraphSetsBrowserSecurityHeaders(t *testing.T) {
+	h := NewHandlerWithPublisher(nil, nil)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/graph", nil)
+
+	h.handleGraph(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
+	assert.Equal(t, "no-referrer", rec.Header().Get("Referrer-Policy"))
+	assert.Contains(t, rec.Header().Get("Content-Security-Policy"), "https://unpkg.com")
+	assert.Contains(t, rec.Header().Get("Content-Security-Policy"), "connect-src 'self' ws: wss:")
+	assert.NotContains(t, rec.Header().Get("Content-Security-Policy"), "unsafe-inline")
 }
 
 func TestBuildGraphSelection_AutoUsesFilteredModeForLargeGraph(t *testing.T) {
@@ -222,12 +244,18 @@ func TestBuildGraphSelection_FilteredFallsBackToFullWithoutVulnerabilities(t *te
 	assert.Contains(t, selection.filterDescription, "No vuln-bearing paths found")
 }
 
-func TestGraphCytoscapeHTML_ContainsGraphModeControls(t *testing.T) {
-	assert.Contains(t, graphCytoscapeHTML, "data-mode=\"filtered\"")
-	assert.Contains(t, graphCytoscapeHTML, "data-mode=\"full\"")
-	assert.Contains(t, graphCytoscapeHTML, "setGraphMode")
-	assert.Contains(t, graphCytoscapeHTML, "prefersFilteredSnapshots")
-	assert.Contains(t, graphCytoscapeHTML, "resolvedGraphMode !== 'full' || prefersFilteredSnapshots()")
+func TestGraphTemplateAndScriptContainGraphModeControls(t *testing.T) {
+	page, err := renderGraphPage()
+	require.NoError(t, err)
+	graphJS, err := browserAssetFS.ReadFile("browser_assets/graph.js")
+	require.NoError(t, err)
+	script := string(graphJS)
+
+	assert.Contains(t, page, "data-mode=\"filtered\"")
+	assert.Contains(t, page, "data-mode=\"full\"")
+	assert.Contains(t, script, "setGraphMode")
+	assert.Contains(t, script, "prefersFilteredSnapshots")
+	assert.Contains(t, script, "resolvedGraphMode !== 'full' || prefersFilteredSnapshots()")
 }
 
 func TestAssetToGraphNode_RepositorySSHAccessLabel(t *testing.T) {

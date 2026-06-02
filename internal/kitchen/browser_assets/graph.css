@@ -1,0 +1,161 @@
+/*
+Copyright (C) 2026 boostsecurity.io
+SPDX-License-Identifier: AGPL-3.0-or-later
+*/
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+            background: #1a1a2e;
+            color: #eee;
+            overflow: hidden;
+        }
+        #cy { width: 100vw; height: 100vh; }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(22, 33, 62, 0.95);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            min-width: 180px;
+            z-index: 100;
+        }
+        #controls h3 {
+            color: #e94560;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        .control-section {
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #333;
+        }
+        .control-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+        .control-section h4 {
+            color: #888;
+            margin-bottom: 6px;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 4px 0;
+        }
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            margin-right: 8px;
+            border-radius: 2px;
+        }
+        .legend-organization { background: #ff7f50; }
+        .legend-repository { background: #4a9eff; }
+        .legend-workflow { background: #50c878; }
+        .legend-secret { background: #ffd700; }
+        .legend-cloud { background: #95e1d3; }
+        .legend-loot { background: #e94560; }
+        .legend-private-repo {
+            background: #e94560;
+            border: 2px solid #fff;
+        }
+        .legend-ssh-read {
+            background: #4a9eff;
+            border: 3px solid #50c878;
+        }
+        .legend-ssh-write {
+            background: #4a9eff;
+            border: 3px solid #ffd700;
+        }
+        .legend-agent { background: #aa96da; }
+        .layout-btn, .mode-btn {
+            background: #2a2a4e;
+            border: 1px solid #444;
+            color: #eee;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 2px;
+            font-size: 11px;
+            transition: all 0.2s;
+        }
+        .layout-btn:hover, .mode-btn:hover { background: #3a3a5e; }
+        .layout-btn.active, .mode-btn.active { background: #e94560; border-color: #e94560; }
+        .button-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        .scope-text {
+            line-height: 1.4;
+        }
+        #filter-status {
+            color: #fff;
+            margin-bottom: 6px;
+        }
+        #filter-description {
+            color: #bbb;
+            margin-top: 8px;
+        }
+        #layout-warning {
+            color: #ffd700;
+            margin-top: 8px;
+        }
+
+        #stats {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(22, 33, 62, 0.95);
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 10px;
+            font-size: 11px;
+            color: #888;
+        }
+        #connection-status {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(22, 33, 62, 0.95);
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 8px 12px;
+            font-size: 11px;
+        }
+        #connection-status.connected { color: #50c878; border-color: #50c878; }
+        #connection-status.disconnected { color: #e94560; border-color: #e94560; }
+        #connection-status.connecting { color: #ffd700; border-color: #ffd700; }
+
+        #tooltip {
+            position: absolute;
+            background: #16213e;
+            border: 1px solid #e94560;
+            border-radius: 4px;
+            padding: 10px;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+            max-width: 300px;
+            z-index: 1000;
+            transition: opacity 0.15s;
+        }
+        #tooltip .title { color: #e94560; font-weight: bold; margin-bottom: 5px; }
+        #tooltip .field { color: #888; }
+        #tooltip .value {
+            color: #fff;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(233, 69, 96, 0.4); }
+            50% { box-shadow: 0 0 0 10px rgba(233, 69, 96, 0); }
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.8); }
+            to { opacity: 1; transform: scale(1); }
+        }

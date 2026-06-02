@@ -442,11 +442,9 @@ func (m *Model) handleGraphCommand() {
 	}
 
 	graphURL := strings.TrimSuffix(kitchenURL, "/") + "/graph"
-	if m.config.AuthToken != "" {
-		graphURL += "?token=" + m.config.AuthToken
-	}
+	launchURL := m.browserSessionURL(graphURL)
 
-	if err := m.openBrowser(graphURL); err != nil {
+	if err := m.openBrowser(launchURL); err != nil {
 		m.activityLog.Add(IconInfo, Hyperlink(graphURL, "Click to open graph →"))
 	} else {
 		m.activityLog.Add(IconSuccess, "Opened graph in browser")

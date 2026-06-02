@@ -884,6 +884,9 @@ func (m *Model) contextStatusHints() string {
 			hints += helpKeyStyle.Render("s") + helpDescStyle.Render(":target ")
 		}
 		if node := m.SelectedTreeNode(); node != nil {
+			if m.sourceViewerAvailableForNode(node) {
+				hints += helpKeyStyle.Render("v") + helpDescStyle.Render(":source ")
+			}
 			if node.Type == TreeNodeWorkflow && workflowNodeDispatchable(node) {
 				hints += helpKeyStyle.Render("x") + helpDescStyle.Render(":exploit ")
 			}

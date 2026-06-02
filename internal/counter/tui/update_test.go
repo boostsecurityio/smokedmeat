@@ -747,6 +747,30 @@ func TestModel_Update_PivotResultSuccess_GitHubApp(t *testing.T) {
 	assert.NotNil(t, model.pivotToken, "should set pivotToken")
 }
 
+func TestModel_Update_PivotResultRegistersPivotedSourceToken(t *testing.T) {
+	mock := &mockKitchenClient{}
+	m := newModelWithMockClient(mock)
+	m.phase = PhasePostExploit
+	m.tokenInfo = &TokenInfo{Value: "ghp_original", Source: "operator"}
+
+	result, cmd := m.Update(PivotResultMsg{
+		Success: true,
+		Type:    PivotTypeGitHubApp,
+		Credentials: []CollectedSecret{
+			{Name: "APP_TOKEN_acme", Value: "ghs_pivoted456", Type: "github_app_token"},
+		},
+	})
+
+	model := result.(Model)
+	require.NotNil(t, cmd)
+	msg := cmd()
+	assert.IsType(t, SourceTokenRegisteredMsg{}, msg)
+	assert.Equal(t, "ghs_pivoted456", model.tokenInfo.Value)
+	assert.Equal(t, "ghs_pivoted456", mock.lastSourceTokenReq.Token)
+	assert.Equal(t, "loot:APP_TOKEN_acme", mock.lastSourceTokenReq.Source)
+	assert.Equal(t, "test", mock.lastSourceTokenReq.SessionID)
+}
+
 func TestModel_Update_PivotResultFailed(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 

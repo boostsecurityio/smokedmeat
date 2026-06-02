@@ -56,6 +56,7 @@ func NewGraphHub(p *pantry.Pantry) *GraphHub {
 
 // HandleWebSocket handles WebSocket connections for graph visualization.
 func (h *GraphHub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	writeGraphSecurityHeaders(w)
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		slog.Error("failed to accept graph websocket", "error", err)

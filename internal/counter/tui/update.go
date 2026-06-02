@@ -387,7 +387,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.connectionState = "connected"
 		m.AddOutput("success", "Connected to Kitchen")
 
-		return m, tea.Batch(m.fetchPantryCmd(), m.fetchKnownEntitiesCmd(), m.fetchHistoryCmd(), m.fetchCallbacksCmd())
+		return m, tea.Batch(m.fetchPantryCmd(), m.fetchKnownEntitiesCmd(), m.fetchHistoryCmd(), m.fetchCallbacksCmd(), m.registerActiveSourceTokenCmd())
 
 	case PantryFetchedMsg:
 		if msg.Pantry != nil && msg.Pantry.Size() > 0 {
@@ -928,7 +928,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.AddOutput("info", fmt.Sprintf("Auto-analyzing %s with installation token %s...", m.target, cred.MaskedValue()))
 					m.activityLog.Add(IconScan, fmt.Sprintf("Re-analyzing %s with installation token", m.target))
 					m.GenerateSuggestions()
-					return m, m.runAnalysis()
+					return m, tea.Batch(m.registerActiveSourceTokenCmd(), m.runAnalysis())
 				}
 			}
 			m.activityLog.Add(IconSecret, "App pivot: installation token obtained")
@@ -1013,9 +1013,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lootStashDirty = true
 		m.GenerateSuggestions()
 		if autoAnalyze && m.tokenInfo != nil && m.config.KitchenURL != "" {
-			return m, m.runPivotAnalysis()
+			return m, tea.Batch(m.registerActiveSourceTokenCmd(), m.runPivotAnalysis())
 		}
-		return m, nil
+		return m, m.registerActiveSourceTokenCmd()
 
 	case SecretValidationMsg:
 		var secret *CollectedSecret
@@ -1159,6 +1159,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PurgeErrorMsg:
 		m.AddOutput("error", fmt.Sprintf("Purge failed: %v", msg.Err))
 		m.activityLog.Add(IconError, fmt.Sprintf("Purge failed: %v", msg.Err))
+		return m, nil
+
+	case SourceTokenRegisteredMsg:
+		return m, nil
+
+	case SourceTokenRegisterErrorMsg:
+		m.activityLog.Add(IconWarning, msg.Err.Error())
+		return m, nil
+
+	case SourceBrowserOpenedMsg:
+		if msg.Err != nil {
+			m.activityLog.Add(IconWarning, msg.Err.Error())
+			if msg.URL != "" {
+				m.activityLog.Add(IconInfo, Hyperlink(msg.URL, "Click to open source viewer ->"))
+			}
+			return m, nil
+		}
+		m.activityLog.Add(IconSuccess, "Opened source viewer in browser")
 		return m, nil
 
 	case HistoryFetchedMsg:
@@ -1850,6 +1868,9 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "v":
+		if m.focus != FocusInput && m.paneFocus == PaneFocusFindings {
+			return m.openSelectedSourceViewer()
+		}
 		if m.paneFocus == PaneFocusLoot {
 			secret := m.SelectedLootSecret()
 			if secret == nil {

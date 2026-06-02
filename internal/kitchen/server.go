@@ -215,6 +215,9 @@ func (s *Server) Start(ctx context.Context) error {
 	s.publisher = pass.NewPublisher(s.natsClient)
 	s.operators = NewOperatorHub(s.publisher, s.store, s.database)
 	s.handler = NewHandler(s.publisher, s.store, s.sessions)
+	if sourceCacheDir := sourceCacheDirForDBPath(s.config.DBPath); sourceCacheDir != "" {
+		s.handler.SetSourceCacheDir(sourceCacheDir)
+	}
 
 	if s.database != nil {
 		// restoreFromDB repopulates handler-owned stagers and callbacks.
@@ -286,6 +289,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.Handle("POST /github/repos/info", opAuth(http.HandlerFunc(s.handler.handleGitHubListReposWithInfo)))
 	mux.Handle("POST /github/workflows", opAuth(http.HandlerFunc(s.handler.handleGitHubListWorkflows)))
 	mux.Handle("POST /github/workflow-runs", opAuth(http.HandlerFunc(s.handler.handleGitHubWorkflowDispatchRun)))
+	mux.Handle("POST /github/source/token", opAuth(http.HandlerFunc(s.handler.handleGitHubSourceToken)))
+	mux.Handle("POST /github/source/content", opAuth(http.HandlerFunc(s.handler.handleGitHubSourceContent)))
 	mux.Handle("POST /github/user", opAuth(http.HandlerFunc(s.handler.handleGitHubGetUser)))
 	mux.Handle("POST /github/token/info", opAuth(http.HandlerFunc(s.handler.handleGitHubTokenInfo)))
 	mux.Handle("POST /github/app/installations", opAuth(http.HandlerFunc(s.handler.handleGitHubAppInstallations)))
@@ -304,6 +309,19 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.Handle("GET /graph", opAuth(http.HandlerFunc(s.handler.handleGraph)))
 	mux.Handle("GET /graph/data", opAuth(http.HandlerFunc(s.handler.handleGraphData)))
 	mux.Handle("GET /graph/ws", opAuth(http.HandlerFunc(s.graphHub.HandleWebSocket)))
+	mux.Handle("GET /graph/assets/{name}", opAuth(http.HandlerFunc(s.handler.handleBrowserAsset)))
+	mux.Handle("GET /browser/session", opAuth(http.HandlerFunc(s.handler.handleBrowserSession)))
+	mux.Handle("GET /viewer/session", opAuth(http.HandlerFunc(s.handler.handleSourceViewerSession)))
+	mux.Handle("GET /viewer/assets/{name}", opAuth(http.HandlerFunc(s.handler.handleBrowserAsset)))
+	mux.Handle("GET /viewer/github.com", opAuth(http.HandlerFunc(s.handler.handleSourceGraphRootViewer)))
+	mux.Handle("GET /viewer/github.com/", opAuth(http.HandlerFunc(s.handler.handleSourceGraphRootViewer)))
+	mux.Handle("GET /viewer/github.com/{owner}", opAuth(http.HandlerFunc(s.handler.handleSourceOwnerViewer)))
+	mux.Handle("GET /viewer/github.com/{owner}/", opAuth(http.HandlerFunc(s.handler.handleSourceOwnerViewer)))
+	mux.Handle("GET /viewer/github.com/{owner}/{repo}", opAuth(http.HandlerFunc(s.handler.handleSourceRepositoryViewer)))
+	mux.Handle("GET /viewer/github.com/{owner}/{repo}/", opAuth(http.HandlerFunc(s.handler.handleSourceRepositoryViewer)))
+	mux.Handle("GET /viewer/github.com/{owner}/{repo}/blob/{ref}/{path...}", opAuth(http.HandlerFunc(s.handler.handleSourceViewer)))
+	mux.Handle("GET /viewer/github.com/{owner}/{repo}/tree/{ref}", opAuth(http.HandlerFunc(s.handler.handleSourceTreeViewer)))
+	mux.Handle("GET /viewer/github.com/{owner}/{repo}/tree/{ref}/{path...}", opAuth(http.HandlerFunc(s.handler.handleSourceTreeViewer)))
 
 	// Stager registration (require operator auth)
 	mux.Handle("POST /r/smokedmeat/{stagerID}", opAuth(http.HandlerFunc(s.handler.handleStagerRegister)))

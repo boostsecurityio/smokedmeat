@@ -68,6 +68,12 @@ func newGitHubDeployClient(token string) *gitHubClient {
 }
 
 func newGitHubClientDefault(token string) *gitHubClient {
+	if strings.TrimSpace(token) == "" {
+		return &gitHubClient{
+			client:     github.NewClient(http.DefaultClient),
+			graphqlURL: "https://api.github.com/graphql",
+		}
+	}
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	tc := oauth2.NewClient(context.Background(), ts)
 	return &gitHubClient{
