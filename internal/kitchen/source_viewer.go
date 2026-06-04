@@ -892,7 +892,7 @@ func (h *Handler) sourceViewerRepositoryAccessHint(req SourceContentRequest) sou
 	}
 	for _, asset := range p.GetAssetsByType(pantry.AssetRepository) {
 		repoOwner, repoName, ok := sourceRepositoryAssetOwnerRepo(asset)
-		if !ok || repoOwner != owner || repoName != repo {
+		if !ok || !strings.EqualFold(repoOwner, owner) || !strings.EqualFold(repoName, repo) {
 			continue
 		}
 		return sourceViewerRepositoryAccessHint{
@@ -1283,7 +1283,7 @@ func (h *Handler) sourceViewerIdentity(ctx context.Context, req SourceContentReq
 		identity := sourceViewerUserIdentity(user, source)
 		if installations, _, installErr := client.client.Apps.ListUserInstallations(ctx, &github.ListOptions{PerPage: 1}); installErr == nil {
 			identity.Details = append(identity.Details, sourceViewerIdentityDetailResponse{
-				Label: "app installations",
+				Label: "app installation access",
 				Value: strconv.Itoa(len(installations)),
 			})
 		}
@@ -1427,7 +1427,7 @@ func sourceViewerAppIdentity(ctx context.Context, client *gitHubClient, app *git
 	sourceViewerAddIdentityDetail(&identity, "installations", strconv.Itoa(app.GetInstallationsCount()))
 	sourceViewerAddIdentityDetail(&identity, "events", strings.Join(app.Events, ", "))
 	if installations, _, err := client.client.Apps.ListInstallations(ctx, &github.ListOptions{PerPage: 1}); err == nil {
-		sourceViewerAddIdentityDetail(&identity, "visible installations", strconv.Itoa(len(installations)))
+		sourceViewerAddIdentityDetail(&identity, "installation access", strconv.Itoa(len(installations)))
 		if len(installations) > 0 && installations[0] != nil {
 			sourceViewerAddIdentityDetail(&identity, "sample account", installations[0].GetAccount().GetLogin())
 			sourceViewerAddIdentityDetail(&identity, "selection", installations[0].GetRepositorySelection())
@@ -1446,9 +1446,6 @@ func sourceViewerInstallationIdentity(repos *github.ListRepositories, source str
 	}
 	sourceViewerAddIdentityDetail(&identity, "source", source)
 	sourceViewerAddIdentityDetail(&identity, "visible repositories", strconv.Itoa(repos.GetTotalCount()))
-	if slug := sourceViewerAppSlugFromSource(source); slug != "" {
-		identity.HTMLURL = sourceViewerGitHubAppURL(slug)
-	}
 	if len(repos.Repositories) > 0 && repos.Repositories[0] != nil {
 		repo := repos.Repositories[0]
 		identity.AvatarURL = repo.GetOwner().GetAvatarURL()
@@ -1513,26 +1510,6 @@ func sourceViewerGitHubAppURL(slug string) string {
 		return ""
 	}
 	return "https://github.com/apps/" + url.PathEscape(slug)
-}
-
-func sourceViewerAppSlugFromSource(source string) string {
-	source = strings.TrimSpace(source)
-	idx := strings.LastIndex(strings.ToUpper(source), "APP_TOKEN_")
-	if idx < 0 {
-		return ""
-	}
-	slug := source[idx+len("APP_TOKEN_"):]
-	for i, r := range slug {
-		if !sourceViewerAppSlugRune(r) {
-			slug = slug[:i]
-			break
-		}
-	}
-	return strings.Trim(strings.ToLower(strings.ReplaceAll(slug, "_", "-")), "-.")
-}
-
-func sourceViewerAppSlugRune(r rune) bool {
-	return r == '-' || r == '_' || r == '.' || r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z'
 }
 
 func sourceViewerInstallationPermissionsSummary(perms *github.InstallationPermissions) string {

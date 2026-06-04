@@ -308,6 +308,7 @@ func TestSourceViewerIdentityAppToken(t *testing.T) {
 	assert.Equal(t, "smokedmeat-lab", resp.Login)
 	assert.Equal(t, "https://github.com/apps/smokedmeat-lab", resp.HTMLURL)
 	assertSourceIdentityDetail(t, resp, "installations", "7")
+	assertSourceIdentityDetail(t, resp, "installation access", "1")
 	assertSourceIdentityDetail(t, resp, "sample account", "whooli")
 	assertSourceIdentityDetailAbsent(t, resp, "external link")
 }
@@ -355,6 +356,39 @@ func TestSourceViewerIdentityInstallationToken(t *testing.T) {
 	assertSourceIdentityDetail(t, resp, "events", "issues, pull_request")
 	assertSourceIdentityDetail(t, resp, "sample repo", "whooli/xyz")
 	assertSourceIdentityDetail(t, resp, "sample repo permissions", "push, pull")
+	assertSourceIdentityDetailAbsent(t, resp, "app page")
+	assertSourceIdentityDetailAbsent(t, resp, "external link")
+}
+
+func TestSourceViewerIdentityInstallationTokenDoesNotDeriveAppURLFromAccount(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /user", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"message":"Bad credentials"}`, http.StatusUnauthorized)
+	})
+	mux.HandleFunc("GET /app", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"message":"A JSON web token could not be decoded"}`, http.StatusUnauthorized)
+	})
+	mux.HandleFunc("GET /installation/repositories", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"total_count":1,"repositories":[{"full_name":"whooli/xyz","permissions":{"pull":true},"owner":{"login":"whooli","avatar_url":"https://avatars.githubusercontent.com/u/3"}}]}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	origNew := newGitHubClientFunc
+	newGitHubClientFunc = sourceTestGitHubClientFactory(t, srv.URL)
+	t.Cleanup(func() { newGitHubClientFunc = origNew })
+
+	h := NewHandlerWithPublisher(nil, nil)
+	h.sourceTokens.put([]string{"operator"}, "ghs_installation", "loot:APP_TOKEN_whooli", time.Now().UTC())
+	rec := httptest.NewRecorder()
+	h.handleSourceViewerIdentity(rec, httptest.NewRequest(http.MethodGet, "/viewer/identity", nil))
+
+	var resp sourceViewerIdentityResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "installation", resp.Kind)
+	assert.Empty(t, resp.HTMLURL)
+	assertSourceIdentityDetail(t, resp, "visible repositories", "1")
 	assertSourceIdentityDetailAbsent(t, resp, "app page")
 	assertSourceIdentityDetailAbsent(t, resp, "external link")
 }
@@ -466,6 +500,7 @@ func TestHandleSourceViewerRendersGitHubLikeFile(t *testing.T) {
 	body := rec.Body.String()
 	assert.Contains(t, body, "acme/api")
 	assert.Contains(t, body, `<link rel="stylesheet" href="/viewer/assets/source-viewer.css">`)
+	assert.Contains(t, body, `target="_blank" rel="noopener noreferrer"`)
 	assert.Contains(t, body, `<a class="repo-host" href="/viewer/github.com/">github.com</a>`)
 	assert.Contains(t, body, `<a class="repo-owner" href="/viewer/github.com/acme">acme</a>`)
 	assert.Contains(t, body, `<a class="repo-link" href="/viewer/github.com/acme/api?ref=main"><strong>api</strong></a>`)
@@ -1254,12 +1289,12 @@ func TestSourceViewerExplainsKnownPrivateRepoNotFound(t *testing.T) {
 	viewerMux := http.NewServeMux()
 	viewerMux.HandleFunc("GET /viewer/github.com/{owner}/{repo}", h.handleSourceRepositoryViewer)
 	rec := httptest.NewRecorder()
-	viewerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/viewer/github.com/whooli/cost-optimized-github-runner", nil))
+	viewerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/viewer/github.com/Whooli/Cost-Optimized-GitHub-Runner", nil))
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	body := rec.Body.String()
 	assert.Contains(t, body, "Private repository not visible to the active token.")
-	assert.Contains(t, body, `<div class="error-action">Re-pivot or register a fresh token with read access to whooli/cost-optimized-github-runner.</div>`)
+	assert.Contains(t, body, `<div class="error-action">Re-pivot or register a fresh token with read access to Whooli/Cost-Optimized-GitHub-Runner.</div>`)
 	assert.Contains(t, body, "Known private repo in graph.")
 	assert.Contains(t, body, "GitHub returns 404 for private repositories the token cannot see.")
 	assert.Contains(t, body, "Active token source: loot:APP_TOKEN_whooli.")
