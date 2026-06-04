@@ -31,11 +31,13 @@ func (m Model) registerActiveSourceTokenCmd() tea.Cmd {
 	token := m.tokenInfo.Value
 	source := m.tokenInfo.Source
 	sessionID := m.config.SessionID
+	appID := m.activeSourceTokenAppID(token)
 	return func() tea.Msg {
 		_, err := m.kitchenClient.RegisterSourceToken(context.Background(), counter.SourceTokenRequest{
 			Token:     token,
 			Source:    source,
 			SessionID: sessionID,
+			AppID:     appID,
 		})
 		if err != nil {
 			return SourceTokenRegisterErrorMsg{Err: fmt.Errorf("register source token: %w", err)}
@@ -186,9 +188,11 @@ func (m Model) openSourceBrowserCmd(viewerURL, launchURL string) tea.Cmd {
 	client := m.kitchenClient
 	sessionID := m.config.SessionID
 	var token, source string
+	var appID string
 	if m.tokenInfo != nil {
 		token = m.tokenInfo.Value
 		source = m.tokenInfo.Source
+		appID = m.activeSourceTokenAppID(token)
 	}
 	return func() tea.Msg {
 		if client != nil && strings.TrimSpace(token) != "" {
@@ -196,6 +200,7 @@ func (m Model) openSourceBrowserCmd(viewerURL, launchURL string) tea.Cmd {
 				Token:     token,
 				Source:    source,
 				SessionID: sessionID,
+				AppID:     appID,
 			})
 			if err != nil {
 				return SourceBrowserOpenedMsg{URL: viewerURL, Err: fmt.Errorf("register source token: %w", err)}
@@ -206,6 +211,13 @@ func (m Model) openSourceBrowserCmd(viewerURL, launchURL string) tea.Cmd {
 		}
 		return SourceBrowserOpenedMsg{URL: viewerURL}
 	}
+}
+
+func (m Model) activeSourceTokenAppID(token string) string {
+	if m.pivotToken == nil || strings.TrimSpace(token) == "" || strings.TrimSpace(m.pivotToken.Value) != strings.TrimSpace(token) {
+		return ""
+	}
+	return appIDFromPivotSource(m.pivotToken.Source)
 }
 
 func (m Model) sourceViewerURL(state *sourceBrowserTarget) string {

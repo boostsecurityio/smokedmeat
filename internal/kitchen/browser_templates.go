@@ -39,6 +39,7 @@ type browserAsset struct {
 
 var browserAssetRoutes = map[string]browserAsset{
 	"source-viewer.css": {Path: "browser_assets/source_viewer.css", ContentType: "text/css; charset=utf-8"},
+	"source-viewer.js":  {Path: "browser_assets/source_viewer.js", ContentType: "text/javascript; charset=utf-8"},
 	"graph.css":         {Path: "browser_assets/graph.css", ContentType: "text/css; charset=utf-8"},
 	"graph.js":          {Path: "browser_assets/graph.js", ContentType: "text/javascript; charset=utf-8"},
 }
@@ -74,7 +75,7 @@ func (h *Handler) handleBrowserAsset(w http.ResponseWriter, r *http.Request) {
 func browserAssetAllowed(path, name string) bool {
 	switch {
 	case strings.HasPrefix(path, "/viewer/assets/"):
-		return name == "source-viewer.css"
+		return name == "source-viewer.css" || name == "source-viewer.js"
 	case strings.HasPrefix(path, "/graph/assets/"):
 		return name == "graph.css" || name == "graph.js"
 	default:

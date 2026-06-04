@@ -9,10 +9,13 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}}</title>
 <link rel="stylesheet" href="/viewer/assets/source-viewer.css">
+<script src="/viewer/assets/source-viewer.js" defer></script>
 </head>
 <body>
 <main class="page">
 {{template "sourceHeader" .Header}}
+{{template "sourceNav" .Nav}}
+{{template "sourceNotices" .Notices}}
 {{template "sourceBody" .}}
 </main>
 </body>
@@ -20,14 +23,42 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 {{define "sourceHeader"}}
 <div class="repo-bar" aria-label="{{.AriaLabel}}">
-  {{if .Description}}
-  <div>
+  <div class="repo-bar-main">
+    <div class="viewer-brand"><span class="viewer-brand-icon" aria-hidden="true">🥩</span><span>SmokedMeat source viewer</span></div>
+    {{if .Description}}
+    <div>
+      {{template "sourceRepoName" .RepoName}}
+      <div class="repo-description">{{.Description}}</div>
+    </div>
+    {{else}}
     {{template "sourceRepoName" .RepoName}}
-    <div class="repo-description">{{.Description}}</div>
+    {{end}}
   </div>
-  {{else}}
-  {{template "sourceRepoName" .RepoName}}
-  {{end}}
+  <div class="viewer-header-actions">
+    <nav class="viewer-switch" aria-label="SmokedMeat browser views">
+      <a href="/graph">Graph</a>
+      <a class="active" href="/viewer/github.com/">Source viewer</a>
+    </nav>
+    <div class="viewer-identity" data-identity-widget>
+      <button class="identity-button" type="button" aria-expanded="false" data-identity-button>
+        <span class="identity-avatar" data-identity-avatar></span>
+        <span class="identity-label" data-identity-label>Checking GitHub identity</span>
+      </button>
+      <div class="identity-popover" data-identity-popover hidden>
+        <div class="identity-popover-head">
+          <span class="identity-popover-avatar" data-identity-popover-avatar></span>
+          <div>
+            <div class="identity-popover-name" data-identity-name></div>
+            <div class="identity-popover-summary" data-identity-summary></div>
+          </div>
+        </div>
+        <div class="identity-badges" data-identity-badges></div>
+        <dl class="identity-details" data-identity-details></dl>
+        <div class="identity-rates" data-identity-rates></div>
+        <a class="button identity-link" data-identity-link href="#" target="_blank" rel="noreferrer">Open public GitHub profile</a>
+      </div>
+    </div>
+  </div>
 </div>
 <div class="file-bar">
   <div class="file-left">
@@ -52,25 +83,61 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 {{end}}
 {{end}}
 
+{{define "sourceNav"}}
+{{if .}}
+<nav class="repo-nav" aria-label="Repository">
+  {{range .Items}}
+  <a class="repo-nav-item{{if .Active}} repo-nav-item-active{{end}}" href="{{.Href}}">{{.Label}}</a>
+  {{end}}
+</nav>
+{{end}}
+{{end}}
+
+{{define "sourceNotices"}}
+{{range .}}
+<div class="notice notice-{{.Kind}}">
+  <div class="notice-title">{{.Title}}</div>
+  <div class="notice-message">{{.Message}}</div>
+  {{if .Action}}<div class="notice-action">{{.Action}}</div>{{end}}
+  {{if .Detail}}<div class="notice-detail">{{.Detail}}</div>{{end}}
+</div>
+{{end}}
+{{end}}
+
+{{define "sourceBadges"}}
+{{range .}}<span class="badge badge-{{.Kind}}">{{.Label}}</span>{{end}}
+{{end}}
+
 {{define "sourceBody"}}
 {{if .Error}}
-<div class="empty-state">{{.Error}}</div>
+  <div class="empty-state error-state">
+  <div class="error-summary">{{.Error}}</div>
+  {{if .ErrorAction}}<div class="error-action">{{.ErrorAction}}</div>{{end}}
+  {{if .ErrorDetail}}<div class="error-detail">{{.ErrorDetail}}</div>{{end}}
+</div>
+{{else if .Discussion}}
+{{template "sourceDiscussion" .Discussion}}
 {{else if .File}}
   {{if .File.MarkdownHTML}}
   <div class="markdown-file-view"><div class="markdown-body">{{.File.MarkdownHTML}}</div></div>
   {{else}}
-  <div class="file-view"><table class="blob"><tbody>
-    {{range .File.Lines}}
-    <tr id="L{{.Number}}" class="line-row{{if .Highlight}} line-highlight{{end}}"><td class="line-num"><a href="#L{{.Number}}">{{.Number}}</a></td><td class="line-code"><pre>{{.Text}}</pre></td></tr>
-    {{end}}
-  </tbody></table></div>
+  <div class="source-layout{{if .File.Inspection}} source-layout-sidebar{{end}}">
+    {{template "sourceInspection" .File.Inspection}}
+    <div class="file-view"><table class="blob"><tbody>
+      {{range .File.Lines}}
+      <tr id="L{{.Number}}" class="line-row {{.Class}}"><td class="line-num"><a href="#L{{.Number}}">{{.Number}}</a></td><td class="line-code"><div class="line-code-inner"><pre>{{if .HTML}}{{.HTML}}{{else}}{{.Text}}{{end}}</pre>{{if .Risks}}<div class="line-risks">{{range .Risks}}<a class="line-risk-chip badge-{{.Severity}}" href="{{.Href}}">{{.Label}}</a>{{end}}</div>{{end}}</div></td></tr>
+      {{end}}
+    </tbody></table></div>
+  </div>
   {{end}}
 {{else if .Table}}
+{{template "sourceTableControls" .Table}}
 <div class="directory-view"><table class="directory-table"><tbody>
   {{range .Table.Rows}}
-  <tr class="directory-row"><td class="directory-type">{{.Type}}</td><td class="directory-name">{{if .Href}}<a href="{{.Href}}">{{.Name}}</a>{{else}}<span class="{{.NameClass}}">{{.Name}}</span>{{end}}{{if .Description}}<div class="repo-row-description">{{.Description}}</div>{{end}}</td><td class="directory-size">{{.Size}}</td></tr>
+  <tr class="directory-row"><td class="directory-type">{{.Type}}</td><td class="directory-name">{{if .Href}}<a href="{{.Href}}">{{.Name}}</a>{{else}}{{if .NameClass}}<span class="{{.NameClass}}">{{.Name}}</span>{{else}}<span>{{.Name}}</span>{{end}}{{end}}{{if .Badges}}<span class="row-badges">{{template "sourceBadges" .Badges}}</span>{{end}}{{if .Meta}}<div class="repo-row-meta">{{range .Meta}}<span class="repo-row-meta-item">{{if .Label}}<span class="repo-row-meta-label">{{.Label}}</span>{{end}}<strong>{{.Value}}</strong></span>{{end}}</div>{{end}}{{if .Description}}<div class="repo-row-description">{{.Description}}</div>{{end}}</td><td class="directory-size">{{.Size}}</td></tr>
   {{end}}
 </tbody></table></div>
+{{template "sourcePagination" .Table.Pagination}}
 {{with .Table.Readme}}
 <div class="readme-view">
   <div class="readme-title">{{.Title}}</div>
@@ -78,4 +145,133 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 </div>
 {{end}}
 {{end}}
+{{end}}
+
+{{define "sourceDiscussion"}}
+<article class="discussion-view">
+  <header class="discussion-card discussion-main">
+    <div class="discussion-card-head">
+      <div class="discussion-type">{{.Kind}} #{{.Number}}</div>
+      <div class="discussion-title">{{.Title}}</div>
+      {{if .Badges}}<div class="discussion-badges">{{template "sourceBadges" .Badges}}</div>{{end}}
+      {{if .Meta}}<div class="repo-row-meta discussion-meta">{{range .Meta}}<span class="repo-row-meta-item">{{if .Label}}<span class="repo-row-meta-label">{{.Label}}</span>{{end}}<strong>{{.Value}}</strong></span>{{end}}</div>{{end}}
+    </div>
+    <div class="markdown-body discussion-body">{{.Body}}</div>
+  </header>
+  <section class="discussion-timeline" aria-label="Conversation">
+    {{if .Timeline}}
+    {{range .Timeline}}
+    <article class="discussion-card discussion-item">
+      <div class="discussion-card-head">
+        <div class="discussion-item-top">
+          <div>
+            <span class="discussion-type">{{.Type}}</span>
+            {{if .Href}}<a class="discussion-author" href="{{.Href}}">{{.Author}}</a>{{else}}<span class="discussion-author">{{.Author}}</span>{{end}}
+          </div>
+          {{if .CreatedAt}}<span class="discussion-time">{{.CreatedAt}}</span>{{end}}
+        </div>
+        {{if .Badges}}<div class="discussion-badges">{{template "sourceBadges" .Badges}}</div>{{end}}
+        {{if .Meta}}<div class="repo-row-meta discussion-meta">{{range .Meta}}<span class="repo-row-meta-item">{{if .Label}}<span class="repo-row-meta-label">{{.Label}}</span>{{end}}<strong>{{.Value}}</strong></span>{{end}}</div>{{end}}
+      </div>
+      <div class="markdown-body discussion-body">{{.Body}}</div>
+    </article>
+    {{end}}
+    {{else}}
+    <div class="discussion-empty">No comments or reviews found.</div>
+    {{end}}
+  </section>
+</article>
+{{end}}
+
+{{define "sourceTableControls"}}
+{{if .ActionLinks}}
+<nav class="action-subnav" aria-label="Section views">
+  {{range .ActionLinks}}
+  <a class="action-subnav-item{{if .Active}} action-subnav-item-active{{end}}" href="{{.Href}}">{{.Label}}</a>
+  {{end}}
+</nav>
+{{end}}
+{{if .ActionsFilter}}
+<form class="actions-filter" method="get" action="{{.ActionsFilter.Action}}">
+  <label><span>Branch</span><input name="branch" type="search" value="{{.ActionsFilter.Branch}}" autocomplete="off" placeholder="main"></label>
+  <label><span>Event</span><input name="event" type="search" value="{{.ActionsFilter.Event}}" autocomplete="off" placeholder="push"></label>
+  <label><span>Status</span><select name="status">{{range .ActionsFilter.StatusItems}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select></label>
+  <label><span>Actor</span><input name="actor" type="search" value="{{.ActionsFilter.Actor}}" autocomplete="off" placeholder="octocat"></label>
+  <label><span>Created</span><input name="created" type="search" value="{{.ActionsFilter.Created}}" autocomplete="off" placeholder=">=2026-06-01"></label>
+  <button class="button" type="submit">Apply</button>
+  <a class="button" href="{{.ActionsFilter.ClearHref}}">Clear</a>
+</form>
+{{end}}
+{{if .Filter}}
+<div class="table-filter" data-filter-panel>
+  <div class="table-filter-input">
+    <input id="viewer-table-filter" aria-label="{{.Filter.Placeholder}}" type="search" autocomplete="off" placeholder="{{.Filter.Placeholder}}" data-filter-input>
+    <kbd title="Press T to focus">T</kbd>
+  </div>
+</div>
+{{end}}
+{{end}}
+
+{{define "sourcePagination"}}
+{{if .}}
+<nav class="pagination" aria-label="Pagination">
+  {{if .PrevHref}}<a class="button" href="{{.PrevHref}}">Previous</a>{{else}}<span class="button pagination-disabled">Previous</span>{{end}}
+  <span class="pagination-page">Page {{.Page}}</span>
+  {{if .NextHref}}<a class="button" href="{{.NextHref}}">Next</a>{{else}}<span class="button pagination-disabled">Next</span>{{end}}
+</nav>
+{{end}}
+{{end}}
+
+{{define "sourceInspection"}}
+{{if .}}
+<aside class="source-sidebar" aria-label="Source inventory">
+  <div class="source-sidebar-header">
+    <div class="source-sidebar-title">{{if eq .Kind "workflow"}}Workflow audit{{else if eq .Kind "action"}}Action audit{{else}}Source signals{{end}}</div>
+    <div class="source-sidebar-badges">{{template "sourceBadges" .Summary}}</div>
+  </div>
+  {{range .Warnings}}
+  <div class="source-sidebar-warning">{{.}}</div>
+  {{end}}
+  {{if .Risks}}
+  <section class="source-sidebar-section">
+    <div class="source-sidebar-section-title">Audit path</div>
+    <ul class="source-sidebar-list">
+      {{range .Risks}}
+      <li><a class="risk-link risk-{{.Severity}}" href="{{.Href}}"><span class="risk-label">{{.Label}}</span><span class="risk-message">{{.Message}}{{if .Details}}<span class="risk-detail-list">{{range .Details}}<span class="risk-detail-pill">{{.}}</span>{{end}}</span>{{end}}</span></a></li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+  {{range .Sections}}
+  <section class="source-sidebar-section">
+    <div class="source-sidebar-section-title">{{.Title}}</div>
+    <ul class="source-sidebar-list">
+      {{range .Items}}
+      {{template "sourceInspectionItem" .}}
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+</aside>
+{{end}}
+{{end}}
+
+{{define "sourceInspectionItem"}}
+<li class="source-sidebar-item{{if .Collapsible}} collapsible-item{{end}}">
+  <div class="source-sidebar-item-row">
+    {{if .Children}}<button class="collapse-toggle" type="button" aria-label="Toggle {{.Label}}" aria-expanded="true"></button>{{end}}
+    <div class="source-sidebar-item-main">
+      {{if .Href}}<a href="{{.Href}}">{{.Label}}</a>{{else}}<span>{{.Label}}</span>{{end}}
+      {{if .Detail}}<div class="source-sidebar-detail">{{.Detail}}</div>{{end}}
+    </div>
+    {{if .Badges}}<span class="source-sidebar-badges">{{template "sourceBadges" .Badges}}</span>{{end}}
+  </div>
+  {{if .Children}}
+  <ul class="source-sidebar-list source-sidebar-children">
+    {{range .Children}}
+    {{template "sourceInspectionItem" .}}
+    {{end}}
+  </ul>
+  {{end}}
+</li>
 {{end}}

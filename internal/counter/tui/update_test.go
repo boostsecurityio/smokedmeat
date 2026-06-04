@@ -757,7 +757,7 @@ func TestModel_Update_PivotResultRegistersPivotedSourceToken(t *testing.T) {
 		Success: true,
 		Type:    PivotTypeGitHubApp,
 		Credentials: []CollectedSecret{
-			{Name: "APP_TOKEN_acme", Value: "ghs_pivoted456", Type: "github_app_token"},
+			{Name: "APP_TOKEN_acme", Value: "ghs_pivoted456", Type: "github_app_token", Source: "pivot:app:12345"},
 		},
 	})
 
@@ -768,6 +768,7 @@ func TestModel_Update_PivotResultRegistersPivotedSourceToken(t *testing.T) {
 	assert.Equal(t, "ghs_pivoted456", model.tokenInfo.Value)
 	assert.Equal(t, "ghs_pivoted456", mock.lastSourceTokenReq.Token)
 	assert.Equal(t, "loot:APP_TOKEN_acme", mock.lastSourceTokenReq.Source)
+	assert.Equal(t, "12345", mock.lastSourceTokenReq.AppID)
 	assert.Equal(t, "test", mock.lastSourceTokenReq.SessionID)
 }
 

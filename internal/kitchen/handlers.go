@@ -97,6 +97,7 @@ type Handler struct {
 	preflightCache *deployPreflightCache
 	sourceCache    *sourceCache
 	sourceTokens   *sourceTokenCache
+	sourceAppJWTs  *sourceAppJWTCache
 	analysisMu     sync.Mutex
 	analysisRuns   map[string]*cachedAnalysisResult
 }
@@ -111,6 +112,7 @@ func NewHandler(publisher *pass.Publisher, store *OrderStore, sessions *SessionR
 		preflightCache: newDeployPreflightCache(),
 		sourceCache:    newMemorySourceCache(),
 		sourceTokens:   newSourceTokenCache(),
+		sourceAppJWTs:  newSourceAppJWTCache(),
 		analysisRuns:   make(map[string]*cachedAnalysisResult),
 	}
 }
@@ -125,6 +127,7 @@ func NewHandlerWithPublisher(publisher Publisher, store *OrderStore) *Handler {
 		preflightCache: newDeployPreflightCache(),
 		sourceCache:    newMemorySourceCache(),
 		sourceTokens:   newSourceTokenCache(),
+		sourceAppJWTs:  newSourceAppJWTCache(),
 		analysisRuns:   make(map[string]*cachedAnalysisResult),
 	}
 }
@@ -213,12 +216,27 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /browser/session", h.handleBrowserSession)
 	mux.HandleFunc("GET /viewer/session", h.handleSourceViewerSession)
 	mux.HandleFunc("GET /viewer/assets/{name}", h.handleBrowserAsset)
+	mux.HandleFunc("GET /viewer/identity", h.handleSourceViewerIdentity)
 	mux.HandleFunc("GET /viewer/github.com", h.handleSourceGraphRootViewer)
 	mux.HandleFunc("GET /viewer/github.com/", h.handleSourceGraphRootViewer)
 	mux.HandleFunc("GET /viewer/github.com/{owner}", h.handleSourceOwnerViewer)
 	mux.HandleFunc("GET /viewer/github.com/{owner}/", h.handleSourceOwnerViewer)
 	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}", h.handleSourceRepositoryViewer)
 	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/", h.handleSourceRepositoryViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/branches", h.handleSourceBranchesViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/tags", h.handleSourceTagsViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/releases", h.handleSourceReleasesViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/actions", h.handleSourceActionsViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/actions/runners", h.handleSourceActionRunnersViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/actions/caches", h.handleSourceActionCachesViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/issues", h.handleSourceIssuesViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/issues/{issue_number}", h.handleSourceIssueViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/pulls", h.handleSourcePullRequestsViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/pulls/{pull_number}", h.handleSourcePullRequestViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/environments", h.handleSourceEnvironmentsViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/rulesets", h.handleSourceRulesetsViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/actions/runs/{run_id}", h.handleSourceActionRunViewer)
+	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/actions/runs/{run_id}/jobs/{job_id}/logs", h.handleSourceActionJobLogViewer)
 	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/blob/{ref}/{path...}", h.handleSourceViewer)
 	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/tree/{ref}", h.handleSourceTreeViewer)
 	mux.HandleFunc("GET /viewer/github.com/{owner}/{repo}/tree/{ref}/{path...}", h.handleSourceTreeViewer)
