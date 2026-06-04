@@ -1276,6 +1276,7 @@ type SourceTokenRequest struct {
 	Token     string `json:"token"`
 	Source    string `json:"source,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
+	AppID     string `json:"app_id,omitempty"`
 }
 
 type SourceTokenResponse struct {

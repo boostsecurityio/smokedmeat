@@ -162,6 +162,8 @@ func TestHandleGraphSetsBrowserSecurityHeaders(t *testing.T) {
 	assert.Contains(t, rec.Header().Get("Content-Security-Policy"), "https://unpkg.com")
 	assert.Contains(t, rec.Header().Get("Content-Security-Policy"), "connect-src 'self' ws: wss:")
 	assert.NotContains(t, rec.Header().Get("Content-Security-Policy"), "unsafe-inline")
+	assert.Contains(t, rec.Body.String(), `href="/viewer/github.com/"`)
+	assert.Contains(t, rec.Body.String(), `class="active" href="/graph"`)
 }
 
 func TestBuildGraphSelection_AutoUsesFilteredModeForLargeGraph(t *testing.T) {

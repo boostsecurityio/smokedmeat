@@ -2457,6 +2457,9 @@ func (h *Handler) handleGitHubAppToken(w http.ResponseWriter, r *http.Request) {
 		writeGitHubError(w, fmt.Errorf("JWT generation failed: %w", err))
 		return
 	}
+	if h.sourceAppJWTs != nil {
+		h.sourceAppJWTs.put(req.AppID, jwtToken, time.Now().UTC())
+	}
 
 	token, expiresAt, perms, err := createInstallationToken(r.Context(), jwtToken, req.InstallationID)
 	if err != nil {
