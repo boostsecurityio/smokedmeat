@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/boostsecurityio/smokedmeat/internal/poutine"
 )
 
 func TestConfig_InitialAccessTokenFields_RoundTrip(t *testing.T) {
@@ -64,4 +66,35 @@ func TestConfig_LastVersionCheckTimestamp_OmittedWhenZero(t *testing.T) {
 	assert.False(t, strings.Contains(string(data), "counter_id"))
 	assert.False(t, strings.Contains(string(data), "counter_start_count"))
 	assert.False(t, strings.Contains(string(data), "last_reported_counter_start_count"))
+}
+
+func TestConfig_CustomRulesRoundTrip(t *testing.T) {
+	t.Setenv("SMOKEDMEAT_CONFIG_DIR", t.TempDir())
+	enabled := true
+
+	err := SaveConfig(&Config{
+		Poutine: PoutineConfig{
+			CustomRules: CustomRulesConfig{
+				Enabled:             &enabled,
+				Path:                "~/.smokedmeat/rules",
+				DisableBuiltinRules: true,
+				RuleMappings: map[string]poutine.CustomRuleMapping{
+					"custom_injection_rule": {
+						ExploitClass: poutine.ExploitClassInjection,
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	loaded, err := LoadConfig()
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	require.NotNil(t, loaded.Poutine.CustomRules.Enabled)
+
+	assert.True(t, *loaded.Poutine.CustomRules.Enabled)
+	assert.Equal(t, "~/.smokedmeat/rules", loaded.Poutine.CustomRules.Path)
+	assert.True(t, loaded.Poutine.CustomRules.DisableBuiltinRules)
+	assert.Equal(t, poutine.ExploitClassInjection, loaded.Poutine.CustomRules.RuleMappings["custom_injection_rule"].ExploitClass)
 }

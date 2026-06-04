@@ -211,17 +211,25 @@ func VulnerabilityExploitSupport(provider, path, ruleID string) (supported bool,
 }
 
 func VulnerabilityExploitSupportWithBashContext(provider, path, ruleID, bashContext string) (supported bool, reason string) {
+	return VulnerabilityExploitSupportForClass(provider, path, ruleID, "", bashContext)
+}
+
+func VulnerabilityExploitSupportForClass(provider, path, ruleID, exploitClass, bashContext string) (supported bool, reason string) {
 	if strings.TrimSpace(provider) != "github" || !strings.HasPrefix(strings.TrimSpace(path), ".github/workflows/") {
 		return false, "This finding is analyze-only in v0.1.0. Exploit actions are only available for GitHub Actions workflows."
 	}
-	switch strings.TrimSpace(ruleID) {
-	case "injection", "untrusted_checkout_exec", "workflow_dispatch":
+	if strings.TrimSpace(exploitClass) == "" && IsSelfHostedRunnerAnalyzeOnlyRule(ruleID) {
+		return false, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet."
+	}
+	if strings.TrimSpace(exploitClass) == "" && strings.TrimSpace(ruleID) == "workflow_dispatch" {
+		return true, ""
+	}
+	switch normalizedExploitClass(ruleID, exploitClass) {
+	case "injection", "untrusted_checkout_exec":
 		if strings.TrimSpace(bashContext) == bashctx.QuotedHeredoc {
 			return false, "Quoted heredoc bodies do not evaluate shell substitutions."
 		}
 		return true, ""
-	case "pr_runs_on_self_hosted":
-		return false, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet."
 	default:
 		return false, "This finding is analyze-only in v0.1.0. Exploit actions are only available for injection and pwn-request findings."
 	}
@@ -237,13 +245,29 @@ func SetVulnerabilityExploitSupport(asset *Asset) {
 	}
 	path, _ := asset.Properties["path"].(string)
 	bashContext, _ := asset.Properties["bash_context"].(string)
-	supported, reason := VulnerabilityExploitSupportWithBashContext(asset.Provider, path, asset.RuleID, bashContext)
+	exploitClass, _ := asset.Properties["exploit_class"].(string)
+	supported, reason := VulnerabilityExploitSupportForClass(asset.Provider, path, asset.RuleID, exploitClass, bashContext)
 	asset.Properties["exploit_supported"] = supported
 	if reason == "" {
 		delete(asset.Properties, "exploit_support_reason")
 		return
 	}
 	asset.Properties["exploit_support_reason"] = reason
+}
+
+func normalizedExploitClass(ruleID, exploitClass string) string {
+	class := strings.TrimSpace(exploitClass)
+	if class != "" {
+		return class
+	}
+	switch strings.TrimSpace(ruleID) {
+	case "injection":
+		return "injection"
+	case "untrusted_checkout_exec":
+		return "untrusted_checkout_exec"
+	default:
+		return "analyze_only"
+	}
 }
 
 // classifyRuleSeverity maps poutine rule IDs to severity levels.

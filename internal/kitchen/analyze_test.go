@@ -132,6 +132,24 @@ func TestHandler_Analyze_EmptyBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+func TestPrepareCustomRuleOptions_PreservesCustomRulesInMemory(t *testing.T) {
+	opts, err := prepareCustomRuleOptions(&poutine.CustomRulePack{
+		DisableBuiltinRules: true,
+		Files: []poutine.CustomRuleFile{
+			{
+				Path:    "nested/custom.rego",
+				Content: "package rules.custom\n",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	require.NotNil(t, opts.CustomRulePack)
+	assert.True(t, opts.CustomRulePack.DisableBuiltinRules)
+	require.Len(t, opts.CustomRulePack.Files, 1)
+	assert.Equal(t, "nested/custom.rego", opts.CustomRulePack.Files[0].Path)
+}
+
 func TestAnalyzeRequest_Structure(t *testing.T) {
 	// Test request marshaling/unmarshaling
 	reqData := `{"token":"ghp_test","target":"acme/repo","target_type":"repo"}`
@@ -479,7 +497,7 @@ func TestAnalysisProgressObserver_TracksRepoSteps(t *testing.T) {
 
 func TestHandleAnalyze_DefersAnalysisMetadataSync(t *testing.T) {
 	origAnalyze := analyzeRemoteWithObserverFunc
-	analyzeRemoteWithObserverFunc = func(_ context.Context, _, _, _ string, _ poutine.AnalysisObserver) (*poutine.AnalysisResult, error) {
+	analyzeRemoteWithObserverFunc = func(_ context.Context, _, _, _ string, _ poutine.AnalysisObserver, _ poutine.AnalysisOptions) (*poutine.AnalysisResult, error) {
 		return &poutine.AnalysisResult{
 			Success:       true,
 			Target:        "acme/api",

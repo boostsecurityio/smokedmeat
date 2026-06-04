@@ -157,7 +157,7 @@ func (m Model) vulnerabilityCanAttemptPersistence(vuln *Vulnerability) bool {
 }
 
 func vulnerabilitySupportsLOTPPersistence(vuln *Vulnerability) bool {
-	if vuln == nil || vuln.RuleID != "untrusted_checkout_exec" {
+	if vuln == nil || vulnerabilityExploitClass(vuln) != "untrusted_checkout_exec" {
 		return false
 	}
 	status := lotp.AutoDeployStatusFor(vuln.LOTPTool, vuln.LOTPAction)

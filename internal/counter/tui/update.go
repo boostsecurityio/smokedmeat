@@ -1013,7 +1013,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lootStashDirty = true
 		m.GenerateSuggestions()
 		if autoAnalyze && m.tokenInfo != nil && m.config.KitchenURL != "" {
-			return m, tea.Batch(m.registerActiveSourceTokenCmd(), m.runPivotAnalysis())
+			rulePack, err := counter.BuildCustomRulePack(m.config.Poutine)
+			if err != nil {
+				m.AddOutput("error", fmt.Sprintf("Failed to load custom rules: %v", err))
+				return m, m.registerActiveSourceTokenCmd()
+			}
+			return m, tea.Batch(m.registerActiveSourceTokenCmd(), m.runPivotAnalysis(rulePack))
 		}
 		return m, m.registerActiveSourceTokenCmd()
 

@@ -1708,8 +1708,8 @@ func (m *Model) buildWizardStep1Content(width int) []string {
 
 	if m.wizard.SelectedVuln != nil {
 		v := m.wizard.SelectedVuln
-		vulnClass := vulnClassFromRuleID(v.RuleID, v.Context)
-		isPwnRequest := v.RuleID == "untrusted_checkout_exec"
+		vulnClass := vulnClassFromRuleID(vulnerabilityExploitClass(v), v.Context)
+		isPwnRequest := vulnerabilityExploitClass(v) == "untrusted_checkout_exec"
 
 		lines = append(lines,
 			formatWizardContent(pad, "", secondaryColorStyle.Render(vulnClass), innerWidth),
@@ -2057,7 +2057,7 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 			if lotpName == "" {
 				lotpName = vuln.LOTPAction
 			}
-			if vuln.RuleID == "untrusted_checkout_exec" && lotpName != "" {
+			if vulnerabilityExploitClass(vuln) == "untrusted_checkout_exec" && lotpName != "" {
 				lines = append(lines,
 					formatWizardContent(pad, "Tool:", lotpName, innerWidth),
 				)

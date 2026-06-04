@@ -250,12 +250,29 @@ func exploitSupportBlockReason(v *Vulnerability) string {
 	if strings.TrimSpace(v.ExploitSupportReason) != "" {
 		return v.ExploitSupportReason
 	}
-	_, reason := pantry.VulnerabilityExploitSupportWithBashContext("github", v.Workflow, v.RuleID, v.BashContext)
+	_, reason := pantry.VulnerabilityExploitSupportForClass("github", v.Workflow, v.RuleID, v.ExploitClass, v.BashContext)
 	return reason
 }
 
 func vulnerabilitySupportsExploit(v *Vulnerability) bool {
 	return v != nil && exploitSupportBlockReason(v) == ""
+}
+
+func vulnerabilityExploitClass(v *Vulnerability) string {
+	if v == nil {
+		return "analyze_only"
+	}
+	if class := strings.TrimSpace(v.ExploitClass); class != "" {
+		return class
+	}
+	switch strings.TrimSpace(v.RuleID) {
+	case "injection":
+		return "injection"
+	case "untrusted_checkout_exec":
+		return "untrusted_checkout_exec"
+	default:
+		return "analyze_only"
+	}
 }
 
 func vulnerabilityExploitError(v *Vulnerability) error {
@@ -272,7 +289,7 @@ func deliveryMethodBlockReason(v *Vulnerability, method DeliveryMethod) string {
 	if v == nil {
 		return ""
 	}
-	if method != DeliveryLOTP || v.RuleID != "untrusted_checkout_exec" {
+	if method != DeliveryLOTP || vulnerabilityExploitClass(v) != "untrusted_checkout_exec" {
 		return ""
 	}
 	status := lotp.AutoDeployStatusFor(v.LOTPTool, v.LOTPAction)
@@ -319,7 +336,7 @@ func ApplicableDeliveryMethods(v *Vulnerability) []DeliveryMethod {
 	}
 
 	// LOTP for untrusted checkout (pwn request) - replace injection methods entirely
-	if v.RuleID == "untrusted_checkout_exec" {
+	if vulnerabilityExploitClass(v) == "untrusted_checkout_exec" {
 		if v.LOTPTool != "" || v.LOTPAction != "" {
 			return []DeliveryMethod{DeliveryLOTP, DeliveryManualSteps}
 		}

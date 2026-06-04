@@ -307,7 +307,7 @@ func TestDetermineContext_CaseInsensitive(t *testing.T) {
 
 func TestConvertFindings_Empty(t *testing.T) {
 	result := &AnalysisResult{Findings: []Finding{}}
-	convertFindings(result, nil)
+	convertFindings(result, nil, AnalysisOptions{})
 
 	assert.Empty(t, result.Findings)
 	assert.Equal(t, 0, result.TotalFindings)
@@ -315,7 +315,7 @@ func TestConvertFindings_Empty(t *testing.T) {
 
 func TestConvertFindings_EmptyPackageList(t *testing.T) {
 	result := &AnalysisResult{Findings: []Finding{}}
-	convertFindings(result, []*models.PackageInsights{})
+	convertFindings(result, []*models.PackageInsights{}, AnalysisOptions{})
 
 	assert.Empty(t, result.Findings)
 	assert.Equal(t, 0, result.TotalFindings)
@@ -323,7 +323,7 @@ func TestConvertFindings_EmptyPackageList(t *testing.T) {
 
 func TestConvertFindings_NilPackage(t *testing.T) {
 	result := &AnalysisResult{Findings: []Finding{}}
-	convertFindings(result, []*models.PackageInsights{nil})
+	convertFindings(result, []*models.PackageInsights{nil}, AnalysisOptions{})
 
 	assert.Empty(t, result.Findings)
 }
@@ -336,7 +336,7 @@ func TestConvertFindings_PackageWithNoFindings(t *testing.T) {
 			Findings: []results.Finding{},
 		},
 	}
-	convertFindings(result, []*models.PackageInsights{pkg})
+	convertFindings(result, []*models.PackageInsights{pkg}, AnalysisOptions{})
 
 	assert.Empty(t, result.Findings)
 }
@@ -368,7 +368,7 @@ func TestConvertFindings_SingleFinding(t *testing.T) {
 		},
 	}
 
-	convertFindings(result, []*models.PackageInsights{pkg})
+	convertFindings(result, []*models.PackageInsights{pkg}, AnalysisOptions{})
 
 	require.Len(t, result.Findings, 1)
 	assert.Equal(t, "V001", result.Findings[0].ID)
@@ -406,7 +406,7 @@ func TestConvertFindings_MultipleSeverities(t *testing.T) {
 		},
 	}
 
-	convertFindings(result, []*models.PackageInsights{pkg})
+	convertFindings(result, []*models.PackageInsights{pkg}, AnalysisOptions{})
 
 	assert.Equal(t, 4, result.TotalFindings)
 	assert.Equal(t, 1, result.CriticalFindings)
@@ -458,7 +458,7 @@ func TestConvertFindings_ExpandsInjectionSourcesWithPerVariantBashContext(t *tes
 		},
 	}
 
-	convertFindings(result, []*models.PackageInsights{pkg})
+	convertFindings(result, []*models.PackageInsights{pkg}, AnalysisOptions{})
 
 	require.Len(t, result.Findings, 2)
 	assert.Equal(t, 2, result.TotalFindings)
@@ -489,7 +489,7 @@ func TestConvertFindings_IDGeneration(t *testing.T) {
 		},
 	}
 
-	convertFindings(result, []*models.PackageInsights{pkg})
+	convertFindings(result, []*models.PackageInsights{pkg}, AnalysisOptions{})
 
 	assert.Equal(t, "V001", result.Findings[0].ID)
 	assert.Equal(t, "V002", result.Findings[1].ID)
@@ -524,7 +524,7 @@ func TestConvertFindings_PopulatesAnalyzedRepos(t *testing.T) {
 		},
 	}
 
-	convertFindings(result, packages)
+	convertFindings(result, packages, AnalysisOptions{})
 
 	assert.Len(t, result.AnalyzedRepos, 2, "should deduplicate repos")
 	assert.Contains(t, result.AnalyzedRepos, "acme/api")
@@ -533,7 +533,7 @@ func TestConvertFindings_PopulatesAnalyzedRepos(t *testing.T) {
 
 func TestConvertFindings_AnalyzedReposEmpty(t *testing.T) {
 	result := &AnalysisResult{Findings: []Finding{}}
-	convertFindings(result, []*models.PackageInsights{nil})
+	convertFindings(result, []*models.PackageInsights{nil}, AnalysisOptions{})
 
 	assert.Empty(t, result.AnalyzedRepos)
 }
@@ -561,7 +561,7 @@ func TestConvertFindings_MultiplePackages(t *testing.T) {
 		},
 	}
 
-	convertFindings(result, packages)
+	convertFindings(result, packages, AnalysisOptions{})
 
 	require.Len(t, result.Findings, 2)
 	assert.Equal(t, "acme/api", result.Findings[0].Repository)
@@ -582,7 +582,7 @@ func TestConvertFindings_MissingRule(t *testing.T) {
 		},
 	}
 
-	convertFindings(result, []*models.PackageInsights{pkg})
+	convertFindings(result, []*models.PackageInsights{pkg}, AnalysisOptions{})
 
 	require.Len(t, result.Findings, 1)
 	assert.Empty(t, result.Findings[0].Title)
@@ -674,7 +674,7 @@ func TestConvertFindings_SetupGoVersionFileVictimStaysReadyWithoutRepoPath(t *te
 		},
 	}
 
-	convertFindings(result, []*models.PackageInsights{pkg})
+	convertFindings(result, []*models.PackageInsights{pkg}, AnalysisOptions{})
 
 	require.Len(t, result.Findings, 1)
 	require.Len(t, result.Findings[0].CachePoisonVictims, 1)

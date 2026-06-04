@@ -536,6 +536,15 @@ func TestVulnerabilitySupportsExploit(t *testing.T) {
 			supports: true,
 		},
 		{
+			name: "mapped custom injection is supported",
+			vuln: &Vulnerability{
+				Workflow:     ".github/workflows/ci.yml",
+				RuleID:       "custom_injection_rule",
+				ExploitClass: "injection",
+			},
+			supports: true,
+		},
+		{
 			name: "self hosted finding is analyze only",
 			vuln: &Vulnerability{
 				Workflow: ".github/workflows/pr.yml",

@@ -107,9 +107,11 @@ func run() error {
 	kitchenBrowserURL := getEnvOrDefault("KITCHEN_BROWSER_URL", kitchenExternalURL)
 
 	var initialToken, initialTokenSource string
+	var poutineConfig counter.PoutineConfig
 	if savedConfig != nil {
 		initialToken = savedConfig.InitialAccessToken
 		initialTokenSource = savedConfig.InitialAccessTokenSource
+		poutineConfig = savedConfig.Poutine
 	}
 
 	config := tui.Config{
@@ -127,6 +129,7 @@ func run() error {
 		AuthFailed:               authFailed,
 		InitialAccessToken:       initialToken,
 		InitialAccessTokenSource: initialTokenSource,
+		Poutine:                  poutineConfig,
 	}
 	if versionCheckResult != nil {
 		config.LatestVersion = versionCheckResult.LatestVersion
