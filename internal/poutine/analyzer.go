@@ -236,9 +236,7 @@ func addCustomRuleModules(opaClient *opa.Opa, files []CustomRuleFile) error {
 		}
 		modules[name] = mod
 	}
-	compiler := ast.NewCompiler().
-		WithEnablePrintStatements(true).
-		WithCapabilities(capabilities)
+	compiler := ast.NewCompiler().WithCapabilities(capabilities)
 	compiler.Compile(modules)
 	if compiler.Failed() {
 		return compiler.Errors

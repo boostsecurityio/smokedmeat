@@ -116,6 +116,9 @@ func loadCustomRuleFiles(root string) ([]poutine.CustomRuleFile, error) {
 		if filepath.Ext(path) != ".rego" {
 			return nil
 		}
+		if entry.Type()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("custom rule file %s is a symlink", path)
+		}
 		if len(files) >= maxCustomRuleFiles {
 			return fmt.Errorf("custom rule pack exceeds %d files", maxCustomRuleFiles)
 		}

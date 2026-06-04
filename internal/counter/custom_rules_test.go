@@ -48,6 +48,23 @@ func TestBuildCustomRulePack_DefaultMissingDirectoryReturnsNil(t *testing.T) {
 	assert.Nil(t, pack)
 }
 
+func TestBuildCustomRulePack_RejectsSymlinkedRuleFile(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target.rego")
+	require.NoError(t, os.WriteFile(target, []byte("package rules.target\n"), 0o600))
+	err := os.Symlink(target, filepath.Join(root, "linked.rego"))
+	if err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	_, err = BuildCustomRulePack(PoutineConfig{
+		CustomRules: CustomRulesConfig{Path: root},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink")
+}
+
 func TestBuildCustomRulePack_InvalidMapping(t *testing.T) {
 	_, err := BuildCustomRulePack(PoutineConfig{
 		CustomRules: CustomRulesConfig{

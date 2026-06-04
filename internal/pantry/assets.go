@@ -218,10 +218,10 @@ func VulnerabilityExploitSupportForClass(provider, path, ruleID, exploitClass, b
 	if strings.TrimSpace(provider) != "github" || !strings.HasPrefix(strings.TrimSpace(path), ".github/workflows/") {
 		return false, "This finding is analyze-only in v0.1.0. Exploit actions are only available for GitHub Actions workflows."
 	}
-	if strings.TrimSpace(exploitClass) == "" && IsSelfHostedRunnerAnalyzeOnlyRule(ruleID) {
+	if IsSelfHostedRunnerAnalyzeOnlyRule(ruleID) {
 		return false, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet."
 	}
-	if strings.TrimSpace(exploitClass) == "" && strings.TrimSpace(ruleID) == "workflow_dispatch" {
+	if strings.TrimSpace(ruleID) == "workflow_dispatch" {
 		return true, ""
 	}
 	switch normalizedExploitClass(ruleID, exploitClass) {

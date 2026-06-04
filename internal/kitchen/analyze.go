@@ -156,7 +156,7 @@ func validateCustomRulePack(pack *poutine.CustomRulePack) error {
 		if !safeCustomRulePath(file.Path) {
 			return fmt.Errorf("unsafe rule path: %s", file.Path)
 		}
-		size := len([]byte(file.Content))
+		size := len(file.Content)
 		if size > maxCustomRuleFileBytes {
 			return fmt.Errorf("rule file %s exceeds %d bytes", file.Path, maxCustomRuleFileBytes)
 		}
