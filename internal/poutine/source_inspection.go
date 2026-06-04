@@ -699,20 +699,15 @@ func sourceActionReferencePinned(uses string) bool {
 		return false
 	}
 	version = strings.TrimSpace(version)
-	if len(version) == 40 {
-		for _, c := range version {
-			if (c < 'a' || c > 'f') && (c < 'A' || c > 'F') && (c < '0' || c > '9') {
-				return false
-			}
-		}
-		return true
-	}
-	switch strings.ToLower(version) {
-	case "main", "master", "head", "latest":
+	if len(version) != 40 {
 		return false
-	default:
-		return strings.HasPrefix(strings.ToLower(version), "v")
 	}
+	for _, c := range version {
+		if (c < 'a' || c > 'f') && (c < 'A' || c > 'F') && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func sourceNameLooksSensitive(name string) bool {

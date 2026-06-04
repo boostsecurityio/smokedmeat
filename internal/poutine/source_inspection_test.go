@@ -43,6 +43,7 @@ jobs:
 	assertSourceRisk(t, inspection.Risks, "oidc-token")
 	assertSourceRisk(t, inspection.Risks, "weak-gate")
 	assertSourceRisk(t, inspection.Risks, "untrusted-checkout")
+	assertSourceRisk(t, inspection.Risks, "unpinned-action")
 	assert.Contains(t, requireSourceRisk(t, inspection.Risks, "lotp-tool").Message, `Step "dangerous" invokes LOTP-capable tool "npm"`)
 	assertSourceRisk(t, inspection.Risks, "tainted-input")
 }
@@ -67,6 +68,28 @@ runs:
 	assertSourceRisk(t, inspection.Risks, "sensitive-input")
 	assertSourceRisk(t, inspection.Risks, "unpinned-action")
 	assertSourceRisk(t, inspection.Risks, "tainted-input")
+}
+
+func TestSourceActionReferencePinned(t *testing.T) {
+	tests := []struct {
+		name string
+		uses string
+		want bool
+	}{
+		{"commit sha", "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5", true},
+		{"uppercase commit sha", "actions/checkout@34E114876B0B11C390A56381AD16EBD13914F8D5", true},
+		{"version tag", "actions/checkout@v4", false},
+		{"branch", "actions/checkout@main", false},
+		{"short sha", "actions/checkout@34e1148", false},
+		{"invalid sha", "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8dz", false},
+		{"missing version", "actions/checkout", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, sourceActionReferencePinned(tt.uses))
+		})
+	}
 }
 
 func assertSourceRisk(t *testing.T, risks []SourceRisk, kind string) {
