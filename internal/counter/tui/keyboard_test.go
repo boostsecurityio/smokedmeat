@@ -134,6 +134,7 @@ func TestHandleKeyMsg_WaitingPhaseDoesNotRouteLettersToHiddenInput(t *testing.T)
 
 func TestHandleKeyMsg_ShiftROpensRulesModalFromReconInputFocus(t *testing.T) {
 	configDir := t.TempDir()
+	enabled := true
 	rulesDir := filepath.Join(configDir, "rules")
 	require.NoError(t, os.Mkdir(rulesDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(rulesDir, "custom.rego"), []byte("package rules.custom\n"), 0o600))
@@ -141,6 +142,7 @@ func TestHandleKeyMsg_ShiftROpensRulesModalFromReconInputFocus(t *testing.T) {
 	require.NoError(t, counter.SaveConfig(&counter.Config{
 		Poutine: counter.PoutineConfig{
 			CustomRules: counter.CustomRulesConfig{
+				Enabled:             &enabled,
 				DisableBuiltinRules: true,
 				RuleMappings: map[string]poutine.CustomRuleMapping{
 					"custom": {ExploitClass: poutine.ExploitClassInjection},

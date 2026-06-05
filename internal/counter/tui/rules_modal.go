@@ -108,7 +108,10 @@ func (m *Model) rulesModalLines(width int) []string {
 	summary := *m.ruleSummary
 	customStatus := "enabled"
 	if !summary.CustomRulesEnabled {
-		customStatus = "disabled in config"
+		customStatus = "disabled by default"
+		if summary.CustomRulesExplicit {
+			customStatus = "disabled in config"
+		}
 	}
 	pathSuffix := ""
 	if summary.CustomRulesDefaultPath {

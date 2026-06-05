@@ -23,7 +23,7 @@ const (
 
 func BuildCustomRulePack(cfg PoutineConfig) (*poutine.CustomRulePack, error) {
 	custom := cfg.CustomRules
-	if custom.Enabled != nil && !*custom.Enabled {
+	if !customRulesEnabled(custom) {
 		return nil, nil
 	}
 	if err := validateRuleMappings(custom.RuleMappings); err != nil {
@@ -65,6 +65,10 @@ func BuildCustomRulePack(cfg PoutineConfig) (*poutine.CustomRulePack, error) {
 		DisableBuiltinRules: custom.DisableBuiltinRules,
 		RuleMappings:        cloneRuleMappings(custom.RuleMappings),
 	}, nil
+}
+
+func customRulesEnabled(custom CustomRulesConfig) bool {
+	return custom.Enabled != nil && *custom.Enabled
 }
 
 func customRulesPath(path string) (rulePath string, usedDefault bool, err error) {

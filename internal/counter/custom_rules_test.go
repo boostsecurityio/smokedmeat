@@ -16,6 +16,7 @@ import (
 
 func TestBuildCustomRulePack_LoadsRecursiveRegoFiles(t *testing.T) {
 	root := t.TempDir()
+	enabled := true
 	require.NoError(t, os.WriteFile(filepath.Join(root, "one.rego"), []byte("package rules.one\n"), 0o600))
 	require.NoError(t, os.Mkdir(filepath.Join(root, "nested"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "nested", "two.rego"), []byte("package rules.two\n"), 0o600))
@@ -23,6 +24,7 @@ func TestBuildCustomRulePack_LoadsRecursiveRegoFiles(t *testing.T) {
 
 	pack, err := BuildCustomRulePack(PoutineConfig{
 		CustomRules: CustomRulesConfig{
+			Enabled:             &enabled,
 			Path:                root,
 			DisableBuiltinRules: true,
 			RuleMappings: map[string]poutine.CustomRuleMapping{
@@ -48,8 +50,21 @@ func TestBuildCustomRulePack_DefaultMissingDirectoryReturnsNil(t *testing.T) {
 	assert.Nil(t, pack)
 }
 
+func TestBuildCustomRulePack_DefaultDirectoryRequiresExplicitEnable(t *testing.T) {
+	configDir := t.TempDir()
+	rulesDir := filepath.Join(configDir, "rules")
+	require.NoError(t, os.Mkdir(rulesDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(rulesDir, "custom.rego"), []byte("package rules.custom\n"), 0o600))
+	t.Setenv("SMOKEDMEAT_CONFIG_DIR", configDir)
+
+	pack, err := BuildCustomRulePack(PoutineConfig{})
+	require.NoError(t, err)
+	assert.Nil(t, pack)
+}
+
 func TestBuildCustomRulePack_RejectsSymlinkedRuleFile(t *testing.T) {
 	root := t.TempDir()
+	enabled := true
 	target := filepath.Join(t.TempDir(), "target.rego")
 	require.NoError(t, os.WriteFile(target, []byte("package rules.target\n"), 0o600))
 	err := os.Symlink(target, filepath.Join(root, "linked.rego"))
@@ -58,7 +73,7 @@ func TestBuildCustomRulePack_RejectsSymlinkedRuleFile(t *testing.T) {
 	}
 
 	_, err = BuildCustomRulePack(PoutineConfig{
-		CustomRules: CustomRulesConfig{Path: root},
+		CustomRules: CustomRulesConfig{Enabled: &enabled, Path: root},
 	})
 
 	require.Error(t, err)
@@ -66,8 +81,11 @@ func TestBuildCustomRulePack_RejectsSymlinkedRuleFile(t *testing.T) {
 }
 
 func TestBuildCustomRulePack_InvalidMapping(t *testing.T) {
+	enabled := true
+
 	_, err := BuildCustomRulePack(PoutineConfig{
 		CustomRules: CustomRulesConfig{
+			Enabled: &enabled,
 			RuleMappings: map[string]poutine.CustomRuleMapping{
 				"custom": {ExploitClass: "invalid"},
 			},
@@ -84,7 +102,8 @@ func TestBuildRuleSummary_DefaultBuiltinRules(t *testing.T) {
 	summary, err := BuildRuleSummary(PoutineConfig{})
 
 	require.NoError(t, err)
-	assert.True(t, summary.CustomRulesEnabled)
+	assert.False(t, summary.CustomRulesEnabled)
+	assert.False(t, summary.CustomRulesExplicit)
 	assert.False(t, summary.CustomRulesPathExists)
 	assert.False(t, summary.DisableBuiltinRules)
 	assert.Equal(t, poutine.OffensiveRules, summary.BuiltinRules)
@@ -95,11 +114,13 @@ func TestBuildRuleSummary_DefaultBuiltinRules(t *testing.T) {
 
 func TestBuildRuleSummary_CustomRulesDisableBuiltins(t *testing.T) {
 	root := t.TempDir()
+	enabled := true
 	require.NoError(t, os.WriteFile(filepath.Join(root, "one.rego"), []byte("package rules.one\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "two.rego"), []byte("package rules.two\n"), 0o600))
 
 	summary, err := BuildRuleSummary(PoutineConfig{
 		CustomRules: CustomRulesConfig{
+			Enabled:             &enabled,
 			Path:                root,
 			DisableBuiltinRules: true,
 			RuleMappings: map[string]poutine.CustomRuleMapping{

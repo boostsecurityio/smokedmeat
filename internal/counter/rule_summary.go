@@ -20,6 +20,7 @@ type RuleMappingSummary struct {
 type RuleSummary struct {
 	ConfigPath             string
 	CustomRulesEnabled     bool
+	CustomRulesExplicit    bool
 	CustomRulesPath        string
 	CustomRulesDefaultPath bool
 	CustomRulesPathExists  bool
@@ -32,7 +33,7 @@ type RuleSummary struct {
 
 func BuildRuleSummary(cfg PoutineConfig) (RuleSummary, error) {
 	custom := cfg.CustomRules
-	enabled := custom.Enabled == nil || *custom.Enabled
+	enabled := customRulesEnabled(custom)
 
 	path, usedDefault, err := customRulesPath(custom.Path)
 	if err != nil {
@@ -42,6 +43,7 @@ func BuildRuleSummary(cfg PoutineConfig) (RuleSummary, error) {
 	summary := RuleSummary{
 		ConfigPath:             ConfigPath(),
 		CustomRulesEnabled:     enabled,
+		CustomRulesExplicit:    custom.Enabled != nil,
 		CustomRulesPath:        path,
 		CustomRulesDefaultPath: usedDefault,
 		DisableBuiltinRules:    enabled && custom.DisableBuiltinRules,
