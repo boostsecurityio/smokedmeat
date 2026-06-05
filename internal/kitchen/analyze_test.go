@@ -150,6 +150,28 @@ func TestPrepareCustomRuleOptions_PreservesCustomRulesInMemory(t *testing.T) {
 	assert.Equal(t, "nested/custom.rego", opts.CustomRulePack.Files[0].Path)
 }
 
+func TestPrepareCustomRuleOptions_UsesPackLimits(t *testing.T) {
+	content := strings.Repeat("a", poutine.DefaultCustomRuleMaxFileBytes+1)
+
+	opts, err := prepareCustomRuleOptions(&poutine.CustomRulePack{
+		Files: []poutine.CustomRuleFile{
+			{
+				Path:    "custom.rego",
+				Content: content,
+			},
+		},
+		Limits: poutine.CustomRuleLimits{
+			MaxFileBytes: poutine.DefaultCustomRuleMaxFileBytes + 1,
+			MaxPackBytes: poutine.DefaultCustomRuleMaxPackBytes + 1,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, opts.CustomRulePack)
+	require.Len(t, opts.CustomRulePack.Files, 1)
+	assert.Equal(t, content, opts.CustomRulePack.Files[0].Content)
+}
+
 func TestAnalyzeRequest_Structure(t *testing.T) {
 	// Test request marshaling/unmarshaling
 	reqData := `{"token":"ghp_test","target":"acme/repo","target_type":"repo"}`

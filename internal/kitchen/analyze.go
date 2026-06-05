@@ -32,10 +32,7 @@ const (
 	analysisStatusPending      = "pending"
 	analysisStatusCompleted    = "completed"
 	analysisStatusFailed       = "failed"
-	maxCustomRuleFiles         = 256
-	maxCustomRuleFileBytes     = 512 * 1024
-	maxCustomRulePackBytes     = 5 * 1024 * 1024
-	analyzeRequestMaxBodyBytes = maxCustomRulePackBytes + 1024*1024
+	analyzeRequestMaxBodyBytes = poutine.HardCustomRuleMaxPackBytes + 1024*1024
 )
 
 var analyzeRemoteWithObserverFunc = poutine.AnalyzeRemoteWithObserverAndOptions
@@ -140,10 +137,14 @@ func prepareCustomRuleOptions(pack *poutine.CustomRulePack) (poutine.AnalysisOpt
 }
 
 func validateCustomRulePack(pack *poutine.CustomRulePack) error {
-	if len(pack.Files) > maxCustomRuleFiles {
-		return fmt.Errorf("rule pack exceeds %d files", maxCustomRuleFiles)
+	limits := poutine.NormalizeCustomRuleLimits(pack.Limits)
+	if !poutine.CustomRuleLimitsValid(limits) {
+		return fmt.Errorf("rule pack limits exceed supported maximums")
 	}
-	totalBytes := 0
+	if len(pack.Files) > limits.MaxFiles {
+		return fmt.Errorf("rule pack exceeds %d files", limits.MaxFiles)
+	}
+	totalBytes := int64(0)
 	for ruleID, mapping := range pack.RuleMappings {
 		if strings.TrimSpace(ruleID) == "" {
 			return fmt.Errorf("rule mapping has an empty rule ID")
@@ -156,13 +157,13 @@ func validateCustomRulePack(pack *poutine.CustomRulePack) error {
 		if !safeCustomRulePath(file.Path) {
 			return fmt.Errorf("unsafe rule path: %s", file.Path)
 		}
-		size := len(file.Content)
-		if size > maxCustomRuleFileBytes {
-			return fmt.Errorf("rule file %s exceeds %d bytes", file.Path, maxCustomRuleFileBytes)
+		size := int64(len(file.Content))
+		if size > limits.MaxFileBytes {
+			return fmt.Errorf("rule file %s exceeds %d bytes", file.Path, limits.MaxFileBytes)
 		}
 		totalBytes += size
-		if totalBytes > maxCustomRulePackBytes {
-			return fmt.Errorf("rule pack exceeds %d bytes", maxCustomRulePackBytes)
+		if totalBytes > limits.MaxPackBytes {
+			return fmt.Errorf("rule pack exceeds %d bytes", limits.MaxPackBytes)
 		}
 	}
 	return nil

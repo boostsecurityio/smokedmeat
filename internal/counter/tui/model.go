@@ -320,6 +320,7 @@ type Model struct {
 
 	ruleSummary      *counter.RuleSummary
 	ruleSummaryError string
+	ruleScroll       int
 
 	analysisResultPoll *analysisResultPollState
 }

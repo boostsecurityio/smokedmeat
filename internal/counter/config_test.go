@@ -78,6 +78,11 @@ func TestConfig_CustomRulesRoundTrip(t *testing.T) {
 				Enabled:             &enabled,
 				Path:                "~/.smokedmeat/rules",
 				DisableBuiltinRules: true,
+				Limits: poutine.CustomRuleLimits{
+					MaxFiles:     512,
+					MaxFileBytes: 1048576,
+					MaxPackBytes: 10485760,
+				},
 				RuleMappings: map[string]poutine.CustomRuleMapping{
 					"custom_injection_rule": {
 						ExploitClass: poutine.ExploitClassInjection,
@@ -101,5 +106,8 @@ func TestConfig_CustomRulesRoundTrip(t *testing.T) {
 	assert.True(t, *loaded.Poutine.CustomRules.Enabled)
 	assert.Equal(t, "~/.smokedmeat/rules", loaded.Poutine.CustomRules.Path)
 	assert.True(t, loaded.Poutine.CustomRules.DisableBuiltinRules)
+	assert.Equal(t, 512, loaded.Poutine.CustomRules.Limits.MaxFiles)
+	assert.Equal(t, int64(1048576), loaded.Poutine.CustomRules.Limits.MaxFileBytes)
+	assert.Equal(t, int64(10485760), loaded.Poutine.CustomRules.Limits.MaxPackBytes)
 	assert.Equal(t, poutine.ExploitClassInjection, loaded.Poutine.CustomRules.RuleMappings["custom_injection_rule"].ExploitClass)
 }

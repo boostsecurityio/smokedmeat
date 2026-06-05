@@ -16,9 +16,6 @@ import (
 
 const (
 	defaultCustomRulesDirName = "rules"
-	maxCustomRuleFiles        = 256
-	maxCustomRuleFileBytes    = 512 * 1024
-	maxCustomRulePackBytes    = 5 * 1024 * 1024
 )
 
 func BuildCustomRulePack(cfg PoutineConfig) (*poutine.CustomRulePack, error) {
@@ -28,6 +25,10 @@ func BuildCustomRulePack(cfg PoutineConfig) (*poutine.CustomRulePack, error) {
 	}
 	if err := validateRuleMappings(custom.RuleMappings); err != nil {
 		return nil, err
+	}
+	limits := poutine.NormalizeCustomRuleLimits(custom.Limits)
+	if !poutine.CustomRuleLimitsValid(limits) {
+		return nil, fmt.Errorf("custom rule limits exceed supported maximums")
 	}
 
 	path, usedDefault, err := customRulesPath(custom.Path)
@@ -44,6 +45,7 @@ func BuildCustomRulePack(cfg PoutineConfig) (*poutine.CustomRulePack, error) {
 			return &poutine.CustomRulePack{
 				DisableBuiltinRules: custom.DisableBuiltinRules,
 				RuleMappings:        cloneRuleMappings(custom.RuleMappings),
+				Limits:              limits,
 			}, nil
 		}
 		return nil, fmt.Errorf("custom rules path: %w", err)
@@ -52,7 +54,7 @@ func BuildCustomRulePack(cfg PoutineConfig) (*poutine.CustomRulePack, error) {
 		return nil, fmt.Errorf("custom rules path is not a directory: %s", path)
 	}
 
-	files, err := loadCustomRuleFiles(path)
+	files, err := loadCustomRuleFiles(path, limits)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +66,7 @@ func BuildCustomRulePack(cfg PoutineConfig) (*poutine.CustomRulePack, error) {
 		Files:               files,
 		DisableBuiltinRules: custom.DisableBuiltinRules,
 		RuleMappings:        cloneRuleMappings(custom.RuleMappings),
+		Limits:              limits,
 	}, nil
 }
 
@@ -106,9 +109,10 @@ func expandUserPath(path string) (string, error) {
 	return path, nil
 }
 
-func loadCustomRuleFiles(root string) ([]poutine.CustomRuleFile, error) {
+func loadCustomRuleFiles(root string, limits poutine.CustomRuleLimits) ([]poutine.CustomRuleFile, error) {
 	var files []poutine.CustomRuleFile
 	totalBytes := int64(0)
+	limits = poutine.NormalizeCustomRuleLimits(limits)
 
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -120,23 +124,20 @@ func loadCustomRuleFiles(root string) ([]poutine.CustomRuleFile, error) {
 		if filepath.Ext(path) != ".rego" {
 			return nil
 		}
-		if entry.Type()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("custom rule file %s is a symlink", path)
-		}
-		if len(files) >= maxCustomRuleFiles {
-			return fmt.Errorf("custom rule pack exceeds %d files", maxCustomRuleFiles)
+		if len(files) >= limits.MaxFiles {
+			return fmt.Errorf("custom rule pack exceeds %d files", limits.MaxFiles)
 		}
 
-		info, err := entry.Info()
+		info, err := customRuleFileInfo(path, entry)
 		if err != nil {
 			return err
 		}
-		if info.Size() > maxCustomRuleFileBytes {
-			return fmt.Errorf("custom rule file %s exceeds %d bytes", path, maxCustomRuleFileBytes)
+		if info.Size() > limits.MaxFileBytes {
+			return fmt.Errorf("custom rule file %s exceeds %d bytes", path, limits.MaxFileBytes)
 		}
 		totalBytes += info.Size()
-		if totalBytes > maxCustomRulePackBytes {
-			return fmt.Errorf("custom rule pack exceeds %d bytes", maxCustomRulePackBytes)
+		if totalBytes > limits.MaxPackBytes {
+			return fmt.Errorf("custom rule pack exceeds %d bytes", limits.MaxPackBytes)
 		}
 
 		rel, err := filepath.Rel(root, path)
@@ -166,6 +167,27 @@ func loadCustomRuleFiles(root string) ([]poutine.CustomRuleFile, error) {
 		return files[i].Path < files[j].Path
 	})
 	return files, nil
+}
+
+func customRuleFileInfo(path string, entry fs.DirEntry) (fs.FileInfo, error) {
+	if entry.Type()&fs.ModeSymlink != 0 {
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("custom rule file %s is not a regular file", path)
+		}
+		return info, nil
+	}
+	info, err := entry.Info()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("custom rule file %s is not a regular file", path)
+	}
+	return info, nil
 }
 
 func safeRulePath(path string) bool {

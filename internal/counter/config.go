@@ -23,6 +23,7 @@ type CustomRulesConfig struct {
 	Path                string                               `yaml:"path,omitempty"`
 	DisableBuiltinRules bool                                 `yaml:"disable_builtin_rules,omitempty"`
 	RuleMappings        map[string]poutine.CustomRuleMapping `yaml:"rule_mappings,omitempty"`
+	Limits              poutine.CustomRuleLimits             `yaml:"limits,omitempty"`
 }
 
 // Config holds Counter configuration.
@@ -49,11 +50,7 @@ type Config struct {
 // ConfigPath returns the path to the config file.
 // Respects SMOKEDMEAT_CONFIG_DIR env var, defaults to ~/.smokedmeat.
 func ConfigPath() string {
-	if dir := os.Getenv("SMOKEDMEAT_CONFIG_DIR"); dir != "" {
-		return filepath.Join(dir, "config.yaml")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".smokedmeat", "config.yaml")
+	return filepath.Join(configDir(), "config.yaml")
 }
 
 // LoadConfig loads config from ~/.smokedmeat/config.yaml

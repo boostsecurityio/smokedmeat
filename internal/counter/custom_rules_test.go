@@ -6,6 +6,7 @@ package counter
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -62,7 +63,7 @@ func TestBuildCustomRulePack_DefaultDirectoryRequiresExplicitEnable(t *testing.T
 	assert.Nil(t, pack)
 }
 
-func TestBuildCustomRulePack_RejectsSymlinkedRuleFile(t *testing.T) {
+func TestBuildCustomRulePack_LoadsSymlinkedRuleFile(t *testing.T) {
 	root := t.TempDir()
 	enabled := true
 	target := filepath.Join(t.TempDir(), "target.rego")
@@ -72,12 +73,37 @@ func TestBuildCustomRulePack_RejectsSymlinkedRuleFile(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 
-	_, err = BuildCustomRulePack(PoutineConfig{
+	pack, err := BuildCustomRulePack(PoutineConfig{
 		CustomRules: CustomRulesConfig{Enabled: &enabled, Path: root},
 	})
+	require.NoError(t, err)
+	require.NotNil(t, pack)
+	require.Len(t, pack.Files, 1)
+	assert.Equal(t, "linked.rego", pack.Files[0].Path)
+	assert.Equal(t, "package rules.target\n", pack.Files[0].Content)
+}
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "symlink")
+func TestBuildCustomRulePack_UsesConfiguredFileSizeLimit(t *testing.T) {
+	root := t.TempDir()
+	enabled := true
+	content := strings.Repeat("a", poutine.DefaultCustomRuleMaxFileBytes+1)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "large.rego"), []byte(content), 0o600))
+
+	pack, err := BuildCustomRulePack(PoutineConfig{
+		CustomRules: CustomRulesConfig{
+			Enabled: &enabled,
+			Path:    root,
+			Limits: poutine.CustomRuleLimits{
+				MaxFileBytes: poutine.DefaultCustomRuleMaxFileBytes + 1,
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, pack)
+	require.Len(t, pack.Files, 1)
+	assert.Equal(t, poutine.DefaultCustomRuleMaxFiles, pack.Limits.MaxFiles)
+	assert.Equal(t, int64(poutine.DefaultCustomRuleMaxFileBytes+1), pack.Limits.MaxFileBytes)
 }
 
 func TestBuildCustomRulePack_InvalidMapping(t *testing.T) {

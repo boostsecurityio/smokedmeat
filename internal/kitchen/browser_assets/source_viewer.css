@@ -990,6 +990,7 @@ button:focus-visible {
 .source-sidebar-item-main span {
   font-weight: 600;
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 .source-sidebar-item-main a:hover {
   color: var(--accent-hover);
@@ -1032,12 +1033,13 @@ button:focus-visible {
 }
 .risk-link {
   display: grid;
-  grid-template-columns: minmax(86px, 112px) 1fr;
+  grid-template-columns: minmax(0, 112px) minmax(0, 1fr);
   gap: 8px;
   margin: 3px -6px;
   padding: 7px 8px;
   color: var(--text);
   font-size: 12px;
+  min-width: 0;
   border-radius: 8px;
   transition: background-color .12s ease, box-shadow .12s ease;
 }
@@ -1047,9 +1049,12 @@ button:focus-visible {
 }
 .risk-label {
   font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .risk-message {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .risk-detail-list {
   display: flex;
@@ -1067,6 +1072,7 @@ button:focus-visible {
   padding: 1px 7px;
   font: 11px ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .risk-critical,
 .risk-high {

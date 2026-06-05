@@ -59,6 +59,10 @@ func BuildRuleSummary(cfg PoutineConfig) (RuleSummary, error) {
 	if validateErr := validateRuleMappings(custom.RuleMappings); validateErr != nil {
 		return RuleSummary{}, validateErr
 	}
+	limits := poutine.NormalizeCustomRuleLimits(custom.Limits)
+	if !poutine.CustomRuleLimitsValid(limits) {
+		return RuleSummary{}, &customRuleLimitsError{}
+	}
 
 	info, err := os.Stat(path)
 	if err != nil {
@@ -73,7 +77,7 @@ func BuildRuleSummary(cfg PoutineConfig) (RuleSummary, error) {
 	}
 	summary.CustomRulesPathExists = true
 
-	files, err := loadCustomRuleFiles(path)
+	files, err := loadCustomRuleFiles(path, limits)
 	if err != nil {
 		return RuleSummary{}, err
 	}
@@ -84,6 +88,12 @@ func BuildRuleSummary(cfg PoutineConfig) (RuleSummary, error) {
 	summary.RuleMappings = summarizeRuleMappings(custom.RuleMappings)
 
 	return summary, nil
+}
+
+type customRuleLimitsError struct{}
+
+func (e *customRuleLimitsError) Error() string {
+	return "custom rule limits exceed supported maximums"
 }
 
 type notDirectoryError struct {

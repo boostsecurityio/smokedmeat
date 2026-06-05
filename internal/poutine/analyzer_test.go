@@ -403,7 +403,7 @@ func TestConvertFindings_CustomUntrustedCheckoutClassUsesMappedPayloadClass(t *t
 		FindingsResults: results.FindingsResult{
 			Findings: []results.Finding{
 				{
-					RuleId: "__pkgsupply_untrusted_checkout_exec",
+					RuleId: "__custom_untrusted_checkout_exec",
 					Meta: results.FindingMeta{
 						Path:          ".github/workflows/package.yml",
 						Line:          32,
@@ -413,7 +413,7 @@ func TestConvertFindings_CustomUntrustedCheckoutClassUsesMappedPayloadClass(t *t
 				},
 			},
 			Rules: map[string]results.Rule{
-				"__pkgsupply_untrusted_checkout_exec": {
+				"__custom_untrusted_checkout_exec": {
 					Title: "Pwn Request",
 					Level: "error",
 				},
@@ -422,7 +422,7 @@ func TestConvertFindings_CustomUntrustedCheckoutClassUsesMappedPayloadClass(t *t
 	}
 	opts := AnalysisOptions{CustomRulePack: &CustomRulePack{
 		RuleMappings: map[string]CustomRuleMapping{
-			"__pkgsupply_untrusted_checkout_exec": {ExploitClass: ExploitClassUntrustedCheckoutExec},
+			"__custom_untrusted_checkout_exec": {ExploitClass: ExploitClassUntrustedCheckoutExec},
 		},
 	}}
 
@@ -430,7 +430,7 @@ func TestConvertFindings_CustomUntrustedCheckoutClassUsesMappedPayloadClass(t *t
 
 	require.Len(t, result.Findings, 1)
 	finding := result.Findings[0]
-	assert.Equal(t, "__pkgsupply_untrusted_checkout_exec", finding.RuleID)
+	assert.Equal(t, "__custom_untrusted_checkout_exec", finding.RuleID)
 	assert.Equal(t, ExploitClassUntrustedCheckoutExec, finding.ExploitClass)
 	assert.Equal(t, "untrusted_checkout", finding.Context)
 	assert.Equal(t, "pull_request_target", finding.Trigger)

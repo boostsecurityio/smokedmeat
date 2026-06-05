@@ -19,6 +19,7 @@ func (m Model) openRulesModal() (Model, tea.Cmd) {
 	} else if err != nil {
 		m.ruleSummary = nil
 		m.ruleSummaryError = "config load failed: " + err.Error()
+		m.ruleScroll = 0
 		m.prevView = m.view
 		m.prevFocus = m.focus
 		m.view = ViewRules
@@ -33,6 +34,7 @@ func (m Model) openRulesModal() (Model, tea.Cmd) {
 		m.ruleSummary = &summary
 		m.ruleSummaryError = ""
 	}
+	m.ruleScroll = 0
 	m.prevView = m.view
 	m.prevFocus = m.focus
 	m.view = ViewRules
@@ -50,6 +52,18 @@ func (m Model) handleRulesKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.focus = m.prevFocus
 		m.updateFocus()
 		return m, nil
+	case "up", "k":
+		m.ruleScroll--
+	case "down", "j":
+		m.ruleScroll++
+	case "pgup", "ctrl+u":
+		m.ruleScroll -= 8
+	case "pgdown", "ctrl+d":
+		m.ruleScroll += 8
+	case "home":
+		m.ruleScroll = 0
+	case "end":
+		m.ruleScroll = 1 << 30
 	}
 	return m, nil
 }
@@ -67,7 +81,7 @@ func (m *Model) buildRulesModal(width, height int) string {
 	contentHeight := max(height-2, 8)
 	lines := m.rulesModalLines(contentWidth)
 	if len(lines) > contentHeight {
-		lines = append(lines[:contentHeight-2], rulesModalLine(contentWidth, "..."))
+		lines = m.visibleRulesModalLines(lines, contentWidth, contentHeight)
 	}
 	for len(lines) < contentHeight {
 		lines = append(lines, strings.Repeat(" ", contentWidth))
@@ -79,6 +93,34 @@ func (m *Model) buildRulesModal(width, height int) string {
 		Width(contentWidth)
 
 	return style.Render(strings.Join(lines, "\n"))
+}
+
+func (m *Model) visibleRulesModalLines(lines []string, width, height int) []string {
+	titleLines := min(2, len(lines))
+	footerLines := 1
+	bodyHeight := max(height-titleLines-footerLines, 1)
+	bodyEnd := max(len(lines)-footerLines, titleLines)
+	body := lines[titleLines:bodyEnd]
+	maxScroll := max(len(body)-bodyHeight, 0)
+	if m.ruleScroll < 0 {
+		m.ruleScroll = 0
+	}
+	if m.ruleScroll > maxScroll {
+		m.ruleScroll = maxScroll
+	}
+
+	out := append([]string(nil), lines[:titleLines]...)
+	end := min(m.ruleScroll+bodyHeight, len(body))
+	out = append(out, body[m.ruleScroll:end]...)
+	for len(out) < height-1 {
+		out = append(out, strings.Repeat(" ", width))
+	}
+	footer := helpKeyStyle.Render("Up/Down") + helpDescStyle.Render(":scroll  ") + helpKeyStyle.Render("Esc") + helpDescStyle.Render(":close")
+	if maxScroll > 0 {
+		footer = fmt.Sprintf("%s  %d/%d", footer, m.ruleScroll+1, maxScroll+1)
+	}
+	out = append(out, rulesModalLine(width, footer))
+	return out
 }
 
 func (m *Model) rulesModalLines(width int) []string {
