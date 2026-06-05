@@ -37,7 +37,7 @@ var schemaKey = []byte("schema")
 
 const (
 	currentSchemaMajor = 2
-	currentSchemaMinor = 4
+	currentSchemaMinor = 5
 	legacySchemaMajor  = 1
 	legacySchemaMinor  = 0
 	// Keep this string stable - quickstart readiness checks grep for it in Kitchen logs.

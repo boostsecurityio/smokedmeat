@@ -18,6 +18,7 @@ import (
 	"github.com/boostsecurityio/poutine/providers/local"
 	"github.com/boostsecurityio/poutine/providers/scm"
 	"github.com/boostsecurityio/poutine/results"
+	"github.com/open-policy-agent/opa/v1/ast"
 
 	"github.com/boostsecurityio/smokedmeat/internal/cachepoison"
 )
@@ -135,17 +136,18 @@ const (
 
 // Finding represents a single vulnerability found during analysis.
 type Finding struct {
-	ID          string `json:"id"`                    // Generated ID (V001, V002, etc.)
-	Repository  string `json:"repository"`            // org/repo
-	Workflow    string `json:"workflow"`              // .github/workflows/foo.yml
-	Line        int    `json:"line,omitempty"`        // Line number in workflow
-	Job         string `json:"job,omitempty"`         // Job name
-	Step        string `json:"step,omitempty"`        // Step name
-	RuleID      string `json:"rule_id"`               // poutine rule ID
-	Title       string `json:"title"`                 // Finding title
-	Description string `json:"description,omitempty"` // Rule description
-	Severity    string `json:"severity"`              // "critical", "high", "medium", "low"
-	Details     string `json:"details,omitempty"`     // Additional details
+	ID           string `json:"id"`             // Generated ID (V001, V002, etc.)
+	Repository   string `json:"repository"`     // org/repo
+	Workflow     string `json:"workflow"`       // .github/workflows/foo.yml
+	Line         int    `json:"line,omitempty"` // Line number in workflow
+	Job          string `json:"job,omitempty"`  // Job name
+	Step         string `json:"step,omitempty"` // Step name
+	RuleID       string `json:"rule_id"`        // poutine rule ID
+	ExploitClass string `json:"exploit_class,omitempty"`
+	Title        string `json:"title"`                 // Finding title
+	Description  string `json:"description,omitempty"` // Rule description
+	Severity     string `json:"severity"`              // "critical", "high", "medium", "low"
+	Details      string `json:"details,omitempty"`     // Additional details
 
 	// Injection-specific metadata (for initial access exploitation)
 	Context     string `json:"context,omitempty"`      // Injection context: "bash_run", "github_script", etc.
@@ -181,6 +183,66 @@ type AnalysisObserver interface {
 	OnStepCompleted(description string)
 	OnFinalizeStarted(totalPackages int)
 	OnFinalizeCompleted()
+}
+
+const disabledBuiltinRulesSentinel = "__smokedmeat_no_builtin_rules__"
+
+func applyAnalysisOptions(config *models.Config, opts AnalysisOptions) {
+	config.AllowedRules = OffensiveRules
+	config.Quiet = true
+	if opts.CustomRulePack != nil && opts.CustomRulePack.DisableBuiltinRules {
+		config.AllowedRules = []string{disabledBuiltinRulesSentinel}
+	}
+}
+
+func newOpaWithAnalysisOptions(ctx context.Context, config *models.Config, opts AnalysisOptions) (*opa.Opa, error) {
+	opaClient, err := opa.NewOpa(ctx, config)
+	if err != nil {
+		return nil, err
+	}
+	if opts.CustomRulePack == nil || len(opts.CustomRulePack.Files) == 0 {
+		return opaClient, nil
+	}
+	if err := addCustomRuleModules(opaClient, opts.CustomRulePack.Files); err != nil {
+		return nil, err
+	}
+	return opaClient, nil
+}
+
+func addCustomRuleModules(opaClient *opa.Opa, files []CustomRuleFile) error {
+	capabilities, err := opa.Capabilities()
+	if err != nil {
+		return err
+	}
+	modules := make(map[string]*ast.Module, len(opaClient.Compiler.Modules)+len(files))
+	for name, mod := range opaClient.Compiler.Modules {
+		modules[name] = mod
+	}
+	for _, file := range files {
+		path := strings.TrimSpace(file.Path)
+		if path == "" {
+			return fmt.Errorf("custom rule has an empty path")
+		}
+		name := "custom/" + strings.TrimPrefix(filepath.ToSlash(path), "/")
+		mod, err := ast.ParseModuleWithOpts(name, file.Content, ast.ParserOptions{
+			RegoVersion:  ast.RegoV0CompatV1,
+			Capabilities: capabilities,
+		})
+		if err != nil {
+			return err
+		}
+		if mod == nil {
+			continue
+		}
+		modules[name] = mod
+	}
+	compiler := ast.NewCompiler().WithCapabilities(capabilities)
+	compiler.Compile(modules)
+	if compiler.Failed() {
+		return compiler.Errors
+	}
+	opaClient.Compiler = compiler
+	return nil
 }
 
 type observerAdapter struct {
@@ -249,6 +311,10 @@ func AnalyzeRemote(ctx context.Context, token, target, targetType string) (*Anal
 }
 
 func AnalyzeRemoteWithObserver(ctx context.Context, token, target, targetType string, observer AnalysisObserver) (*AnalysisResult, error) {
+	return AnalyzeRemoteWithObserverAndOptions(ctx, token, target, targetType, observer, AnalysisOptions{})
+}
+
+func AnalyzeRemoteWithObserverAndOptions(ctx context.Context, token, target, targetType string, observer AnalysisObserver, opts AnalysisOptions) (*AnalysisResult, error) {
 	start := time.Now()
 	result := &AnalysisResult{
 		Target:     target,
@@ -271,13 +337,11 @@ func AnalyzeRemoteWithObserver(ctx context.Context, token, target, targetType st
 		return nil, fmt.Errorf("failed to create SCM client: %w", err)
 	}
 
-	// Create config with offensive rules filter
 	config := models.DefaultConfig()
-	config.AllowedRules = OffensiveRules
-	config.Quiet = true // No progress bar
+	applyAnalysisOptions(config, opts)
 
 	// Create OPA policy engine
-	opaClient, err := opa.NewOpa(ctx, config)
+	opaClient, err := newOpaWithAnalysisOptions(ctx, config, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize policy engine: %w", err)
 	}
@@ -312,7 +376,7 @@ func AnalyzeRemoteWithObserver(ctx context.Context, token, target, targetType st
 	result.ReposAnalyzed = len(packages)
 
 	// Convert findings
-	convertFindings(result, packages)
+	convertFindings(result, packages, opts)
 
 	result.Duration = time.Since(start)
 	result.Success = len(result.Errors) == 0
@@ -345,13 +409,11 @@ func AnalyzeLocal(ctx context.Context, path string) (*AnalysisResult, error) {
 		result.Repository = repo
 	}
 
-	// Create config with offensive rules filter
 	config := models.DefaultConfig()
-	config.AllowedRules = OffensiveRules
-	config.Quiet = true
+	applyAnalysisOptions(config, AnalysisOptions{})
 
 	// Create OPA policy engine
-	opaClient, err := opa.NewOpa(ctx, config)
+	opaClient, err := newOpaWithAnalysisOptions(ctx, config, AnalysisOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize policy engine: %w", err)
 	}
@@ -379,7 +441,7 @@ func AnalyzeLocal(ctx context.Context, path string) (*AnalysisResult, error) {
 
 	if pkg != nil {
 		result.ReposAnalyzed = 1
-		convertFindings(result, []*models.PackageInsights{pkg})
+		convertFindings(result, []*models.PackageInsights{pkg}, AnalysisOptions{})
 	}
 
 	result.Duration = time.Since(start)
@@ -389,9 +451,15 @@ func AnalyzeLocal(ctx context.Context, path string) (*AnalysisResult, error) {
 }
 
 // convertFindings converts poutine PackageInsights to our Finding format.
-func convertFindings(result *AnalysisResult, packages []*models.PackageInsights) {
+func convertFindings(result *AnalysisResult, packages []*models.PackageInsights, opts AnalysisOptions) {
 	findingCounter := 0
 	seenRepos := make(map[string]bool)
+	var mappings map[string]CustomRuleMapping
+	customDefaultAnalyzeOnly := false
+	if opts.CustomRulePack != nil {
+		mappings = opts.CustomRulePack.RuleMappings
+		customDefaultAnalyzeOnly = opts.CustomRulePack.DisableBuiltinRules
+	}
 
 	for _, pkg := range packages {
 		if pkg == nil {
@@ -414,15 +482,16 @@ func convertFindings(result *AnalysisResult, packages []*models.PackageInsights)
 		for _, f := range pkg.FindingsResults.Findings {
 			findingCounter++
 			finding := Finding{
-				ID:          fmt.Sprintf("V%03d", findingCounter),
-				Repository:  repoName,
-				Workflow:    f.Meta.Path,
-				Line:        f.Meta.Line,
-				RuleID:      f.RuleId,
-				Job:         f.Meta.Job,
-				Step:        f.Meta.Step,
-				Details:     f.Meta.Details,
-				Fingerprint: f.GenerateFindingFingerprint(),
+				ID:           fmt.Sprintf("V%03d", findingCounter),
+				Repository:   repoName,
+				Workflow:     f.Meta.Path,
+				Line:         f.Meta.Line,
+				RuleID:       f.RuleId,
+				ExploitClass: ExploitClassForRuleWithDefault(f.RuleId, mappings, customDefaultAnalyzeOnly),
+				Job:          f.Meta.Job,
+				Step:         f.Meta.Step,
+				Details:      f.Meta.Details,
+				Fingerprint:  f.GenerateFindingFingerprint(),
 			}
 
 			if rule, ok := pkg.FindingsResults.Rules[f.RuleId]; ok {
@@ -449,11 +518,11 @@ func convertFindings(result *AnalysisResult, packages []*models.PackageInsights)
 					f.Meta.InjectionSources,
 				)
 			} else {
-				finding.Context = determineContext(f.RuleId, f.Meta)
+				finding.Context = determineContextForFinding(f.RuleId, finding.ExploitClass, f.Meta)
 				finding.Expression = extractExpression(f.Meta.Details)
 			}
 			finding.Trigger = extractTrigger(f.Meta.EventTriggers)
-			finding.CachePoisonWriter, finding.CachePoisonReason = cachepoison.ClassifyWriterEligible(f.RuleId, finding.Trigger)
+			finding.CachePoisonWriter, finding.CachePoisonReason = cachepoison.ClassifyWriterEligible(finding.ExploitClass, finding.Trigger)
 			if finding.CachePoisonWriter {
 				finding.CachePoisonVictims = cloneVictimCandidates(repoVictims)
 			}
@@ -804,6 +873,17 @@ func determineContext(ruleID string, meta results.FindingMeta) string {
 	}
 
 	return "unknown"
+}
+
+func determineContextForFinding(ruleID, exploitClass string, meta results.FindingMeta) string {
+	contextName := determineContext(ruleID, meta)
+	if contextName != "unknown" {
+		return contextName
+	}
+	if strings.TrimSpace(exploitClass) == ExploitClassUntrustedCheckoutExec {
+		return "untrusted_checkout"
+	}
+	return contextName
 }
 
 // extractTrigger returns the workflow trigger from EventTriggers slice.

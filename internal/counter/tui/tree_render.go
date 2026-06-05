@@ -420,6 +420,9 @@ func (m *Model) renderVulnDetails(node *TreeNode, width int) []string {
 	if vuln.RuleID != "" {
 		metaParts = append(metaParts, mutedColor.Render(vuln.RuleID))
 	}
+	if class := vulnerabilityExploitClass(vuln); class != "" && class != "analyze_only" && class != vuln.RuleID {
+		metaParts = append(metaParts, mutedColor.Render("class:"+class))
+	}
 	if len(metaParts) > 0 {
 		lines = append(lines, detailStyle.Render(indent+"├─ ")+strings.Join(metaParts, " • "))
 	}
@@ -485,8 +488,15 @@ func (m *Model) formatVulnLabel(node *TreeNode) string {
 			trigger = vuln.Trigger
 		}
 	}
+	exploitClass := nodeStringProperty(node, "exploit_class")
+	if vuln != nil && exploitClass == "" {
+		exploitClass = vulnerabilityExploitClass(vuln)
+	}
+	if exploitClass == "" {
+		exploitClass = ruleID
+	}
 
-	switch ruleID {
+	switch exploitClass {
 	case "injection":
 		label := vulnLabel(ctx, trigger)
 		if trigger == "workflow_dispatch" && !m.hasDispatchCredential() {

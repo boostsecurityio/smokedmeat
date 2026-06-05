@@ -172,8 +172,27 @@ func TestNewVulnerability_SetsAnalyzeOnlyMetadata(t *testing.T) {
 	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", vuln.Properties["exploit_support_reason"])
 }
 
+func TestNewVulnerability_SelfHostedReasonIgnoresExplicitAnalyzeOnlyClass(t *testing.T) {
+	vuln := NewVulnerability("pr_runs_on_self_hosted", "pkg:github/acme/api", ".github/workflows/pr.yml", 19)
+	vuln.SetProperty("exploit_class", "analyze_only")
+	SetVulnerabilityExploitSupport(&vuln)
+
+	assert.Equal(t, false, vuln.Properties["exploit_supported"])
+	assert.Equal(t, "Self-hosted runner findings are analyze-only in v0.1.0. Exploit actions are not supported yet.", vuln.Properties["exploit_support_reason"])
+}
+
 func TestNewVulnerability_WorkflowDispatchIsExploitable(t *testing.T) {
 	vuln := NewVulnerability("workflow_dispatch", "pkg:github/acme/api", ".github/workflows/deploy.yml", 0)
+	SetVulnerabilityExploitSupport(&vuln)
+
+	assert.Equal(t, true, vuln.Properties["exploit_supported"])
+	_, hasReason := vuln.Properties["exploit_support_reason"]
+	assert.False(t, hasReason)
+}
+
+func TestNewVulnerability_WorkflowDispatchIgnoresExplicitAnalyzeOnlyClass(t *testing.T) {
+	vuln := NewVulnerability("workflow_dispatch", "pkg:github/acme/api", ".github/workflows/deploy.yml", 0)
+	vuln.SetProperty("exploit_class", "analyze_only")
 	SetVulnerabilityExploitSupport(&vuln)
 
 	assert.Equal(t, true, vuln.Properties["exploit_supported"])

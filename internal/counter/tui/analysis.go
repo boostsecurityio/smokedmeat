@@ -118,6 +118,11 @@ func (m Model) handleAnalyzeForTarget(target, targetType string, deep, selection
 		m.AddOutput("error", fmt.Sprintf("Failed to start analysis: %v", err))
 		return m, nil
 	}
+	rulePack, err := counter.BuildCustomRulePack(m.config.Poutine)
+	if err != nil {
+		m.AddOutput("error", fmt.Sprintf("Failed to load custom rules: %v", err))
+		return m, nil
+	}
 
 	m.analysisFocusRepo = ""
 	m.beginAnalysisProgress(analysisID, target, targetType, deep)
@@ -141,14 +146,14 @@ func (m Model) handleAnalyzeForTarget(target, targetType string, deep, selection
 				m.activityLog.Add(IconScan, fmt.Sprintf("Starting deep analysis of %d repos in %s", len(repos), target))
 				m.flashMessage = "Deep-analyzing " + target
 				m.flashUntil = time.Now().Add(2 * time.Second)
-				return m, m.runDeepAnalysisForTargets(analysisID, repos, target)
+				return m, m.runDeepAnalysisForTargets(analysisID, repos, target, rulePack)
 			}
 			m.AddOutput("info", "Tip: deep-analyze is most useful on a single repo. Highlight a repo and press 'd', or run 'set target repo:owner/repo'.")
 		}
 		m.activityLog.Add(IconScan, fmt.Sprintf("Starting deep analysis of %s", targetSpec))
 		m.flashMessage = "Deep-analyzing " + target
 		m.flashUntil = time.Now().Add(2 * time.Second)
-		return m, m.runDeepAnalysisForTarget(analysisID, target, targetType)
+		return m, m.runDeepAnalysisForTarget(analysisID, target, targetType, rulePack)
 	}
 
 	m.AddOutput("info", fmt.Sprintf("Starting poutine analysis via Kitchen (%s)...", m.config.KitchenURL))
@@ -156,10 +161,10 @@ func (m Model) handleAnalyzeForTarget(target, targetType string, deep, selection
 	m.flashMessage = "Analyzing " + target
 	m.flashUntil = time.Now().Add(2 * time.Second)
 
-	return m, m.runAnalysisForTarget(analysisID, target, targetType)
+	return m, m.runAnalysisForTarget(analysisID, target, targetType, rulePack)
 }
 
-func (m Model) runDeepAnalysisForTarget(analysisID, target, targetType string) tea.Cmd {
+func (m Model) runDeepAnalysisForTarget(analysisID, target, targetType string, rulePack *poutine.CustomRulePack) tea.Cmd {
 	token := ""
 	if m.tokenInfo != nil {
 		token = m.tokenInfo.Value
@@ -170,7 +175,7 @@ func (m Model) runDeepAnalysisForTarget(analysisID, target, targetType string) t
 		defer cancel()
 
 		client := counter.NewClient(m.config.KitchenURL, m.config.AuthToken, m.config.SessionID)
-		result, err := client.DeepAnalyzeWithID(ctx, token, target, targetType, analysisID)
+		result, err := client.DeepAnalyzeWithIDAndRulePack(ctx, token, target, targetType, analysisID, rulePack)
 		if err != nil {
 			if isRecoverableDroppedAnalysisError(err) {
 				return AnalysisResponseDroppedMsg{AnalysisID: analysisID, Deep: true, Err: err}
@@ -182,7 +187,7 @@ func (m Model) runDeepAnalysisForTarget(analysisID, target, targetType string) t
 	}
 }
 
-func (m Model) runDeepAnalysisForTargets(analysisID string, repos []string, owner string) tea.Cmd {
+func (m Model) runDeepAnalysisForTargets(analysisID string, repos []string, owner string, rulePack *poutine.CustomRulePack) tea.Cmd {
 	token := ""
 	if m.tokenInfo != nil {
 		token = m.tokenInfo.Value
@@ -204,7 +209,7 @@ func (m Model) runDeepAnalysisForTargets(analysisID string, repos []string, owne
 		}
 
 		for _, repo := range targets {
-			repoResult, err := client.DeepAnalyze(ctx, token, repo, "repo")
+			repoResult, err := client.DeepAnalyzeWithIDAndRulePack(ctx, token, repo, "repo", "", rulePack)
 			if err != nil {
 				result.Success = false
 				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", repo, err))
@@ -243,6 +248,11 @@ func (m Model) handleAnalyzePivotsCommand() (tea.Model, tea.Cmd) {
 		m.AddOutput("error", "GitHub token not set. Try 'set token' (Tab for options)")
 		return m, nil
 	}
+	rulePack, err := counter.BuildCustomRulePack(m.config.Poutine)
+	if err != nil {
+		m.AddOutput("error", fmt.Sprintf("Failed to load custom rules: %v", err))
+		return m, nil
+	}
 
 	m.AddOutput("info", "")
 	m.AddOutput("info", fmt.Sprintf("Queuing analysis for %d pivot targets...", len(m.pivotTargets)))
@@ -250,10 +260,10 @@ func (m Model) handleAnalyzePivotsCommand() (tea.Model, tea.Cmd) {
 	m.flashMessage = fmt.Sprintf("Analyzing %d pivot repo(s)", len(m.pivotTargets))
 	m.flashUntil = time.Now().Add(2 * time.Second)
 
-	return m, m.runPivotAnalysis()
+	return m, m.runPivotAnalysis(rulePack)
 }
 
-func (m Model) runPivotAnalysis() tea.Cmd {
+func (m Model) runPivotAnalysis(rulePack *poutine.CustomRulePack) tea.Cmd {
 	token := ""
 	if m.tokenInfo != nil {
 		token = m.tokenInfo.Value
@@ -274,7 +284,7 @@ func (m Model) runPivotAnalysis() tea.Cmd {
 		analyzed := 0
 
 		for _, target := range targets {
-			result, err := client.Analyze(ctx, token, target, "repo")
+			result, err := client.AnalyzeWithIDAndRulePack(ctx, token, target, "repo", "", rulePack)
 			if err != nil {
 				continue
 			}
@@ -305,10 +315,16 @@ func (m Model) runAnalysis() tea.Cmd {
 			return AnalysisErrorMsg{Err: fmt.Errorf("failed to start analysis: %w", err)}
 		}
 	}
-	return m.runAnalysisForTarget(analysisID, m.target, m.targetType)
+	rulePack, err := counter.BuildCustomRulePack(m.config.Poutine)
+	if err != nil {
+		return func() tea.Msg {
+			return AnalysisErrorMsg{AnalysisID: analysisID, Err: fmt.Errorf("failed to load custom rules: %w", err)}
+		}
+	}
+	return m.runAnalysisForTarget(analysisID, m.target, m.targetType, rulePack)
 }
 
-func (m Model) runAnalysisForTarget(analysisID, target, targetType string) tea.Cmd {
+func (m Model) runAnalysisForTarget(analysisID, target, targetType string, rulePack *poutine.CustomRulePack) tea.Cmd {
 	token := ""
 	if m.tokenInfo != nil {
 		token = m.tokenInfo.Value
@@ -319,7 +335,7 @@ func (m Model) runAnalysisForTarget(analysisID, target, targetType string) tea.C
 		defer cancel()
 
 		client := counter.NewClient(m.config.KitchenURL, m.config.AuthToken, m.config.SessionID)
-		result, err := client.AnalyzeWithID(ctx, token, target, targetType, analysisID)
+		result, err := client.AnalyzeWithIDAndRulePack(ctx, token, target, targetType, analysisID, rulePack)
 		if err != nil {
 			if isRecoverableDroppedAnalysisError(err) {
 				return AnalysisResponseDroppedMsg{AnalysisID: analysisID, Err: err}
@@ -523,7 +539,7 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 
 	supportedCount := 0
 	for _, f := range expandedFindings {
-		if supported, _ := pantry.VulnerabilityExploitSupportWithBashContext("github", f.Workflow, f.RuleID, f.BashContext); supported {
+		if supported, _ := pantry.VulnerabilityExploitSupportForClass("github", f.Workflow, f.RuleID, f.ExploitClass, f.BashContext); supported {
 			supportedCount++
 		}
 	}
@@ -567,7 +583,7 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 			if existing[key] {
 				continue
 			}
-			supported, reason := pantry.VulnerabilityExploitSupportWithBashContext("github", f.Workflow, f.RuleID, f.BashContext)
+			supported, reason := pantry.VulnerabilityExploitSupportForClass("github", f.Workflow, f.RuleID, f.ExploitClass, f.BashContext)
 			vulnID := fmt.Sprintf("V%03d", nextVulnID)
 			nextVulnID++
 			m.vulnerabilities = append(m.vulnerabilities, Vulnerability{
@@ -580,6 +596,7 @@ func (m Model) handleAnalysisCompleted(msg AnalysisCompletedMsg) (tea.Model, tea
 				Line:                 f.Line,
 				Title:                f.Title,
 				RuleID:               f.RuleID,
+				ExploitClass:         f.ExploitClass,
 				Context:              f.Context,
 				BashContext:          f.BashContext,
 				Trigger:              f.Trigger,

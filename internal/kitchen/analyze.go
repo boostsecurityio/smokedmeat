@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -20,20 +21,21 @@ import (
 )
 
 const (
-	analysisPhaseWorkflow   = "workflow_analysis"
-	analysisPhaseSecret     = "secret_scan"
-	analysisPhaseImport     = "import"
-	analysisMetadataStarted = "started"
-	analysisMetadataDone    = "completed"
-	analysisMetadataFailed  = "failed"
-	analysisResultTTL       = 2 * time.Hour
-	analysisStatusUnknown   = "unknown"
-	analysisStatusPending   = "pending"
-	analysisStatusCompleted = "completed"
-	analysisStatusFailed    = "failed"
+	analysisPhaseWorkflow      = "workflow_analysis"
+	analysisPhaseSecret        = "secret_scan"
+	analysisPhaseImport        = "import"
+	analysisMetadataStarted    = "started"
+	analysisMetadataDone       = "completed"
+	analysisMetadataFailed     = "failed"
+	analysisResultTTL          = 2 * time.Hour
+	analysisStatusUnknown      = "unknown"
+	analysisStatusPending      = "pending"
+	analysisStatusCompleted    = "completed"
+	analysisStatusFailed       = "failed"
+	analyzeRequestMaxBodyBytes = poutine.HardCustomRuleMaxPackBytes + 1024*1024
 )
 
-var analyzeRemoteWithObserverFunc = poutine.AnalyzeRemoteWithObserver
+var analyzeRemoteWithObserverFunc = poutine.AnalyzeRemoteWithObserverAndOptions
 
 type cachedAnalysisResult struct {
 	SessionID string
@@ -107,6 +109,8 @@ type AnalyzeRequest struct {
 	SessionID string `json:"session_id,omitempty"`
 
 	AnalysisID string `json:"analysis_id,omitempty"`
+
+	CustomRulePack *poutine.CustomRulePack `json:"custom_rule_pack,omitempty"`
 }
 
 // AnalyzeResponse wraps the analysis result.
@@ -121,6 +125,65 @@ type AnalyzeResultStatusResponse struct {
 	Error      string                  `json:"error,omitempty"`
 }
 
+func prepareCustomRuleOptions(pack *poutine.CustomRulePack) (poutine.AnalysisOptions, error) {
+	opts := poutine.AnalysisOptions{CustomRulePack: pack}
+	if pack == nil {
+		return opts, nil
+	}
+	if err := validateCustomRulePack(pack); err != nil {
+		return opts, err
+	}
+	return opts, nil
+}
+
+func validateCustomRulePack(pack *poutine.CustomRulePack) error {
+	limits := poutine.NormalizeCustomRuleLimits(pack.Limits)
+	if !poutine.CustomRuleLimitsValid(limits) {
+		return fmt.Errorf("rule pack limits exceed supported maximums")
+	}
+	if len(pack.Files) > limits.MaxFiles {
+		return fmt.Errorf("rule pack exceeds %d files", limits.MaxFiles)
+	}
+	totalBytes := int64(0)
+	for ruleID, mapping := range pack.RuleMappings {
+		if strings.TrimSpace(ruleID) == "" {
+			return fmt.Errorf("rule mapping has an empty rule ID")
+		}
+		if !poutine.ValidExploitClass(strings.TrimSpace(mapping.ExploitClass)) {
+			return fmt.Errorf("rule mapping %s has invalid exploit_class %q", ruleID, mapping.ExploitClass)
+		}
+	}
+	for _, file := range pack.Files {
+		if !safeCustomRulePath(file.Path) {
+			return fmt.Errorf("unsafe rule path: %s", file.Path)
+		}
+		size := int64(len(file.Content))
+		if size > limits.MaxFileBytes {
+			return fmt.Errorf("rule file %s exceeds %d bytes", file.Path, limits.MaxFileBytes)
+		}
+		totalBytes += size
+		if totalBytes > limits.MaxPackBytes {
+			return fmt.Errorf("rule pack exceeds %d bytes", limits.MaxPackBytes)
+		}
+	}
+	return nil
+}
+
+func safeCustomRulePath(path string) bool {
+	if path == "" || strings.ContainsRune(path, 0) || strings.HasPrefix(path, "/") {
+		return false
+	}
+	if filepath.Ext(path) != ".rego" {
+		return false
+	}
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
 // handleAnalyze handles remote poutine analysis requests from Counter.
 // This endpoint uses the operator-provided token to scan remote repositories
 // via the GitHub API, without requiring an agent on the target.
@@ -132,6 +195,7 @@ type AnalyzeResultStatusResponse struct {
 // - Results are returned synchronously and not persisted
 func (h *Handler) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	// Parse request
+	r.Body = http.MaxBytesReader(w, r.Body, analyzeRequestMaxBodyBytes)
 	var req AnalyzeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -163,6 +227,11 @@ func (h *Handler) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session_id is required when analysis_id is provided", http.StatusBadRequest)
 		return
 	}
+	analysisOptions, err := prepareCustomRuleOptions(req.CustomRulePack)
+	if err != nil {
+		http.Error(w, "invalid custom rules: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	h.recordAnalysisPending(req)
 
@@ -172,7 +241,7 @@ func (h *Handler) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	progressObserver := newAnalysisProgressObserver(h, req, startedAt)
 
 	slog.Info("analysis starting", "target", req.Target, "type", req.TargetType, "token_len", len(req.Token), "deep", req.Deep)
-	result, err := analyzeRemoteWithObserverFunc(ctx, req.Token, req.Target, req.TargetType, progressObserver)
+	result, err := analyzeRemoteWithObserverFunc(ctx, req.Token, req.Target, req.TargetType, progressObserver, analysisOptions)
 	if err != nil {
 		h.recordAnalysisFailure(req, sanitizeError(err))
 		slog.Warn("analysis failed", "target", req.Target, "error", sanitizeError(err))
@@ -797,6 +866,9 @@ func (h *Handler) importAnalysisToPantry(result *poutine.AnalysisResult) int {
 		vuln.Severity = f.Severity
 		if f.Title != "" {
 			vuln.SetProperty("title", f.Title)
+		}
+		if f.ExploitClass != "" {
+			vuln.SetProperty("exploit_class", f.ExploitClass)
 		}
 		if f.Job != "" {
 			vuln.SetProperty("job", f.Job)

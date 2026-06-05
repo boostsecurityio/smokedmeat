@@ -208,6 +208,7 @@ func TestView_IsModal(t *testing.T) {
 	assert.True(t, ViewReAuth.IsModal())
 	assert.True(t, ViewOmnibox.IsModal())
 	assert.True(t, ViewCallbacks.IsModal())
+	assert.True(t, ViewRules.IsModal())
 }
 
 func TestPhase_String(t *testing.T) {
@@ -264,6 +265,7 @@ func TestView_String(t *testing.T) {
 		{ViewReAuth, "ReAuth"},
 		{ViewOmnibox, "Omnibox"},
 		{ViewCallbacks, "Implants"},
+		{ViewRules, "Rules"},
 		{View(99), "Unknown"},
 	}
 	for _, tt := range tests {
@@ -532,6 +534,15 @@ func TestVulnerabilitySupportsExploit(t *testing.T) {
 			vuln: &Vulnerability{
 				Workflow: ".github/workflows/pr.yml",
 				RuleID:   "untrusted_checkout_exec",
+			},
+			supports: true,
+		},
+		{
+			name: "mapped custom injection is supported",
+			vuln: &Vulnerability{
+				Workflow:     ".github/workflows/ci.yml",
+				RuleID:       "custom_injection_rule",
+				ExploitClass: "injection",
 			},
 			supports: true,
 		},

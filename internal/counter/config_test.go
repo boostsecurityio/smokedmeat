@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/boostsecurityio/smokedmeat/internal/poutine"
 )
 
 func TestConfig_InitialAccessTokenFields_RoundTrip(t *testing.T) {
@@ -64,4 +66,48 @@ func TestConfig_LastVersionCheckTimestamp_OmittedWhenZero(t *testing.T) {
 	assert.False(t, strings.Contains(string(data), "counter_id"))
 	assert.False(t, strings.Contains(string(data), "counter_start_count"))
 	assert.False(t, strings.Contains(string(data), "last_reported_counter_start_count"))
+}
+
+func TestConfig_CustomRulesRoundTrip(t *testing.T) {
+	t.Setenv("SMOKEDMEAT_CONFIG_DIR", t.TempDir())
+	enabled := true
+
+	err := SaveConfig(&Config{
+		Poutine: PoutineConfig{
+			CustomRules: CustomRulesConfig{
+				Enabled:             &enabled,
+				Path:                "~/.smokedmeat/rules",
+				DisableBuiltinRules: true,
+				Limits: poutine.CustomRuleLimits{
+					MaxFiles:     512,
+					MaxFileBytes: 1048576,
+					MaxPackBytes: 10485760,
+				},
+				RuleMappings: map[string]poutine.CustomRuleMapping{
+					"custom_injection_rule": {
+						ExploitClass: poutine.ExploitClassInjection,
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(ConfigPath())
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "exploit_class: injection")
+	assert.NotContains(t, string(data), "exploitclass")
+
+	loaded, err := LoadConfig()
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	require.NotNil(t, loaded.Poutine.CustomRules.Enabled)
+
+	assert.True(t, *loaded.Poutine.CustomRules.Enabled)
+	assert.Equal(t, "~/.smokedmeat/rules", loaded.Poutine.CustomRules.Path)
+	assert.True(t, loaded.Poutine.CustomRules.DisableBuiltinRules)
+	assert.Equal(t, 512, loaded.Poutine.CustomRules.Limits.MaxFiles)
+	assert.Equal(t, int64(1048576), loaded.Poutine.CustomRules.Limits.MaxFileBytes)
+	assert.Equal(t, int64(10485760), loaded.Poutine.CustomRules.Limits.MaxPackBytes)
+	assert.Equal(t, poutine.ExploitClassInjection, loaded.Poutine.CustomRules.RuleMappings["custom_injection_rule"].ExploitClass)
 }

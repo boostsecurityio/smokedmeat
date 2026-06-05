@@ -139,7 +139,7 @@ func (m *Model) renderMenuItemLines(numKey string, suggestion SuggestedAction, w
 
 func (m *Model) vulnFirstLineText(vuln Vulnerability) string {
 	var icon, class string
-	switch vuln.RuleID {
+	switch vulnerabilityExploitClass(&vuln) {
 	case "injection":
 		icon = "💉"
 		class = vulnLabel(vuln.Context, vuln.Trigger)
@@ -162,7 +162,7 @@ func (m *Model) vulnFirstLineText(vuln Vulnerability) string {
 
 func (m *Model) renderVulnMenuItem(numKey string, vuln Vulnerability, width int) []string {
 	var icon, class string
-	switch vuln.RuleID {
+	switch vulnerabilityExploitClass(&vuln) {
 	case "injection":
 		icon = "💉"
 		class = vulnLabel(vuln.Context, vuln.Trigger)

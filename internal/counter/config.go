@@ -10,36 +10,47 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/boostsecurityio/smokedmeat/internal/poutine"
 )
+
+type PoutineConfig struct {
+	CustomRules CustomRulesConfig `yaml:"custom_rules,omitempty"`
+}
+
+type CustomRulesConfig struct {
+	Enabled             *bool                                `yaml:"enabled,omitempty"`
+	Path                string                               `yaml:"path,omitempty"`
+	DisableBuiltinRules bool                                 `yaml:"disable_builtin_rules,omitempty"`
+	RuleMappings        map[string]poutine.CustomRuleMapping `yaml:"rule_mappings,omitempty"`
+	Limits              poutine.CustomRuleLimits             `yaml:"limits,omitempty"`
+}
 
 // Config holds Counter configuration.
 type Config struct {
-	KitchenURL               string    `yaml:"kitchen_url"`
-	SessionID                string    `yaml:"session_id,omitempty"`
-	Operator                 string    `yaml:"operator"`
-	KeyComment               string    `yaml:"key_comment,omitempty"`
-	Token                    string    `yaml:"token,omitempty"`
-	TokenSource              string    `yaml:"token_source,omitempty"`
-	OPSecretRef              string    `yaml:"op_secret_ref,omitempty"`
-	Target                   string    `yaml:"target,omitempty"`
-	LastAnalyzedTarget       string    `yaml:"last_analyzed_target,omitempty"`
-	InitialAccessToken       string    `yaml:"initial_access_token,omitempty"`
-	InitialAccessTokenSource string    `yaml:"initial_access_token_source,omitempty"`
-	Theme                    string    `yaml:"theme,omitempty"`
-	CounterID                string    `yaml:"counter_id,omitempty"`
-	CounterStartCount        int       `yaml:"counter_start_count,omitempty"`
-	LastReportedStartCount   int       `yaml:"last_reported_counter_start_count,omitempty"`
-	LastVersionCheckAt       time.Time `yaml:"last_version_check_timestamp,omitempty"`
+	KitchenURL               string        `yaml:"kitchen_url"`
+	SessionID                string        `yaml:"session_id,omitempty"`
+	Operator                 string        `yaml:"operator"`
+	KeyComment               string        `yaml:"key_comment,omitempty"`
+	Token                    string        `yaml:"token,omitempty"`
+	TokenSource              string        `yaml:"token_source,omitempty"`
+	OPSecretRef              string        `yaml:"op_secret_ref,omitempty"`
+	Target                   string        `yaml:"target,omitempty"`
+	LastAnalyzedTarget       string        `yaml:"last_analyzed_target,omitempty"`
+	InitialAccessToken       string        `yaml:"initial_access_token,omitempty"`
+	InitialAccessTokenSource string        `yaml:"initial_access_token_source,omitempty"`
+	Theme                    string        `yaml:"theme,omitempty"`
+	CounterID                string        `yaml:"counter_id,omitempty"`
+	CounterStartCount        int           `yaml:"counter_start_count,omitempty"`
+	LastReportedStartCount   int           `yaml:"last_reported_counter_start_count,omitempty"`
+	LastVersionCheckAt       time.Time     `yaml:"last_version_check_timestamp,omitempty"`
+	Poutine                  PoutineConfig `yaml:"poutine,omitempty"`
 }
 
 // ConfigPath returns the path to the config file.
 // Respects SMOKEDMEAT_CONFIG_DIR env var, defaults to ~/.smokedmeat.
 func ConfigPath() string {
-	if dir := os.Getenv("SMOKEDMEAT_CONFIG_DIR"); dir != "" {
-		return filepath.Join(dir, "config.yaml")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".smokedmeat", "config.yaml")
+	return filepath.Join(configDir(), "config.yaml")
 }
 
 // LoadConfig loads config from ~/.smokedmeat/config.yaml

@@ -65,20 +65,21 @@ type OutputLine struct {
 
 // Vulnerability represents an injection vulnerability found during scanning
 type Vulnerability struct {
-	ID          string // V001, V002, etc.
-	Fingerprint string
-	Repository  string // org/repo
-	Workflow    string // .github/workflows/foo.yml
-	Job         string // Job name in workflow
-	Step        string // Step index or name in workflow
-	Line        int    // Line number in workflow
-	Title       string // "Injection", "Untrusted Checkout" - human readable
-	RuleID      string // "injection", "untrusted_checkout_exec" - poutine rule
-	Context     string // "bash", "github_script"
-	BashContext string
-	Trigger     string // "pull_request", "push", "issues"
-	Expression  string // The vulnerable expression
-	Severity    string // "critical", "high", "medium", "low"
+	ID           string // V001, V002, etc.
+	Fingerprint  string
+	Repository   string // org/repo
+	Workflow     string // .github/workflows/foo.yml
+	Job          string // Job name in workflow
+	Step         string // Step index or name in workflow
+	Line         int    // Line number in workflow
+	Title        string // "Injection", "Untrusted Checkout" - human readable
+	RuleID       string // "injection", "untrusted_checkout_exec" - poutine rule
+	ExploitClass string
+	Context      string // "bash", "github_script"
+	BashContext  string
+	Trigger      string // "pull_request", "push", "issues"
+	Expression   string // The vulnerable expression
+	Severity     string // "critical", "high", "medium", "low"
 
 	InjectionSources   []string
 	ReferencedSecrets  []string
@@ -116,6 +117,7 @@ type Config struct {
 	LatestVersion            string
 	LatestVersionURL         string
 	UpdateAvailable          bool
+	Poutine                  counter.PoutineConfig
 }
 
 // ExternalURL returns the external Kitchen URL for stagers and display.
@@ -315,6 +317,10 @@ type Model struct {
 	// Theme picker state
 	themeCursor   int
 	themeOriginal ThemeName
+
+	ruleSummary      *counter.RuleSummary
+	ruleSummaryError string
+	ruleScroll       int
 
 	analysisResultPoll *analysisResultPollState
 }
@@ -711,6 +717,7 @@ func (m *Model) extractVulnerabilitiesFromPantry() []Vulnerability {
 			Line:                 line,
 			Title:                title,
 			RuleID:               pv.RuleID,
+			ExploitClass:         propertyString(pv.Properties, "exploit_class"),
 			Severity:             pv.Severity,
 			Context:              propertyString(pv.Properties, "context"),
 			BashContext:          propertyString(pv.Properties, "bash_context"),
@@ -1432,6 +1439,9 @@ func (m *Model) importAnalysisToPantry(result *poutine.AnalysisResult) importSum
 		if f.Title != "" {
 			vuln.SetProperty("title", f.Title)
 		}
+		if f.ExploitClass != "" {
+			vuln.SetProperty("exploit_class", f.ExploitClass)
+		}
 		if f.Job != "" {
 			vuln.SetProperty("job", f.Job)
 		}
@@ -1616,6 +1626,7 @@ func (m *Model) importVulnerabilitiesToPantry(vulns []Vulnerability) importSumma
 			Line:               vuln.Line,
 			Job:                vuln.Job,
 			RuleID:             vuln.RuleID,
+			ExploitClass:       vuln.ExploitClass,
 			Title:              vuln.Title,
 			Severity:           vuln.Severity,
 			Context:            vuln.Context,

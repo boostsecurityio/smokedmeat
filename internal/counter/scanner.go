@@ -28,7 +28,7 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
-// NewClient creates a new Kitchen client. SessionID is required —
+// NewClient creates a new Kitchen client. SessionID is required -
 // Kitchen uses it to track known entities and repo visibility.
 func NewClient(kitchenURL, authToken, sessionID string) *Client {
 	return &Client{
@@ -61,6 +61,8 @@ type AnalyzeRequest struct {
 	SessionID string `json:"session_id,omitempty"`
 
 	AnalysisID string `json:"analysis_id,omitempty"`
+
+	CustomRulePack *poutine.CustomRulePack `json:"custom_rule_pack,omitempty"`
 }
 
 type AnalyzeResultStatusResponse struct {
@@ -73,20 +75,28 @@ type AnalyzeResultStatusResponse struct {
 // Analyze performs a poutine analysis by delegating to Kitchen.
 // The token is sent to Kitchen for ephemeral use - it is never stored.
 func (c *Client) Analyze(ctx context.Context, token, target, targetType string) (*poutine.AnalysisResult, error) {
-	return c.analyze(ctx, token, target, targetType, false, "")
+	return c.analyze(ctx, token, target, targetType, false, "", nil)
 }
 
 func (c *Client) AnalyzeWithID(ctx context.Context, token, target, targetType, analysisID string) (*poutine.AnalysisResult, error) {
-	return c.analyze(ctx, token, target, targetType, false, analysisID)
+	return c.analyze(ctx, token, target, targetType, false, analysisID, nil)
+}
+
+func (c *Client) AnalyzeWithIDAndRulePack(ctx context.Context, token, target, targetType, analysisID string, rulePack *poutine.CustomRulePack) (*poutine.AnalysisResult, error) {
+	return c.analyze(ctx, token, target, targetType, false, analysisID, rulePack)
 }
 
 // DeepAnalyze performs poutine analysis plus gitleaks secret scanning.
 func (c *Client) DeepAnalyze(ctx context.Context, token, target, targetType string) (*poutine.AnalysisResult, error) {
-	return c.analyze(ctx, token, target, targetType, true, "")
+	return c.analyze(ctx, token, target, targetType, true, "", nil)
 }
 
 func (c *Client) DeepAnalyzeWithID(ctx context.Context, token, target, targetType, analysisID string) (*poutine.AnalysisResult, error) {
-	return c.analyze(ctx, token, target, targetType, true, analysisID)
+	return c.analyze(ctx, token, target, targetType, true, analysisID, nil)
+}
+
+func (c *Client) DeepAnalyzeWithIDAndRulePack(ctx context.Context, token, target, targetType, analysisID string, rulePack *poutine.CustomRulePack) (*poutine.AnalysisResult, error) {
+	return c.analyze(ctx, token, target, targetType, true, analysisID, rulePack)
 }
 
 func (c *Client) FetchAnalysisResult(ctx context.Context, analysisID string) (*AnalyzeResultStatusResponse, error) {
@@ -130,18 +140,19 @@ func (c *Client) FetchAnalysisResult(ctx context.Context, analysisID string) (*A
 	return &result, nil
 }
 
-func (c *Client) analyze(ctx context.Context, token, target, targetType string, deep bool, analysisID string) (*poutine.AnalysisResult, error) {
+func (c *Client) analyze(ctx context.Context, token, target, targetType string, deep bool, analysisID string, rulePack *poutine.CustomRulePack) (*poutine.AnalysisResult, error) {
 	if c.KitchenURL == "" {
 		return nil, fmt.Errorf("kitchen URL not configured")
 	}
 
 	reqBody := AnalyzeRequest{
-		Token:      token,
-		Target:     target,
-		TargetType: targetType,
-		Deep:       deep,
-		SessionID:  c.SessionID,
-		AnalysisID: analysisID,
+		Token:          token,
+		Target:         target,
+		TargetType:     targetType,
+		Deep:           deep,
+		SessionID:      c.SessionID,
+		AnalysisID:     analysisID,
+		CustomRulePack: rulePack,
 	}
 
 	jsonData, err := json.Marshal(reqBody)

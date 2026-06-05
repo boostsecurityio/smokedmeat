@@ -309,6 +309,10 @@ func (m *Model) RenderStickersLayout() string {
 		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused, progressLine)
 		overlayStr := m.renderCallbacksOverlay(background, flexHeight+activityHeight)
 		screen = lipgloss.JoinVertical(lipgloss.Left, header, overlayStr, input, status)
+	case ViewRules:
+		background := m.stickersLayout.RenderContentWithActivity(renderers, activityFocused, progressLine)
+		overlayStr := m.renderRulesOverlay(background, flexHeight+activityHeight)
+		screen = lipgloss.JoinVertical(lipgloss.Left, header, overlayStr, input, status)
 	case ViewAgent:
 		screen = m.stickersLayout.RenderAgent(header, input, status, hintActive, renderers, activityFocused, progressLine)
 	default:
@@ -749,6 +753,9 @@ func (m *Model) renderNewStatusBar() string {
 			keyHints += helpKeyStyle.Render("d/n") + helpDescStyle.Render(":dwell ")
 		}
 		keyHints += helpKeyStyle.Render("Esc") + helpDescStyle.Render(":close")
+	case ViewRules:
+		keyHints = helpKeyStyle.Render("Esc") + helpDescStyle.Render(":close ") +
+			helpKeyStyle.Render("R") + helpDescStyle.Render(":close")
 	case ViewWaiting:
 		keyHints = helpKeyStyle.Render("Esc") + helpDescStyle.Render(":cancel ")
 		if _, label := waitingOpenURL(m.waiting); label != "" {
@@ -821,6 +828,7 @@ func (m *Model) globalStatusHintsForWidth(maxWidth int) string {
 		}
 		if m.view == ViewFindings || m.view == ViewAgent {
 			specs = append(specs,
+				statusHintSpec{Key: "Shift+R", Desc: "rules"},
 				statusHintSpec{Key: "Shift+L", Desc: "log"},
 				statusHintSpec{Key: "Shift+I", Desc: "implants"},
 				statusHintSpec{Key: "t", Desc: "theme"},
@@ -1708,8 +1716,8 @@ func (m *Model) buildWizardStep1Content(width int) []string {
 
 	if m.wizard.SelectedVuln != nil {
 		v := m.wizard.SelectedVuln
-		vulnClass := vulnClassFromRuleID(v.RuleID, v.Context)
-		isPwnRequest := v.RuleID == "untrusted_checkout_exec"
+		vulnClass := vulnClassFromRuleID(vulnerabilityExploitClass(v), v.Context)
+		isPwnRequest := vulnerabilityExploitClass(v) == "untrusted_checkout_exec"
 
 		lines = append(lines,
 			formatWizardContent(pad, "", secondaryColorStyle.Render(vulnClass), innerWidth),
@@ -2057,7 +2065,7 @@ func (m *Model) buildWizardStep3Content(width int) []string {
 			if lotpName == "" {
 				lotpName = vuln.LOTPAction
 			}
-			if vuln.RuleID == "untrusted_checkout_exec" && lotpName != "" {
+			if vulnerabilityExploitClass(vuln) == "untrusted_checkout_exec" && lotpName != "" {
 				lines = append(lines,
 					formatWizardContent(pad, "Tool:", lotpName, innerWidth),
 				)
@@ -3112,6 +3120,7 @@ func (m *Model) buildHelpModal(width, height int) []string {
 				"x        Exploit selected vuln (opens wizard)",
 				"1-5      Quick select from The Menu",
 				"Tab      Focus input / command completion",
+				"R        Show active recon rules",
 				"t        Open the theme picker",
 				"?        Toggle this help",
 				"q        Quit",

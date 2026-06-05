@@ -1013,7 +1013,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lootStashDirty = true
 		m.GenerateSuggestions()
 		if autoAnalyze && m.tokenInfo != nil && m.config.KitchenURL != "" {
-			return m, tea.Batch(m.registerActiveSourceTokenCmd(), m.runPivotAnalysis())
+			rulePack, err := counter.BuildCustomRulePack(m.config.Poutine)
+			if err != nil {
+				m.AddOutput("error", fmt.Sprintf("Failed to load custom rules: %v", err))
+				return m, m.registerActiveSourceTokenCmd()
+			}
+			return m, tea.Batch(m.registerActiveSourceTokenCmd(), m.runPivotAnalysis(rulePack))
 		}
 		return m, m.registerActiveSourceTokenCmd()
 
@@ -1462,6 +1467,10 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleCallbacksKeyMsg(msg)
 	}
 
+	if m.view == ViewRules {
+		return m.handleRulesKeyMsg(msg)
+	}
+
 	// Handle re-auth modal
 	if m.view == ViewReAuth {
 		return m.handleReAuthKeyMsg(msg)
@@ -1690,6 +1699,11 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "I", "shift+i", "C", "shift+c":
 		if !m.view.IsModal() {
 			return m, m.openCallbacksModal()
+		}
+
+	case "R", "shift+r":
+		if !m.view.IsModal() && m.phase == PhaseRecon {
+			return m.openRulesModal()
 		}
 
 	case "s":
@@ -2095,7 +2109,7 @@ func (m Model) shouldRouteToInput(msg tea.KeyPressMsg) bool {
 	switch msg.String() {
 	case "/":
 		return strings.TrimSpace(m.input.Value()) != ""
-	case "ctrl+c", "?", "esc", "tab", "enter", "up", "down", "alt+tab", "shift+tab", "alt+shift+tab", "f1", "f2", "f3", "f4", "f5":
+	case "ctrl+c", "?", "esc", "tab", "enter", "up", "down", "alt+tab", "shift+tab", "alt+shift+tab", "f1", "f2", "f3", "f4", "f5", "R", "shift+r":
 		return false
 	default:
 		return true
