@@ -296,6 +296,16 @@ func TestDetermineContext_Unknown(t *testing.T) {
 	assert.Equal(t, "unknown", determineContext("other_rule", meta))
 }
 
+func TestDetermineContextForFinding_CustomUntrustedCheckoutClass(t *testing.T) {
+	meta := results.FindingMeta{Details: "Detected usage of `npm`"}
+	assert.Equal(t, "untrusted_checkout", determineContextForFinding("custom_rule", ExploitClassUntrustedCheckoutExec, meta))
+}
+
+func TestDetermineContextForFinding_CustomInjectionClassDoesNotGuessContext(t *testing.T) {
+	meta := results.FindingMeta{Details: "custom injection without source metadata"}
+	assert.Equal(t, "unknown", determineContextForFinding("custom_rule", ExploitClassInjection, meta))
+}
+
 func TestDetermineContext_CaseInsensitive(t *testing.T) {
 	meta := results.FindingMeta{Details: "GITHUB.HEAD_REF used here"}
 	assert.Equal(t, "git_branch", determineContext("", meta))
@@ -384,6 +394,80 @@ func TestConvertFindings_SingleFinding(t *testing.T) {
 	assert.Equal(t, "${{ github.event.pull_request.title }}", result.Findings[0].Expression)
 	assert.Equal(t, 1, result.TotalFindings)
 	assert.Equal(t, 1, result.CriticalFindings)
+}
+
+func TestConvertFindings_CustomUntrustedCheckoutClassUsesMappedPayloadClass(t *testing.T) {
+	result := &AnalysisResult{Findings: []Finding{}}
+	pkg := &models.PackageInsights{
+		Purl: "pkg:github/acme/api",
+		FindingsResults: results.FindingsResult{
+			Findings: []results.Finding{
+				{
+					RuleId: "__pkgsupply_untrusted_checkout_exec",
+					Meta: results.FindingMeta{
+						Path:          ".github/workflows/package.yml",
+						Line:          32,
+						Details:       "Detected usage of `npm`",
+						EventTriggers: []string{"pull_request_target"},
+					},
+				},
+			},
+			Rules: map[string]results.Rule{
+				"__pkgsupply_untrusted_checkout_exec": {
+					Title: "Pwn Request",
+					Level: "error",
+				},
+			},
+		},
+	}
+	opts := AnalysisOptions{CustomRulePack: &CustomRulePack{
+		RuleMappings: map[string]CustomRuleMapping{
+			"__pkgsupply_untrusted_checkout_exec": {ExploitClass: ExploitClassUntrustedCheckoutExec},
+		},
+	}}
+
+	convertFindings(result, []*models.PackageInsights{pkg}, opts)
+
+	require.Len(t, result.Findings, 1)
+	finding := result.Findings[0]
+	assert.Equal(t, "__pkgsupply_untrusted_checkout_exec", finding.RuleID)
+	assert.Equal(t, ExploitClassUntrustedCheckoutExec, finding.ExploitClass)
+	assert.Equal(t, "untrusted_checkout", finding.Context)
+	assert.Equal(t, "pull_request_target", finding.Trigger)
+	assert.True(t, finding.CachePoisonWriter)
+	assert.Empty(t, finding.CachePoisonReason)
+}
+
+func TestConvertFindings_AnalyzeOnlyMappingDisablesCacheWriter(t *testing.T) {
+	result := &AnalysisResult{Findings: []Finding{}}
+	pkg := &models.PackageInsights{
+		Purl: "pkg:github/acme/api",
+		FindingsResults: results.FindingsResult{
+			Findings: []results.Finding{
+				{
+					RuleId: "untrusted_checkout_exec",
+					Meta: results.FindingMeta{
+						Path:          ".github/workflows/package.yml",
+						Line:          32,
+						Details:       "Detected usage of `npm`",
+						EventTriggers: []string{"pull_request_target"},
+					},
+				},
+			},
+		},
+	}
+	opts := AnalysisOptions{CustomRulePack: &CustomRulePack{
+		RuleMappings: map[string]CustomRuleMapping{
+			"untrusted_checkout_exec": {ExploitClass: ExploitClassAnalyzeOnly},
+		},
+	}}
+
+	convertFindings(result, []*models.PackageInsights{pkg}, opts)
+
+	require.Len(t, result.Findings, 1)
+	assert.Equal(t, ExploitClassAnalyzeOnly, result.Findings[0].ExploitClass)
+	assert.False(t, result.Findings[0].CachePoisonWriter)
+	assert.Equal(t, "selected vulnerability does not provide a supported writer payload path", result.Findings[0].CachePoisonReason)
 }
 
 func TestConvertFindings_MultipleSeverities(t *testing.T) {

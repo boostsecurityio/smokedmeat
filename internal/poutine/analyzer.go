@@ -518,11 +518,11 @@ func convertFindings(result *AnalysisResult, packages []*models.PackageInsights,
 					f.Meta.InjectionSources,
 				)
 			} else {
-				finding.Context = determineContext(f.RuleId, f.Meta)
+				finding.Context = determineContextForFinding(f.RuleId, finding.ExploitClass, f.Meta)
 				finding.Expression = extractExpression(f.Meta.Details)
 			}
 			finding.Trigger = extractTrigger(f.Meta.EventTriggers)
-			finding.CachePoisonWriter, finding.CachePoisonReason = cachepoison.ClassifyWriterEligible(f.RuleId, finding.Trigger)
+			finding.CachePoisonWriter, finding.CachePoisonReason = cachepoison.ClassifyWriterEligible(finding.ExploitClass, finding.Trigger)
 			if finding.CachePoisonWriter {
 				finding.CachePoisonVictims = cloneVictimCandidates(repoVictims)
 			}
@@ -873,6 +873,17 @@ func determineContext(ruleID string, meta results.FindingMeta) string {
 	}
 
 	return "unknown"
+}
+
+func determineContextForFinding(ruleID, exploitClass string, meta results.FindingMeta) string {
+	contextName := determineContext(ruleID, meta)
+	if contextName != "unknown" {
+		return contextName
+	}
+	if strings.TrimSpace(exploitClass) == ExploitClassUntrustedCheckoutExec {
+		return "untrusted_checkout"
+	}
+	return contextName
 }
 
 // extractTrigger returns the workflow trigger from EventTriggers slice.

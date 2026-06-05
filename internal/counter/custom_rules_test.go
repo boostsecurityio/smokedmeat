@@ -77,3 +77,47 @@ func TestBuildCustomRulePack_InvalidMapping(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid exploit_class")
 }
+
+func TestBuildRuleSummary_DefaultBuiltinRules(t *testing.T) {
+	t.Setenv("SMOKEDMEAT_CONFIG_DIR", t.TempDir())
+
+	summary, err := BuildRuleSummary(PoutineConfig{})
+
+	require.NoError(t, err)
+	assert.True(t, summary.CustomRulesEnabled)
+	assert.False(t, summary.CustomRulesPathExists)
+	assert.False(t, summary.DisableBuiltinRules)
+	assert.Equal(t, poutine.OffensiveRules, summary.BuiltinRules)
+	assert.Empty(t, summary.CustomRuleFiles)
+	assert.Empty(t, summary.RuleMappings)
+	assert.Equal(t, "built-in defaults", summary.UnmappedRuleDefault)
+}
+
+func TestBuildRuleSummary_CustomRulesDisableBuiltins(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "one.rego"), []byte("package rules.one\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "two.rego"), []byte("package rules.two\n"), 0o600))
+
+	summary, err := BuildRuleSummary(PoutineConfig{
+		CustomRules: CustomRulesConfig{
+			Path:                root,
+			DisableBuiltinRules: true,
+			RuleMappings: map[string]poutine.CustomRuleMapping{
+				"two": {ExploitClass: poutine.ExploitClassInjection},
+				"one": {ExploitClass: poutine.ExploitClassAnalyzeOnly},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.True(t, summary.CustomRulesPathExists)
+	assert.True(t, summary.DisableBuiltinRules)
+	assert.Empty(t, summary.BuiltinRules)
+	assert.Equal(t, []string{"one.rego", "two.rego"}, summary.CustomRuleFiles)
+	require.Len(t, summary.RuleMappings, 2)
+	assert.Equal(t, "one", summary.RuleMappings[0].RuleID)
+	assert.Equal(t, poutine.ExploitClassAnalyzeOnly, summary.RuleMappings[0].ExploitClass)
+	assert.Equal(t, "two", summary.RuleMappings[1].RuleID)
+	assert.Equal(t, poutine.ExploitClassInjection, summary.RuleMappings[1].ExploitClass)
+	assert.Equal(t, poutine.ExploitClassAnalyzeOnly, summary.UnmappedRuleDefault)
+}

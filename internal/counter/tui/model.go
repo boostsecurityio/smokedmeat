@@ -318,6 +318,9 @@ type Model struct {
 	themeCursor   int
 	themeOriginal ThemeName
 
+	ruleSummary      *counter.RuleSummary
+	ruleSummaryError string
+
 	analysisResultPoll *analysisResultPollState
 }
 

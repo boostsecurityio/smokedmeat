@@ -71,6 +71,7 @@ const (
 	ViewTheme                   // Theme picker modal overlay
 	ViewOmnibox                 // Search/jump modal overlay
 	ViewCallbacks               // Callback inventory modal overlay
+	ViewRules                   // Rule inventory modal overlay
 )
 
 func (v View) String() string {
@@ -99,13 +100,15 @@ func (v View) String() string {
 		return "Omnibox"
 	case ViewCallbacks:
 		return "Implants"
+	case ViewRules:
+		return "Rules"
 	default:
 		return "Unknown"
 	}
 }
 
 func (v View) IsModal() bool {
-	return v == ViewWizard || v == ViewLicense || v == ViewHelp || v == ViewReAuth || v == ViewKillChain || v == ViewTheme || v == ViewOmnibox || v == ViewCallbacks
+	return v == ViewWizard || v == ViewLicense || v == ViewHelp || v == ViewReAuth || v == ViewKillChain || v == ViewTheme || v == ViewOmnibox || v == ViewCallbacks || v == ViewRules
 }
 
 type DeliveryMethod int

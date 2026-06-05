@@ -4,11 +4,16 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/boostsecurityio/smokedmeat/internal/counter"
+	"github.com/boostsecurityio/smokedmeat/internal/poutine"
 )
 
 func newKeyboardTestModel() Model {
@@ -125,6 +130,39 @@ func TestHandleKeyMsg_WaitingPhaseDoesNotRouteLettersToHiddenInput(t *testing.T)
 	model := result.(Model)
 	assert.Equal(t, ViewCallbacks, model.view)
 	assert.Empty(t, model.input.Value())
+}
+
+func TestHandleKeyMsg_ShiftROpensRulesModalFromReconInputFocus(t *testing.T) {
+	configDir := t.TempDir()
+	rulesDir := filepath.Join(configDir, "rules")
+	require.NoError(t, os.Mkdir(rulesDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(rulesDir, "custom.rego"), []byte("package rules.custom\n"), 0o600))
+	t.Setenv("SMOKEDMEAT_CONFIG_DIR", configDir)
+	require.NoError(t, counter.SaveConfig(&counter.Config{
+		Poutine: counter.PoutineConfig{
+			CustomRules: counter.CustomRulesConfig{
+				DisableBuiltinRules: true,
+				RuleMappings: map[string]poutine.CustomRuleMapping{
+					"custom": {ExploitClass: poutine.ExploitClassInjection},
+				},
+			},
+		},
+	}))
+
+	m := newKeyboardTestModel()
+	m.phase = PhaseRecon
+	m.view = ViewFindings
+	m.focus = FocusInput
+	m.input.Focus()
+
+	result, _ := m.Update(tea.KeyPressMsg{Text: "R", Code: 'R'})
+
+	model := result.(Model)
+	assert.Equal(t, ViewRules, model.view)
+	assert.Empty(t, model.input.Value())
+	require.NotNil(t, model.ruleSummary)
+	assert.True(t, model.ruleSummary.DisableBuiltinRules)
+	assert.Equal(t, []string{"custom.rego"}, model.ruleSummary.CustomRuleFiles)
 }
 
 func TestHandleCallbacksKeyMsg_CloseRestoresFocus(t *testing.T) {
