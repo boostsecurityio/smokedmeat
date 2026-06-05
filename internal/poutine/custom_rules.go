@@ -15,7 +15,7 @@ type CustomRuleFile struct {
 }
 
 type CustomRuleMapping struct {
-	ExploitClass string `json:"exploit_class"`
+	ExploitClass string `json:"exploit_class" yaml:"exploit_class,omitempty"`
 }
 
 type CustomRulePack struct {

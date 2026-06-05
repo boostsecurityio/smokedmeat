@@ -88,6 +88,11 @@ func TestConfig_CustomRulesRoundTrip(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	data, err := os.ReadFile(ConfigPath())
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "exploit_class: injection")
+	assert.NotContains(t, string(data), "exploitclass")
+
 	loaded, err := LoadConfig()
 	require.NoError(t, err)
 	require.NotNil(t, loaded)
