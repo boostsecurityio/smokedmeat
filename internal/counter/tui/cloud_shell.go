@@ -114,6 +114,9 @@ func localEnvVars(cs *CloudState) map[string]string {
 		if v := cs.RawCredentials["ACCESS_TOKEN"]; v != "" {
 			env["CLOUDSDK_AUTH_ACCESS_TOKEN"] = v
 			env["GOOGLE_OAUTH_ACCESS_TOKEN"] = v
+		} else if path := materializeGCPExternalAccountConfig(cs, cs.TempDir); path != "" {
+			env["CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"] = path
+			env["GOOGLE_APPLICATION_CREDENTIALS"] = path
 		}
 		if v := gcpProjectFromCreds(cs.RawCredentials); v != "" {
 			env["CLOUDSDK_CORE_PROJECT"] = v
@@ -255,22 +258,61 @@ func cloudShellNeedsLocalImage() bool {
 }
 
 func dockerRunUserArgs() []string {
-	if runtime.GOOS == "windows" {
+	current, ok := currentNumericUser()
+	if !ok {
 		return nil
+	}
+	return []string{"--user", current.Uid + ":" + current.Gid}
+}
+
+func currentNumericUser() (*user.User, bool) {
+	if runtime.GOOS == "windows" {
+		return nil, false
 	}
 
 	current, err := currentUserFn()
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	if _, err := strconv.ParseUint(current.Uid, 10, 32); err != nil {
-		return nil
+		return nil, false
 	}
 	if _, err := strconv.ParseUint(current.Gid, 10, 32); err != nil {
+		return nil, false
+	}
+	return current, true
+}
+
+func dockerRunIdentityMountArgs(hostDir, containerHome string) []string {
+	current, ok := currentNumericUser()
+	if !ok || current.Uid == "0" {
 		return nil
 	}
+	if err := writeDockerRunIdentityFiles(hostDir, containerHome, current.Uid, current.Gid); err != nil {
+		return nil
+	}
+	return []string{
+		"--mount", "type=bind,source=" + filepath.Join(hostDir, ".sm-passwd") + ",target=/etc/passwd,readonly",
+		"--mount", "type=bind,source=" + filepath.Join(hostDir, ".sm-group") + ",target=/etc/group,readonly",
+	}
+}
 
-	return []string{"--user", current.Uid + ":" + current.Gid}
+func writeDockerRunIdentityFiles(hostDir, containerHome, uid, gid string) error {
+	passwd := strings.Join([]string{
+		"root:x:0:0:root:/root:/bin/sh",
+		fmt.Sprintf("smokedmeat:x:%s:%s:SmokedMeat Shell:%s:/bin/bash", uid, gid, containerHome),
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(hostDir, ".sm-passwd"), []byte(passwd), 0o644); err != nil {
+		return err
+	}
+
+	group := strings.Join([]string{
+		"root:x:0:",
+		fmt.Sprintf("smokedmeat:x:%s:", gid),
+		"",
+	}, "\n")
+	return os.WriteFile(filepath.Join(hostDir, ".sm-group"), []byte(group), 0o644)
 }
 
 func dockerBindMountArgs(source, target string) []string {
@@ -304,17 +346,8 @@ func (m Model) spawnDockerCloudShell(cs *CloudState) tea.Cmd {
 	shareDir := cloudShellShareDir(cs)
 	_ = os.MkdirAll(shareDir, 0o700)
 
-	env := cloudShellEnv(cs, "/shell", "/shared")
 	image := cloudShellImageRefFn()
-	args := []string{"run", "--rm", "-it"}
-	args = append(args, dockerRunUserArgs()...)
-	args = append(args, dockerBindMountArgs(cs.TempDir, "/shell")...)
-	args = append(args, dockerBindMountArgs(shareDir, "/shared")...)
-	args = append(args, "-w", "/shell")
-	for _, kv := range env {
-		args = append(args, "-e", kv)
-	}
-	args = append(args, image)
+	args := dockerCloudShellArgs(cs, shareDir, image)
 
 	cmd := exec.Command("docker", args...)
 	cmd.Stdin = os.Stdin
@@ -324,6 +357,21 @@ func (m Model) spawnDockerCloudShell(cs *CloudState) tea.Cmd {
 		cleanupCloudShellShareDir(shareDir)
 		return CloudShellExitMsg{Err: err}
 	})
+}
+
+func dockerCloudShellArgs(cs *CloudState, shareDir, image string) []string {
+	env := cloudShellEnv(cs, "/shell", "/shared")
+	args := []string{"run", "--rm", "-it"}
+	args = append(args, dockerRunIdentityMountArgs(cs.TempDir, "/shell")...)
+	args = append(args, dockerRunUserArgs()...)
+	args = append(args, dockerBindMountArgs(cs.TempDir, "/shell")...)
+	args = append(args, dockerBindMountArgs(shareDir, "/shared")...)
+	args = append(args, "-w", "/shell")
+	for _, kv := range env {
+		args = append(args, "-e", kv)
+	}
+	args = append(args, image)
+	return args
 }
 
 func cloudShellShareDir(cs *CloudState) string {
@@ -365,6 +413,8 @@ func cloudShellEnv(cs *CloudState, shellHome, sharedDir string) []string {
 	case "gcp", "google":
 		if v := cs.RawCredentials["ACCESS_TOKEN"]; v != "" {
 			env = append(env, "CLOUDSDK_AUTH_ACCESS_TOKEN="+v, "GOOGLE_OAUTH_ACCESS_TOKEN="+v)
+		} else if path := materializeGCPExternalAccountConfig(cs, shellHome); path != "" {
+			env = append(env, "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE="+path, "GOOGLE_APPLICATION_CREDENTIALS="+path)
 		}
 		if v := gcpProjectFromCreds(cs.RawCredentials); v != "" {
 			env = append(env,
@@ -389,6 +439,21 @@ func cloudShellEnv(cs *CloudState, shellHome, sharedDir string) []string {
 		}
 	}
 	return env
+}
+
+func materializeGCPExternalAccountConfig(cs *CloudState, shellHome string) string {
+	if cs == nil || cs.TempDir == "" {
+		return ""
+	}
+	data := strings.TrimSpace(cs.RawCredentials["CREDENTIAL_CONFIG_JSON"])
+	if data == "" {
+		return ""
+	}
+	hostPath := filepath.Join(cs.TempDir, "google-application-credentials.json")
+	if err := os.WriteFile(hostPath, []byte(data), 0o600); err != nil {
+		return ""
+	}
+	return filepath.Join(shellHome, "google-application-credentials.json")
 }
 
 func gcpProjectFromCreds(raw map[string]string) string {

@@ -645,6 +645,33 @@ func TestSetupLocalCloudShell_GCP(t *testing.T) {
 	assert.NotContains(t, content, "_init_creds.py")
 }
 
+func TestSetupLocalCloudShell_GCPCredentialConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	credentialConfig := `{"type":"external_account","token_url":"https://sts.googleapis.com/v1/token"}`
+	cs := &CloudState{
+		Provider: "gcp",
+		Method:   "resident-harvest",
+		TempDir:  tmpDir,
+		RawCredentials: map[string]string{
+			"CREDENTIAL_CONFIG_JSON": credentialConfig,
+			"PROJECT":                "whooli",
+		},
+	}
+
+	require.NoError(t, setupLocalCloudShell(cs))
+
+	credentialPath := filepath.Join(tmpDir, "google-application-credentials.json")
+	data, err := os.ReadFile(credentialPath)
+	require.NoError(t, err)
+	assert.Equal(t, credentialConfig, string(data))
+
+	bashrc, err := os.ReadFile(filepath.Join(tmpDir, ".bashrc"))
+	require.NoError(t, err)
+	content := string(bashrc)
+	assert.Contains(t, content, "export CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE='"+credentialPath+"'")
+	assert.Contains(t, content, "export GOOGLE_APPLICATION_CREDENTIALS='"+credentialPath+"'")
+}
+
 func TestSetupLocalCloudShell_Azure(t *testing.T) {
 	tmpDir := t.TempDir()
 	cs := &CloudState{
@@ -736,6 +763,79 @@ func TestDockerRunUserArgs_NumericUIDGID(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{"--user", "501:20"}, dockerRunUserArgs())
+}
+
+func TestDockerRunIdentityMountArgs_WritesUserDatabase(t *testing.T) {
+	oldCurrentUser := currentUserFn
+	currentUserFn = func() (*user.User, error) {
+		return &user.User{Uid: "501", Gid: "20"}, nil
+	}
+	t.Cleanup(func() {
+		currentUserFn = oldCurrentUser
+	})
+
+	tmpDir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		assert.Nil(t, dockerRunIdentityMountArgs(tmpDir, "/shell"))
+		return
+	}
+
+	args := dockerRunIdentityMountArgs(tmpDir, "/shell")
+	assert.Equal(t, []string{
+		"--mount", "type=bind,source=" + filepath.Join(tmpDir, ".sm-passwd") + ",target=/etc/passwd,readonly",
+		"--mount", "type=bind,source=" + filepath.Join(tmpDir, ".sm-group") + ",target=/etc/group,readonly",
+	}, args)
+
+	passwd, err := os.ReadFile(filepath.Join(tmpDir, ".sm-passwd"))
+	require.NoError(t, err)
+	assert.Contains(t, string(passwd), "root:x:0:0:root:/root:/bin/sh")
+	assert.Contains(t, string(passwd), "smokedmeat:x:501:20:SmokedMeat Shell:/shell:/bin/bash")
+
+	group, err := os.ReadFile(filepath.Join(tmpDir, ".sm-group"))
+	require.NoError(t, err)
+	assert.Contains(t, string(group), "root:x:0:")
+	assert.Contains(t, string(group), "smokedmeat:x:20:")
+}
+
+func TestDockerCloudShellArgs_MountsUserDatabase(t *testing.T) {
+	oldCurrentUser := currentUserFn
+	currentUserFn = func() (*user.User, error) {
+		return &user.User{Uid: "501", Gid: "20"}, nil
+	}
+	t.Cleanup(func() {
+		currentUserFn = oldCurrentUser
+	})
+
+	tmpDir := t.TempDir()
+	shareDir := t.TempDir()
+	cs := &CloudState{
+		Provider: "gcp",
+		Method:   "oidc",
+		TempDir:  tmpDir,
+		RawCredentials: map[string]string{
+			"ACCESS_TOKEN": "token",
+		},
+	}
+
+	args := dockerCloudShellArgs(cs, shareDir, "smokedmeat-cloud-shell:test")
+	joined := "\n" + strings.Join(args, "\n") + "\n"
+
+	if runtime.GOOS == "windows" {
+		assert.NotContains(t, joined, "target=/etc/passwd")
+		assert.NotContains(t, joined, "\n--user\n")
+		return
+	}
+
+	assert.Contains(t, joined, "\ntype=bind,source="+filepath.Join(tmpDir, ".sm-passwd")+",target=/etc/passwd,readonly\n")
+	assert.Contains(t, joined, "\ntype=bind,source="+filepath.Join(tmpDir, ".sm-group")+",target=/etc/group,readonly\n")
+	assert.Contains(t, joined, "\n--user\n501:20\n")
+	assert.Contains(t, joined, "\ntype=bind,source="+tmpDir+",target=/shell\n")
+	assert.Contains(t, joined, "\ntype=bind,source="+shareDir+",target=/shared\n")
+	assert.Equal(t, "smokedmeat-cloud-shell:test", args[len(args)-1])
+
+	passwd, err := os.ReadFile(filepath.Join(tmpDir, ".sm-passwd"))
+	require.NoError(t, err)
+	assert.Contains(t, string(passwd), "smokedmeat:x:501:20:SmokedMeat Shell:/shell:/bin/bash")
 }
 
 func TestDockerRunUserArgs_NonNumericUIDGID(t *testing.T) {

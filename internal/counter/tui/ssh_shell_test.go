@@ -5,13 +5,16 @@ package tui
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/boostsecurityio/smokedmeat/internal/buildinfo"
 )
@@ -122,7 +125,10 @@ func TestSetupSSHShellHome_WritesConfig(t *testing.T) {
 
 	keyData, err := os.ReadFile(filepath.Join(tmpDir, ".ssh", "id_smokedmeat"))
 	require.NoError(t, err)
-	assert.Contains(t, string(keyData), "BEGIN RSA PRIVATE KEY")
+	assert.Contains(t, string(keyData), "BEGIN OPENSSH PRIVATE KEY")
+	assert.True(t, strings.HasSuffix(string(keyData), "\n"))
+	_, err = ssh.ParsePrivateKey(keyData)
+	require.NoError(t, err)
 
 	configData, err := os.ReadFile(filepath.Join(tmpDir, ".ssh", "config"))
 	require.NoError(t, err)
@@ -164,6 +170,25 @@ func TestSetupSSHShellHome_WritesConfig(t *testing.T) {
 	assert.Contains(t, string(nanoScriptData), "exec vi")
 }
 
+func TestSetupSSHShellHome_NormalizesEscapedPrivateKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	key := strings.TrimSpace(testSSHPrivateKey(t))
+	ss := &SSHState{
+		KeyName:  "DEPLOY_KEY",
+		KeyValue: strings.ReplaceAll(key, "\n", `\n`),
+		TempDir:  tmpDir,
+	}
+
+	require.NoError(t, setupSSHShellHome(ss))
+
+	keyData, err := os.ReadFile(filepath.Join(tmpDir, ".ssh", "id_smokedmeat"))
+	require.NoError(t, err)
+	assert.Contains(t, string(keyData), "BEGIN OPENSSH PRIVATE KEY")
+	assert.True(t, strings.HasSuffix(string(keyData), "\n"))
+	_, err = ssh.ParsePrivateKey(keyData)
+	require.NoError(t, err)
+}
+
 func TestSSHShellEnv_UsesRuntimeScopedKeyPaths(t *testing.T) {
 	ss := &SSHState{
 		KeyFingerprint: "SHA256:test",
@@ -178,6 +203,43 @@ func TestSSHShellEnv_UsesRuntimeScopedKeyPaths(t *testing.T) {
 	assert.Contains(t, joined, "\nSM_SSH_IDENTITY=/shell/.ssh/id_smokedmeat\n")
 	assert.Contains(t, joined, "\nSM_SSH_KNOWN_HOSTS=/shell/.ssh/known_hosts\n")
 	assert.Contains(t, joined, "\nGIT_SSH_COMMAND=ssh -o IdentitiesOnly=yes -o IdentityFile=/shell/.ssh/id_smokedmeat -o UserKnownHostsFile=/shell/.ssh/known_hosts -o StrictHostKeyChecking=yes -o LogLevel=ERROR\n")
+}
+
+func TestDockerSSHShellArgs_MountsUserDatabase(t *testing.T) {
+	oldCurrentUser := currentUserFn
+	currentUserFn = func() (*user.User, error) {
+		return &user.User{Uid: "501", Gid: "20"}, nil
+	}
+	t.Cleanup(func() {
+		currentUserFn = oldCurrentUser
+	})
+
+	tmpDir := t.TempDir()
+	ss := &SSHState{
+		KeyFingerprint: "SHA256:test",
+		Scope:          "repo:whooli/infrastructure-definitions",
+		TempDir:        tmpDir,
+	}
+
+	args := dockerSSHShellArgs(ss, "smokedmeat-cloud-shell:test")
+	joined := "\n" + strings.Join(args, "\n") + "\n"
+
+	if runtime.GOOS == "windows" {
+		assert.NotContains(t, joined, "target=/etc/passwd")
+		assert.NotContains(t, joined, "\n--user\n")
+		return
+	}
+
+	assert.Contains(t, joined, "\ntype=bind,source="+filepath.Join(tmpDir, ".sm-passwd")+",target=/etc/passwd,readonly\n")
+	assert.Contains(t, joined, "\ntype=bind,source="+filepath.Join(tmpDir, ".sm-group")+",target=/etc/group,readonly\n")
+	assert.Contains(t, joined, "\n--user\n501:20\n")
+	assert.Contains(t, joined, "\ntype=bind,source="+tmpDir+",target=/shell\n")
+	assert.Contains(t, joined, "\nGIT_SSH_COMMAND=ssh -o IdentitiesOnly=yes -o IdentityFile=/shell/.ssh/id_smokedmeat -o UserKnownHostsFile=/shell/.ssh/known_hosts -o StrictHostKeyChecking=yes -o LogLevel=ERROR\n")
+	assert.Equal(t, "smokedmeat-cloud-shell:test", args[len(args)-1])
+
+	passwd, err := os.ReadFile(filepath.Join(tmpDir, ".sm-passwd"))
+	require.NoError(t, err)
+	assert.Contains(t, string(passwd), "smokedmeat:x:501:20:SmokedMeat Shell:/shell:/bin/bash")
 }
 
 func TestSSHShellExitRestoresInputFocus(t *testing.T) {

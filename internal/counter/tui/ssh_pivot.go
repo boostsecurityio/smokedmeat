@@ -11,6 +11,7 @@ import (
 	"net"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -102,13 +103,23 @@ func sshPrivateKeyMetadata(value string) (keyType, fingerprint string, err error
 }
 
 func normalizeSSHPrivateKey(value string) string {
+	value = strings.TrimSpace(value)
+	if unquoted, err := strconv.Unquote(value); err == nil {
+		value = unquoted
+	}
+	value = strings.ReplaceAll(value, `\r\n`, "\n")
+	value = strings.ReplaceAll(value, `\n`, "\n")
 	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""
 	}
 	if match := privateKeyBlockRe.FindString(value); match != "" {
-		return strings.TrimSpace(match)
+		value = strings.TrimSpace(match)
+	}
+	if !strings.HasSuffix(value, "\n") {
+		value += "\n"
 	}
 	return value
 }
