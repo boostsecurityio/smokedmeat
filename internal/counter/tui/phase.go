@@ -585,6 +585,9 @@ func (s CollectedSecret) IsEphemeral() bool {
 		"ACTIONS_RUNTIME_TOKEN",
 		"ACTIONS_ID_TOKEN_REQUEST_",
 		"ACTIONS_CACHE_URL",
+		"GCP_ACCESS_TOKEN",
+		"CLOUDSDK_AUTH_ACCESS_TOKEN",
+		"GOOGLE_OAUTH_ACCESS_TOKEN",
 	}
 	for _, prefix := range ephemeralPrefixes {
 		if strings.HasPrefix(s.Name, prefix) {

