@@ -23,8 +23,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/boostsecurityio/smokedmeat/internal/models"
 	"golang.org/x/oauth2/google/externalaccount"
+
+	"github.com/boostsecurityio/smokedmeat/internal/models"
 )
 
 const (
@@ -526,7 +527,7 @@ func exchangeResidentGCPExternalAccount(ctx context.Context, data []byte) (resid
 }
 
 func residentGCPGitHubSubjectToken(ctx context.Context, source residentGCPCredentialSource) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source.URL, http.NoBody)
 	if err != nil {
 		return "", err
 	}

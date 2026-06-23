@@ -146,8 +146,10 @@ func TestWaitResidentGCPWorkloadCredentialsCatchesLateFile(t *testing.T) {
 	result := (&Agent{}).waitResidentGCPWorkloadCredentials(context.Background(), root, time.Second)
 
 	assert.NotNil(t, result)
-	assert.Len(t, result.Secrets, 1)
-	assert.Contains(t, result.Secrets[0], "ya29.late")
+	assert.Len(t, result.Secrets, 2)
+	assert.Contains(t, strings.Join(result.Secrets, "\n"), "GCP_EXTERNAL_ACCOUNT_JSON_B64")
+	assert.Contains(t, strings.Join(result.Secrets, "\n"), "GCP_ACCESS_TOKEN")
+	assert.Contains(t, strings.Join(result.Secrets, "\n"), "ya29.late")
 }
 
 func TestNewestResidentGCPCredentialFileUsesWorkspaceGlobBeforeBoundedWalk(t *testing.T) {
