@@ -5,6 +5,7 @@ package tui
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
@@ -768,14 +769,24 @@ func (m *Model) activateResidentGCPCloudSession(data counter.ExpressDataPayload)
 		return
 	}
 	token := residentGCPAccessToken(data.Secrets)
-	if token == "" {
+	credentialConfig := residentGCPCredentialConfig(data.Secrets)
+	if token == "" && credentialConfig == "" {
 		return
 	}
-	if m.cloudState != nil && m.cloudState.RawCredentials["ACCESS_TOKEN"] == token {
+	if m.cloudState != nil && token != "" && m.cloudState.RawCredentials["ACCESS_TOKEN"] == token {
+		return
+	}
+	if m.cloudState != nil && credentialConfig != "" && m.cloudState.RawCredentials["CREDENTIAL_CONFIG_JSON"] == credentialConfig {
 		return
 	}
 
-	raw := map[string]string{"ACCESS_TOKEN": token}
+	raw := make(map[string]string)
+	if token != "" {
+		raw["ACCESS_TOKEN"] = token
+	}
+	if credentialConfig != "" {
+		raw["CREDENTIAL_CONFIG_JSON"] = credentialConfig
+	}
 	if project := residentGCPProject(data.Vars, m.runnerVars); project != "" {
 		raw["PROJECT"] = project
 	}
@@ -820,6 +831,24 @@ func residentGCPAccessToken(secrets []counter.ExtractedSecret) string {
 		}
 		if secret.Type == "gcp" && strings.Contains(name, "ACCESS_TOKEN") {
 			return secret.Value
+		}
+	}
+	return ""
+}
+
+func residentGCPCredentialConfig(secrets []counter.ExtractedSecret) string {
+	for _, secret := range secrets {
+		name := strings.ToUpper(strings.TrimSpace(secret.Name))
+		if name != "GCP_EXTERNAL_ACCOUNT_JSON_B64" {
+			continue
+		}
+		data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(secret.Value))
+		if err != nil {
+			return ""
+		}
+		value := strings.TrimSpace(string(data))
+		if strings.Contains(value, `"type"`) && strings.Contains(value, `"external_account"`) {
+			return value
 		}
 	}
 	return ""

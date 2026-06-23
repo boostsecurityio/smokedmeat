@@ -114,6 +114,9 @@ func localEnvVars(cs *CloudState) map[string]string {
 		if v := cs.RawCredentials["ACCESS_TOKEN"]; v != "" {
 			env["CLOUDSDK_AUTH_ACCESS_TOKEN"] = v
 			env["GOOGLE_OAUTH_ACCESS_TOKEN"] = v
+		} else if path := materializeGCPExternalAccountConfig(cs, cs.TempDir); path != "" {
+			env["CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"] = path
+			env["GOOGLE_APPLICATION_CREDENTIALS"] = path
 		}
 		if v := gcpProjectFromCreds(cs.RawCredentials); v != "" {
 			env["CLOUDSDK_CORE_PROJECT"] = v
@@ -410,6 +413,8 @@ func cloudShellEnv(cs *CloudState, shellHome, sharedDir string) []string {
 	case "gcp", "google":
 		if v := cs.RawCredentials["ACCESS_TOKEN"]; v != "" {
 			env = append(env, "CLOUDSDK_AUTH_ACCESS_TOKEN="+v, "GOOGLE_OAUTH_ACCESS_TOKEN="+v)
+		} else if path := materializeGCPExternalAccountConfig(cs, shellHome); path != "" {
+			env = append(env, "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE="+path, "GOOGLE_APPLICATION_CREDENTIALS="+path)
 		}
 		if v := gcpProjectFromCreds(cs.RawCredentials); v != "" {
 			env = append(env,
@@ -434,6 +439,21 @@ func cloudShellEnv(cs *CloudState, shellHome, sharedDir string) []string {
 		}
 	}
 	return env
+}
+
+func materializeGCPExternalAccountConfig(cs *CloudState, shellHome string) string {
+	if cs == nil || cs.TempDir == "" {
+		return ""
+	}
+	data := strings.TrimSpace(cs.RawCredentials["CREDENTIAL_CONFIG_JSON"])
+	if data == "" {
+		return ""
+	}
+	hostPath := filepath.Join(cs.TempDir, "google-application-credentials.json")
+	if err := os.WriteFile(hostPath, []byte(data), 0o600); err != nil {
+		return ""
+	}
+	return filepath.Join(shellHome, "google-application-credentials.json")
 }
 
 func gcpProjectFromCreds(raw map[string]string) string {

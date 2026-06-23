@@ -645,6 +645,33 @@ func TestSetupLocalCloudShell_GCP(t *testing.T) {
 	assert.NotContains(t, content, "_init_creds.py")
 }
 
+func TestSetupLocalCloudShell_GCPCredentialConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	credentialConfig := `{"type":"external_account","token_url":"https://sts.googleapis.com/v1/token"}`
+	cs := &CloudState{
+		Provider: "gcp",
+		Method:   "resident-harvest",
+		TempDir:  tmpDir,
+		RawCredentials: map[string]string{
+			"CREDENTIAL_CONFIG_JSON": credentialConfig,
+			"PROJECT":                "whooli",
+		},
+	}
+
+	require.NoError(t, setupLocalCloudShell(cs))
+
+	credentialPath := filepath.Join(tmpDir, "google-application-credentials.json")
+	data, err := os.ReadFile(credentialPath)
+	require.NoError(t, err)
+	assert.Equal(t, credentialConfig, string(data))
+
+	bashrc, err := os.ReadFile(filepath.Join(tmpDir, ".bashrc"))
+	require.NoError(t, err)
+	content := string(bashrc)
+	assert.Contains(t, content, "export CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE='"+credentialPath+"'")
+	assert.Contains(t, content, "export GOOGLE_APPLICATION_CREDENTIALS='"+credentialPath+"'")
+}
+
 func TestSetupLocalCloudShell_Azure(t *testing.T) {
 	tmpDir := t.TempDir()
 	cs := &CloudState{

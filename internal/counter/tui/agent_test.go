@@ -69,6 +69,43 @@ func TestHandleExpressData_ResidentGCPHarvestActivatesCloudSession(t *testing.T)
 	assert.True(t, model.sessionLoot[0].IsEphemeral())
 }
 
+func TestHandleExpressData_ResidentGCPHarvestActivatesCloudSessionFromCredentialConfig(t *testing.T) {
+	m := NewModel(Config{SessionID: "test"})
+	credentialConfig := `{"type":"external_account","token_url":"https://sts.googleapis.com/v1/token"}`
+
+	result, _ := m.handleExpressData(ExpressDataMsg{Data: counter.ExpressDataPayload{
+		AgentID:   "agent-resident",
+		SessionID: "test",
+		Hostname:  "runner",
+		Timestamp: time.Date(2026, 6, 23, 14, 0, 0, 0, time.UTC),
+		ResidentJob: &models.ResidentJobObservation{
+			Event:      models.ResidentJobEventHarvested,
+			Repository: "whooli/infrastructure-definitions",
+			Workflow:   ".github/workflows/self-hosted-trusted-sync.yml",
+			Job:        "sync",
+		},
+		Secrets: []counter.ExtractedSecret{{
+			Name:      "GCP_EXTERNAL_ACCOUNT_JSON_B64",
+			Value:     base64.StdEncoding.EncodeToString([]byte(credentialConfig)),
+			Type:      "gcp",
+			Source:    "runner_memory",
+			HighValue: true,
+		}},
+		Vars: map[string]string{
+			"CLOUDSDK_CORE_PROJECT": "whooli",
+			"GCP_SERVICE_ACCOUNT":   "newcleus-runner-trusted@whooli.iam.gserviceaccount.com",
+		},
+	}})
+
+	model := result.(Model)
+	require.NotNil(t, model.cloudState)
+	assert.Equal(t, "gcp", model.cloudState.Provider)
+	assert.Equal(t, "resident-harvest", model.cloudState.Method)
+	assert.Equal(t, credentialConfig, model.cloudState.RawCredentials["CREDENTIAL_CONFIG_JSON"])
+	assert.Equal(t, "whooli", model.cloudState.RawCredentials["PROJECT"])
+	assert.Equal(t, "newcleus-runner-trusted@whooli.iam.gserviceaccount.com", model.cloudState.RawCredentials["SERVICE_ACCOUNT"])
+}
+
 func TestHandleColeslaw_PlainStdout(t *testing.T) {
 	m := NewModel(Config{SessionID: "test"})
 	m.phase = PhasePostExploit
