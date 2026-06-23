@@ -255,22 +255,61 @@ func cloudShellNeedsLocalImage() bool {
 }
 
 func dockerRunUserArgs() []string {
-	if runtime.GOOS == "windows" {
+	current, ok := currentNumericUser()
+	if !ok {
 		return nil
+	}
+	return []string{"--user", current.Uid + ":" + current.Gid}
+}
+
+func currentNumericUser() (*user.User, bool) {
+	if runtime.GOOS == "windows" {
+		return nil, false
 	}
 
 	current, err := currentUserFn()
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	if _, err := strconv.ParseUint(current.Uid, 10, 32); err != nil {
-		return nil
+		return nil, false
 	}
 	if _, err := strconv.ParseUint(current.Gid, 10, 32); err != nil {
+		return nil, false
+	}
+	return current, true
+}
+
+func dockerRunIdentityMountArgs(hostDir, containerHome string) []string {
+	current, ok := currentNumericUser()
+	if !ok || current.Uid == "0" {
 		return nil
 	}
+	if err := writeDockerRunIdentityFiles(hostDir, containerHome, current.Uid, current.Gid); err != nil {
+		return nil
+	}
+	return []string{
+		"--mount", "type=bind,source=" + filepath.Join(hostDir, ".sm-passwd") + ",target=/etc/passwd,readonly",
+		"--mount", "type=bind,source=" + filepath.Join(hostDir, ".sm-group") + ",target=/etc/group,readonly",
+	}
+}
 
-	return []string{"--user", current.Uid + ":" + current.Gid}
+func writeDockerRunIdentityFiles(hostDir, containerHome, uid, gid string) error {
+	passwd := strings.Join([]string{
+		"root:x:0:0:root:/root:/bin/sh",
+		fmt.Sprintf("smokedmeat:x:%s:%s:SmokedMeat Shell:%s:/bin/bash", uid, gid, containerHome),
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(hostDir, ".sm-passwd"), []byte(passwd), 0o644); err != nil {
+		return err
+	}
+
+	group := strings.Join([]string{
+		"root:x:0:",
+		fmt.Sprintf("smokedmeat:x:%s:", gid),
+		"",
+	}, "\n")
+	return os.WriteFile(filepath.Join(hostDir, ".sm-group"), []byte(group), 0o644)
 }
 
 func dockerBindMountArgs(source, target string) []string {
@@ -304,17 +343,8 @@ func (m Model) spawnDockerCloudShell(cs *CloudState) tea.Cmd {
 	shareDir := cloudShellShareDir(cs)
 	_ = os.MkdirAll(shareDir, 0o700)
 
-	env := cloudShellEnv(cs, "/shell", "/shared")
 	image := cloudShellImageRefFn()
-	args := []string{"run", "--rm", "-it"}
-	args = append(args, dockerRunUserArgs()...)
-	args = append(args, dockerBindMountArgs(cs.TempDir, "/shell")...)
-	args = append(args, dockerBindMountArgs(shareDir, "/shared")...)
-	args = append(args, "-w", "/shell")
-	for _, kv := range env {
-		args = append(args, "-e", kv)
-	}
-	args = append(args, image)
+	args := dockerCloudShellArgs(cs, shareDir, image)
 
 	cmd := exec.Command("docker", args...)
 	cmd.Stdin = os.Stdin
@@ -324,6 +354,21 @@ func (m Model) spawnDockerCloudShell(cs *CloudState) tea.Cmd {
 		cleanupCloudShellShareDir(shareDir)
 		return CloudShellExitMsg{Err: err}
 	})
+}
+
+func dockerCloudShellArgs(cs *CloudState, shareDir, image string) []string {
+	env := cloudShellEnv(cs, "/shell", "/shared")
+	args := []string{"run", "--rm", "-it"}
+	args = append(args, dockerRunIdentityMountArgs(cs.TempDir, "/shell")...)
+	args = append(args, dockerRunUserArgs()...)
+	args = append(args, dockerBindMountArgs(cs.TempDir, "/shell")...)
+	args = append(args, dockerBindMountArgs(shareDir, "/shared")...)
+	args = append(args, "-w", "/shell")
+	for _, kv := range env {
+		args = append(args, "-e", kv)
+	}
+	args = append(args, image)
+	return args
 }
 
 func cloudShellShareDir(cs *CloudState) string {

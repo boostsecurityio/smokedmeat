@@ -424,16 +424,8 @@ func (m Model) spawnEmbeddedSSHShell(ss *SSHState) tea.Cmd {
 }
 
 func (m Model) spawnDockerSSHShell(ss *SSHState) tea.Cmd {
-	env := sshShellEnv(ss, "/shell")
 	image := cloudShellImageRefFn()
-	args := []string{"run", "--rm", "-it"}
-	args = append(args, dockerRunUserArgs()...)
-	args = append(args, dockerBindMountArgs(ss.TempDir, "/shell")...)
-	args = append(args, "-w", "/shell")
-	for _, kv := range env {
-		args = append(args, "-e", kv)
-	}
-	args = append(args, image)
+	args := dockerSSHShellArgs(ss, image)
 
 	cmd := exec.Command("docker", args...)
 	cmd.Stdin = os.Stdin
@@ -442,4 +434,18 @@ func (m Model) spawnDockerSSHShell(ss *SSHState) tea.Cmd {
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return SSHShellExitMsg{Err: err}
 	})
+}
+
+func dockerSSHShellArgs(ss *SSHState, image string) []string {
+	env := sshShellEnv(ss, "/shell")
+	args := []string{"run", "--rm", "-it"}
+	args = append(args, dockerRunIdentityMountArgs(ss.TempDir, "/shell")...)
+	args = append(args, dockerRunUserArgs()...)
+	args = append(args, dockerBindMountArgs(ss.TempDir, "/shell")...)
+	args = append(args, "-w", "/shell")
+	for _, kv := range env {
+		args = append(args, "-e", kv)
+	}
+	args = append(args, image)
+	return args
 }
