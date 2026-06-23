@@ -5,6 +5,7 @@ package tui
 
 import (
 	"bytes"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"os/exec"
@@ -218,7 +219,11 @@ func setupSSHShellHome(ss *SSHState) error {
 	}
 
 	keyPath := filepath.Join(sshDir, "id_smokedmeat")
-	if err := os.WriteFile(keyPath, []byte(ss.KeyValue), 0o600); err != nil {
+	keyData, err := sshShellPrivateKeyBytes(ss.KeyValue)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(keyPath, keyData, 0o600); err != nil {
 		return err
 	}
 
@@ -255,6 +260,22 @@ func setupSSHShellHome(ss *SSHState) error {
 		return err
 	}
 	return writeSSHShellHelpers(ss)
+}
+
+func sshShellPrivateKeyBytes(value string) ([]byte, error) {
+	normalized := normalizeSSHPrivateKey(value)
+	if normalized == "" {
+		return nil, fmt.Errorf("SSH private key is empty")
+	}
+	raw, err := ssh.ParseRawPrivateKey([]byte(normalized))
+	if err != nil {
+		return nil, fmt.Errorf("invalid SSH private key: %w", err)
+	}
+	block, err := ssh.MarshalPrivateKey(raw, "smokedmeat")
+	if err != nil {
+		return []byte(normalized), nil
+	}
+	return pem.EncodeToMemory(block), nil
 }
 
 func sshShellEnv(ss *SSHState, shellHome string) []string {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/boostsecurityio/smokedmeat/internal/buildinfo"
 )
@@ -124,7 +125,10 @@ func TestSetupSSHShellHome_WritesConfig(t *testing.T) {
 
 	keyData, err := os.ReadFile(filepath.Join(tmpDir, ".ssh", "id_smokedmeat"))
 	require.NoError(t, err)
-	assert.Contains(t, string(keyData), "BEGIN RSA PRIVATE KEY")
+	assert.Contains(t, string(keyData), "BEGIN OPENSSH PRIVATE KEY")
+	assert.True(t, strings.HasSuffix(string(keyData), "\n"))
+	_, err = ssh.ParsePrivateKey(keyData)
+	require.NoError(t, err)
 
 	configData, err := os.ReadFile(filepath.Join(tmpDir, ".ssh", "config"))
 	require.NoError(t, err)
@@ -164,6 +168,25 @@ func TestSetupSSHShellHome_WritesConfig(t *testing.T) {
 	nanoScriptData, err := os.ReadFile(filepath.Join(tmpDir, "bin", "nano"))
 	require.NoError(t, err)
 	assert.Contains(t, string(nanoScriptData), "exec vi")
+}
+
+func TestSetupSSHShellHome_NormalizesEscapedPrivateKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	key := strings.TrimSpace(testSSHPrivateKey(t))
+	ss := &SSHState{
+		KeyName:  "DEPLOY_KEY",
+		KeyValue: strings.ReplaceAll(key, "\n", `\n`),
+		TempDir:  tmpDir,
+	}
+
+	require.NoError(t, setupSSHShellHome(ss))
+
+	keyData, err := os.ReadFile(filepath.Join(tmpDir, ".ssh", "id_smokedmeat"))
+	require.NoError(t, err)
+	assert.Contains(t, string(keyData), "BEGIN OPENSSH PRIVATE KEY")
+	assert.True(t, strings.HasSuffix(string(keyData), "\n"))
+	_, err = ssh.ParsePrivateKey(keyData)
+	require.NoError(t, err)
 }
 
 func TestSSHShellEnv_UsesRuntimeScopedKeyPaths(t *testing.T) {
