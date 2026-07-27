@@ -24,6 +24,10 @@ _Avoid_: Analysis, scan
 Static examination of repositories and CI workflows that produces findings without requiring code execution on a runner.
 _Avoid_: Recon, exploit
 
+**Secret detection**:
+Static Analysis that identifies credential material in target repositories without depending on a particular detection engine.
+_Avoid_: Gitleaks scan, secret scan
+
 **Finding**:
 Evidence of a CI/CD weakness produced by analysis before it is normalized for operator use.
 _Avoid_: Issue, ticket
@@ -99,6 +103,10 @@ _Avoid_: Recon, exploit
 **Pantry**:
 The persistent attack graph representing discovered entities, their state, and the paths between them.
 _Avoid_: Tree, inventory
+
+**Analysis ingestion**:
+Reconciliation of completed Analysis evidence into Pantry within the repositories the Analysis covered, while preserving evidence collected through other engagement activity.
+_Avoid_: Pantry import, graph import
 
 **Asset**:
 A tracked entity in Pantry, such as an organization, repository, workflow, job, vulnerability, credential, cloud resource, or agent.
