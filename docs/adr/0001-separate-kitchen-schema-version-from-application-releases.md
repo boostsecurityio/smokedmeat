@@ -1,0 +1,3 @@
+# Separate Kitchen schema versions from application releases
+
+Kitchen persists engagement state across application upgrades. Its database therefore carries an explicit schema version that is independent of the SmokedMeat release version: additive changes may advance the schema minor, while changes that older binaries or existing data cannot interpret safely advance the schema major and make startup fail with clear purge guidance instead of applying an implicit migration. This favors predictable compatibility and honest failure over coupling storage changes to release numbers or accumulating an early migration framework.

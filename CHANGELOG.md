@@ -1,87 +1,143 @@
 # Changelog
 
-All notable changes to SmokedMeat will be documented in this file.
+All notable changes to SmokedMeat are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/),
-and this project adheres to [Semantic Versioning](https://semver.org/).
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and releases use [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Fixed
-- LOTP auto-PR now honors detected pull request title gate triggers and npm payload callbacks use the exact stager URL path
-- Counter LOTP Step 3 preview boxes no longer clip against the wizard modal edge on narrower terminals
-
-## [0.1.0] - 2026-04-15
-
-First public release. GitHub Actions is the supported CI platform for v0.1.0. Other platforms (GitLab CI, Azure DevOps, CircleCI, Jenkins, Bitbucket) are detected during recon but analysis, delivery, exploitation, and pivoting workflows are GitHub Actions only.
-
 ### Added
-- Server-side GitHub deploy preflight for workflow dispatch (validates workflow existence and required inputs)
-- Bounded callback fanout controls for managing multiple concurrent agent sessions
-- Selective Kitchen purge controls for targeted state cleanup
-- Live analysis progress for large orgs with resilient reconnection on transient failures
-- Improved operator command discoverability with phase-aware help and suggestions
-- Cross-platform clipboard support for loot and payload copy
-- Browser graph tooltip formatting
-- Public-facing feature reference in `docs/FEATURES.md`
-- Whooli playground guide in `docs/WHOOLI.md`
-- Tutorial walkthrough in `TUTORIAL.md` with screenshots
+
+- Canonical domain language in `CONTEXT.md` and an ADR for Kitchen schema compatibility.
+- Agent-specific guidance for engineering, TUI work, persistence, issue tracking, and triage.
+- TROOPERS slide-deck images for project documentation.
 
 ### Changed
-- Bumped embedded poutine for major repo analysis speedups and fine-grained PAT org support
-- Reworked the README for first-time operators, including quickstart, deployment modes, and public evaluation guidance
-- Renamed the playground target to `whooli`
-- Polished setup wizard token flow with clearer guidance
-- Tightened command input feedback across all TUI phases
-- Reproducible release builds for Brisket implant binaries
-- Clarified Counter tree filtering with an explicit ON/OFF footer banner and a findings-pane `f:filter` status hint
-- Removed internal planning docs that are not meant to ship in the public repo
 
-### Fixed
-- GITHUB_TOKEN permission attribution now correctly maps scopes
-- Findings tree exploit selection no longer skips certain vulnerability nodes
-- GitHub App PEM loot copy works correctly
-- App pivot delivery scope warnings no longer show false positives
-- Unsupported findings (non-GitHub Actions) are kept as analyze-only instead of being hidden
-- Setup analysis retries on transient EOF instead of failing silently
+- Replaced the repository roadmap files with GitHub Issues and the private SmokedMeat Roadmap Project as planning sources of truth.
+- Reduced `AGENTS.md` to durable constraints and progressive links to task-specific guidance.
+- Rebuilt this changelog from the published GitHub release history.
+- Pinned release-backed quickstart to v0.3.1.
 
-### Known Limitations
-- Server-side deploy preflight is partial: dispatch validates workflow existence and inputs, but PR, issue, comment, and LOTP preflight relies on client-side wizard gating. Failed deployments show friendly 403 messages.
-- No operator notifications (webhook/Slack/Discord) for agent callbacks or high-value loot. Watch the Counter activity log.
-- `cloud shell` and `ssh shell` hand off to external processes via raw exec. An in-app PTY shell takeover is planned.
-- Cache poisoning flow requires manual coordination and understanding of GitHub's cache scoping rules.
-- Single-operator focus: multiple operators can connect to the same Kitchen, but there is no session management UI for coordinating across agents and pivots.
-
-## [0.0.4] - 2026-03-27
+## [0.3.1] - 2026-06-23
 
 ### Added
-- End-to-end GitHub Actions cache-poisoning flow with wizard UX, exact-key prediction, and persistent implant support
-- Additional goat validation around the writer and victim workflow chain
 
-## [0.0.3] - 2026-03-17
-
-### Added
-- SSH pivoting with `pivot ssh`, `pivot ssh org`, `pivot ssh org/repo`, and `ssh shell`
-- Cloud post-exploit improvements with durable sessions, `cloud shell`, `cloud export`, and provider quick checks
-
-## [0.0.2] - 2026-02-20
-
-### Added
-- GitHub App key pivot from PEM to installation token
-- Workflow `if:` gate detection with trigger classification
-- Issue deploy comment-mode for `issue_comment` vulnerabilities
-- Draft PR support and auto-close on callback
-- Server-side dispatch permission pre-checks
+- Trusted self-hosted runner harvest results now create normal cloud shell sessions.
+- Resident cloud credentials include their expiry window when available.
 
 ### Changed
-- Migrated the Counter TUI to Bubble Tea v2 with Ultraviolet layout and compositing
-- Split the monolithic `update.go` flow into focused subject files
 
-## [0.0.1] - 2026-01-06
+- Docker shell containers mount host user and group databases for reliable UID and GID resolution on macOS and Linux.
+- Linux lint coverage includes the resident-harvest path.
+
+### Fixed
+
+- Release-backed Docker SSH shells no longer fail when the container cannot resolve the host UID.
+- SSH private keys are canonicalized before containerized clients load them.
+- Resident harvest tolerates short-lived process races.
+- Trusted runner cloud tokens remain available after resident harvest.
+
+Kitchen schema remains compatible with v0.3.0. No purge is required.
+
+## [0.3.0] - 2026-06-05
 
 ### Added
-- Core Counter, Kitchen, and Brisket operator flow for GitHub Actions
-- LOTP delivery support for CI/CD payload injection
-- Kitchen-side GitHub API proxying
-- Docker quickstart flow for local evaluation
-- Attack graph browser view and E2E foundation
+
+- Authenticated browser-based GitHub source and repository browsing through Kitchen.
+- Workflow source inspection from Counter with source-aware findings.
+- GitHub Actions Auditor mode for browser-native workflow review.
+- Custom Poutine rule packs with configuration, validation, mappings, and Counter rule summaries.
+
+### Changed
+
+- Graph nodes link into the browser source viewer.
+- Repository browsing includes richer navigation and control-plane context.
+- Cache-poisoning results preserve stronger runtime correlation.
+
+### Fixed
+
+- Gump recovers runtime context on slim runners without the usual process environment path.
+- Quickstart state works correctly for same-host multi-user installations.
+- SSH shell launch resolves its entrypoint from the current environment.
+- Imported Pantry findings use their normalized exploit class.
+
+Kitchen schema advances from 2.4 to 2.5 and remains on major version 2. No purge is required from v0.2.0.
+
+## [0.2.0] - 2026-05-05
+
+### Added
+
+- Self-hosted runners as first-class attack graph and Counter targets.
+- Resident Brisket footholds with later-job observation and automatic harvest.
+- Workflow dispatch targeting with input review, triggering, and correlated waiting state.
+- Counter release update checks.
+
+### Changed
+
+- Waiting, callback, loot, Pantry, graph, tree, and omnibox views carry richer execution context.
+- Re-analysis replaces stale repository findings before importing fresh results.
+- Open-target actions identify the actual workflow, run, issue, pull request, or comment.
+
+### Fixed
+
+- Public authentication request bodies are size-limited.
+- Authentication challenges have per-IP rate limiting and bounded pending state.
+- Gitleaks findings are attributed to the correct repository.
+- Self-hosted runner signals remain analyze-only until an honest exploit path exists.
+
+Kitchen schema remains on major version 2. No purge is required from v0.1.2.
+
+## [0.1.2] - 2026-04-24
+
+### Added
+
+- Per-source injection variants are persisted with stable discriminators.
+
+### Changed
+
+- Automatic LOTP delivery is limited to payload families with working generators and delivery paths.
+- Detected but unsupported LOTP findings remain available as analyze-only findings.
+- **Breaking:** Kitchen schema advances from 1.0 to 2.0. Existing v0.1.0 and v0.1.1 volumes must be purged before upgrade.
+
+### Fixed
+
+- Stager metadata is accessed through locked snapshots instead of shared mutable pointers.
+- Pip, Yarn, Cargo, and Make prefer callback-bearing payload variants.
+- Setup action aliases resolve to honest LOTP generators.
+
+## [0.1.1] - 2026-04-17
+
+### Added
+
+- Bash injection context analysis for command, argument, quoting, and heredoc positions.
+- Branch-name payload delivery for `github.head_ref` findings.
+- LOTP wizard previews built on Ultraviolet compositing.
+
+### Fixed
+
+- Public quickstart resolves downloads against the pinned release path.
+
+Kitchen schema is unchanged from v0.1.0. No purge is required.
+
+## [0.1.0] - 2026-04-14
+
+First public release. GitHub Actions is the supported analysis, delivery, exploitation, and pivot platform. Other CI providers are detected for runner classification only.
+
+### Added
+
+- Counter operator client, Kitchen teamserver, and Brisket implant flow.
+- GitHub Actions analysis for injection paths, dangerous triggers, and unsafe checkout patterns.
+- Payload delivery through pull requests, issues, comments, LOTP, and workflow dispatch.
+- Runner post-exploitation, secret extraction, token enumeration, and cloud pivots.
+- Persistent Pantry attack graph with a live browser view.
+- Release-backed and development quickstart flows.
+- Whooli playground, tutorial, feature reference, and public deployment documentation.
+
+[Unreleased]: https://github.com/boostsecurityio/smokedmeat/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/boostsecurityio/smokedmeat/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/boostsecurityio/smokedmeat/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/boostsecurityio/smokedmeat/compare/v0.1.2...v0.2.0
+[0.1.2]: https://github.com/boostsecurityio/smokedmeat/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/boostsecurityio/smokedmeat/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/boostsecurityio/smokedmeat/releases/tag/v0.1.0
