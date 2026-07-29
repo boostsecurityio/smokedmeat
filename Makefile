@@ -6,7 +6,7 @@
         build-brisket build-brisket-all clean \
         e2e-up e2e-down e2e-purge e2e-counter e2e-capture e2e-keys e2e-kitchen-rebuild analyze-perf \
         worktree-sync-main worktree-add worktree-list worktree-remove worktree-prune \
-        e2e-smoke e2e-goat
+        e2e-smoke e2e-goat prototype-analysis-ingestion
 
 .DEFAULT_GOAL := help
 
@@ -94,6 +94,7 @@ help-more:
 	@echo "  tidy             Run go mod tidy"
 	@echo "  pinact           Pin GitHub Actions versions"
 	@echo "  tag VERSION=v... Create, sign, and push a release tag"
+	@echo "  prototype-analysis-ingestion Compare throwaway Analysis ingestion interfaces"
 	@echo "  clean            Remove dist/ directory"
 
 define print_release_quickstart_banner
@@ -1078,6 +1079,9 @@ dev-quickstart-purge:
 
 counter:
 	@go run ./cmd/counter
+
+prototype-analysis-ingestion:
+	@go run ./internal/kitchen/analysis_ingestion_prototype
 
 # =============================================================================
 # Testing
