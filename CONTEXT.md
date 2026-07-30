@@ -104,6 +104,14 @@ _Avoid_: Recon, exploit
 The persistent attack graph representing discovered entities, their state, and the paths between them.
 _Avoid_: Tree, inventory
 
+**Pantry revision**:
+The ordered identity of one committed Pantry state. A later revision supersedes earlier state; failed and no-op transitions do not create a revision.
+_Avoid_: Graph version, message version
+
+**Pantry snapshot**:
+A complete, internally consistent view of Pantry at one revision.
+_Avoid_: Graph dump, partial view
+
 **Analysis ingestion**:
 Reconciliation of completed Analysis evidence into Pantry within the repositories the Analysis covered, while preserving evidence collected through other engagement activity.
 _Avoid_: Pantry import, graph import
