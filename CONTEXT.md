@@ -24,6 +24,14 @@ _Avoid_: Analysis, scan
 Static examination of repositories and CI workflows that produces findings without requiring code execution on a runner.
 _Avoid_: Recon, exploit
 
+**Analysis run**:
+One identified execution of workflow Analysis and optional secret detection over an Analysis scope.
+_Avoid_: Scan job, analysis request
+
+**Analysis scope**:
+The Organization, Repository, or explicit Repository set whose terminal phase and existence evidence belongs to one Analysis run.
+_Avoid_: Batch, target list
+
 **Secret detection**:
 Static Analysis that identifies credential material in target repositories without depending on a particular detection engine.
 _Avoid_: Gitleaks scan, secret scan
