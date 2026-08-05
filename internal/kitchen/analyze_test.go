@@ -853,9 +853,14 @@ func TestImportPrivateReposToPantry_AddsPrivateRepos(t *testing.T) {
 	h := NewHandlerWithPublisher(mock, nil)
 	h.database = database
 
-	h.importPrivateReposToPantry("sess1")
+	require.NoError(t, h.importPrivateReposToPantry(context.Background(), "sess1"))
 
 	p := h.Pantry()
+	assert.Equal(t, uint64(1), p.Revision())
+	persisted, err := database.LoadPantry()
+	require.NoError(t, err)
+	require.NotNil(t, persisted)
+	assert.Equal(t, uint64(1), persisted.Revision())
 	repos := p.GetAssetsByType(pantry.AssetRepository)
 	assert.Len(t, repos, 2)
 
@@ -877,7 +882,7 @@ func TestImportPrivateReposToPantry_SkipsPublicRepos(t *testing.T) {
 	h := NewHandlerWithPublisher(mock, nil)
 	h.database = database
 
-	h.importPrivateReposToPantry("sess1")
+	require.NoError(t, h.importPrivateReposToPantry(context.Background(), "sess1"))
 
 	p := h.Pantry()
 	repos := p.GetAssetsByType(pantry.AssetRepository)
@@ -897,7 +902,7 @@ func TestImportPrivateReposToPantry_CreatesOrgAssets(t *testing.T) {
 	h := NewHandlerWithPublisher(mock, nil)
 	h.database = database
 
-	h.importPrivateReposToPantry("sess1")
+	require.NoError(t, h.importPrivateReposToPantry(context.Background(), "sess1"))
 
 	p := h.Pantry()
 
@@ -936,7 +941,7 @@ func TestImportPrivateReposToPantry_ImportsSSHAccessRepos(t *testing.T) {
 	h := NewHandlerWithPublisher(mock, nil)
 	h.database = database
 
-	h.importPrivateReposToPantry("sess1")
+	require.NoError(t, h.importPrivateReposToPantry(context.Background(), "sess1"))
 
 	repos := h.Pantry().GetAssetsByType(pantry.AssetRepository)
 	require.Len(t, repos, 1)
@@ -1021,7 +1026,7 @@ func TestHandleAnalyze_EmptySessionID_SkipsRepoVisibility(t *testing.T) {
 	// When SessionID is empty, this block is skipped entirely.
 	if req.SessionID != "" && h.database != nil {
 		h.recordAnalyzedRepoVisibility(t.Context(), req, result)
-		h.importPrivateReposToPantry(req.SessionID)
+		require.NoError(t, h.importPrivateReposToPantry(context.Background(), req.SessionID))
 	}
 
 	// Prove: no known entities recorded
@@ -1032,7 +1037,7 @@ func TestHandleAnalyze_EmptySessionID_SkipsRepoVisibility(t *testing.T) {
 
 	// Prove: pantry has no private property
 	p := h.Pantry()
-	h.importAnalysisToPantry(result)
+	h.importAnalysisToPantry(h.Pantry(), result)
 	repos := p.GetAssetsByType(pantry.AssetRepository)
 	for _, repo := range repos {
 		_, hasPrivate := repo.Properties["private"]
@@ -1079,7 +1084,7 @@ func TestHandleAnalyze_WithSessionID_RecordsRepoVisibility(t *testing.T) {
 	// Same guard as handleAnalyze
 	if req.SessionID != "" && h.database != nil {
 		h.recordAnalyzedRepoVisibility(t.Context(), req, result)
-		h.importPrivateReposToPantry(req.SessionID)
+		require.NoError(t, h.importPrivateReposToPantry(context.Background(), req.SessionID))
 	}
 
 	// Prove: entity recorded with IsPrivate=true
@@ -1177,7 +1182,7 @@ func TestImportAnalysisToPantry_SetsExploitSupportMetadata(t *testing.T) {
 		},
 	}
 
-	h.importAnalysisToPantry(result)
+	h.importAnalysisToPantry(h.Pantry(), result)
 
 	vulns := h.Pantry().FindVulnerabilities()
 	require.Len(t, vulns, 1)
@@ -1200,7 +1205,7 @@ func TestImportAnalysisToPantry_SkipsSelfHostedRunnerAnalyzeOnlyVuln(t *testing.
 		},
 	}
 
-	h.importAnalysisToPantry(result)
+	h.importAnalysisToPantry(h.Pantry(), result)
 
 	assert.Empty(t, h.Pantry().FindVulnerabilities())
 	targets := h.Pantry().GetAssetsByType(pantry.AssetSelfHostedRunner)
@@ -1238,7 +1243,7 @@ func TestImportAnalysisToPantry_CreatesSelfHostedRunnerTargets(t *testing.T) {
 		},
 	}
 
-	h.importAnalysisToPantry(result)
+	h.importAnalysisToPantry(h.Pantry(), result)
 
 	targets := h.Pantry().GetAssetsByType(pantry.AssetSelfHostedRunner)
 	require.Len(t, targets, 1)
@@ -1265,7 +1270,7 @@ func TestImportAnalysisToPantry_AttachesGitleaksSecretsToFindingRepo(t *testing.
 		},
 	}
 
-	h.importAnalysisToPantry(result)
+	h.importAnalysisToPantry(h.Pantry(), result)
 
 	secrets := h.Pantry().GetAssetsByType(pantry.AssetSecret)
 	require.Len(t, secrets, 1)
@@ -1295,7 +1300,7 @@ func TestImportAnalysisToPantry_PersistsBashContextBeforeExploitSupport(t *testi
 		},
 	}
 
-	h.importAnalysisToPantry(result)
+	h.importAnalysisToPantry(h.Pantry(), result)
 
 	vulns := h.Pantry().FindVulnerabilities()
 	require.Len(t, vulns, 1)
@@ -1338,7 +1343,7 @@ func TestImportAnalysisToPantry_PreservesMultiSourceInjectionFindings(t *testing
 		},
 	}
 
-	h.importAnalysisToPantry(result)
+	h.importAnalysisToPantry(h.Pantry(), result)
 
 	vulns := h.Pantry().FindVulnerabilities()
 	require.Len(t, vulns, 4)

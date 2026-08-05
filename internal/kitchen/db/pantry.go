@@ -13,16 +13,18 @@ import (
 
 var pantryKey = []byte("graph")
 
-// SavePantry persists the attack graph to the database.
-func (db *DB) SavePantry(p *pantry.Pantry) error {
-	data, err := json.Marshal(p)
-	if err != nil {
-		return err
-	}
+type PantrySnapshotStore struct {
+	db *DB
+}
 
-	return db.bolt.Update(func(tx *bolt.Tx) error {
+func NewPantrySnapshotStore(database *DB) *PantrySnapshotStore {
+	return &PantrySnapshotStore{db: database}
+}
+
+func (s *PantrySnapshotStore) Replace(serialized []byte) error {
+	return s.db.bolt.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(BucketPantry)
-		return b.Put(pantryKey, data)
+		return b.Put(pantryKey, serialized)
 	})
 }
 
@@ -33,7 +35,7 @@ func (db *DB) LoadPantry() (*pantry.Pantry, error) {
 
 	err := db.bolt.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(BucketPantry)
-		data = b.Get(pantryKey)
+		data = append([]byte(nil), b.Get(pantryKey)...)
 		return nil
 	})
 	if err != nil {

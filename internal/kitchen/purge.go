@@ -4,6 +4,7 @@
 package kitchen
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -50,7 +51,7 @@ func (h *Handler) handlePurge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := h.runPurge(req.SessionID, scopeType, scopeValue, req.DryRun)
+	resp, err := h.runPurge(r.Context(), req.SessionID, scopeType, scopeValue, req.DryRun)
 	if err != nil {
 		http.Error(w, "failed to purge state", http.StatusInternalServerError)
 		return
@@ -85,7 +86,7 @@ func normalizePurgeScope(scopeType, scopeValue string) (normalizedType, normaliz
 	}
 }
 
-func (h *Handler) runPurge(sessionID, scopeType, scopeValue string, dryRun bool) (PurgeResponse, error) {
+func (h *Handler) runPurge(ctx context.Context, sessionID, scopeType, scopeValue string, dryRun bool) (PurgeResponse, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return PurgeResponse{}, fmt.Errorf("session_id is required")
@@ -99,9 +100,8 @@ func (h *Handler) runPurge(sessionID, scopeType, scopeValue string, dryRun bool)
 		DryRun:     dryRun,
 	}
 
-	if h.pantry != nil {
-		resp.PantryAssets = countPurgeAssets(h.pantry, purgeRootAssetID(scopeType, scopeValue))
-	}
+	p := h.Pantry()
+	resp.PantryAssets = countPurgeAssets(p, purgeRootAssetID(scopeType, scopeValue))
 	if h.database != nil {
 		entityRepo := db.NewKnownEntityRepository(h.database)
 		count, err := entityRepo.CountByScopeAndSession(db.EntityType(scopeType), scopeValue, sessionID)
@@ -115,13 +115,15 @@ func (h *Handler) runPurge(sessionID, scopeType, scopeValue string, dryRun bool)
 		return resp, nil
 	}
 
-	if h.pantry != nil && resp.PantryAssets > 0 {
-		for _, id := range collectPurgeAssetIDs(h.pantry, purgeRootAssetID(scopeType, scopeValue)) {
-			if err := h.pantry.RemoveAsset(id); err != nil && err != pantry.ErrAssetNotFound {
-				return PurgeResponse{}, err
+	if resp.PantryAssets > 0 {
+		if err := h.committedPantry().Update(ctx, func(candidate *pantry.Pantry) error {
+			for _, id := range collectPurgeAssetIDs(candidate, purgeRootAssetID(scopeType, scopeValue)) {
+				if err := candidate.RemoveAsset(id); err != nil && err != pantry.ErrAssetNotFound {
+					return err
+				}
 			}
-		}
-		if err := h.SavePantry(); err != nil {
+			return nil
+		}); err != nil {
 			return PurgeResponse{}, err
 		}
 	}

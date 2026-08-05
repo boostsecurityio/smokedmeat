@@ -535,44 +535,6 @@ func TestPantry_AddAsset_PreservesProperties(t *testing.T) {
 	assert.Equal(t, "analysis", final.Properties["discovered_by"], "New property should override old")
 }
 
-func TestPantry_AddAsset_PropertyChangeNotifiesObserver(t *testing.T) {
-	p := New()
-
-	repo := NewRepository("acme", "api", "github")
-	require.NoError(t, p.AddAsset(repo))
-
-	var updatedAssets []Asset
-	obs := &testObserver{
-		onUpdated: func(a Asset, _ AssetState) { updatedAssets = append(updatedAssets, a) },
-	}
-	p.AddObserver(obs)
-
-	updated := NewRepository("acme", "api", "github")
-	updated.SetProperty("private", true)
-	require.NoError(t, p.AddAsset(updated))
-
-	require.Len(t, updatedAssets, 1, "property change should fire OnAssetUpdated")
-	assert.Equal(t, true, updatedAssets[0].Properties["private"])
-}
-
-func TestPantry_AddAsset_NoPropertyChangeNoNotification(t *testing.T) {
-	p := New()
-
-	repo := NewRepository("acme", "api", "github")
-	require.NoError(t, p.AddAsset(repo))
-
-	var updateCount int
-	obs := &testObserver{
-		onUpdated: func(_ Asset, _ AssetState) { updateCount++ },
-	}
-	p.AddObserver(obs)
-
-	same := NewRepository("acme", "api", "github")
-	require.NoError(t, p.AddAsset(same))
-
-	assert.Equal(t, 0, updateCount, "identical re-add should not fire observer")
-}
-
 func TestPantry_AddAsset_SlicePropertyNoPanic(t *testing.T) {
 	p := New()
 
@@ -589,25 +551,6 @@ func TestPantry_AddAsset_SlicePropertyNoPanic(t *testing.T) {
 	assert.Equal(t, true, final.Properties["private"])
 	assert.Equal(t, []interface{}{"read", "write"}, final.Properties["permissions"])
 }
-
-type testObserver struct {
-	onAdded   func(Asset)
-	onUpdated func(Asset, AssetState)
-}
-
-func (o *testObserver) OnAssetAdded(a Asset) {
-	if o.onAdded != nil {
-		o.onAdded(a)
-	}
-}
-func (o *testObserver) OnAssetUpdated(a Asset, old AssetState) {
-	if o.onUpdated != nil {
-		o.onUpdated(a, old)
-	}
-}
-func (o *testObserver) OnRelationshipAdded(_, _ string, _ Relationship) {}
-func (o *testObserver) OnAssetRemoved(_ string)                         {}
-func (o *testObserver) OnRelationshipRemoved(_, _ string)               {}
 
 func TestPantry_JSON_OrganizationRoundTrip(t *testing.T) {
 	p := New()

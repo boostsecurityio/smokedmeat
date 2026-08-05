@@ -6,6 +6,8 @@ package pantry
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
+	"sort"
 	"sync"
 
 	"github.com/hmdsefi/gograph"
@@ -37,22 +39,26 @@ type Pantry struct {
 	// Index for faster lookups by type
 	byType map[AssetType]map[string]struct{}
 
+	commitGate chan struct{}
+
 	// Observer support for real-time notifications
 	obsMu     sync.RWMutex
 	observers []Observer
 
-	// Version counter for change tracking
-	version int64
+	revision uint64
 }
 
 // New creates a new Pantry with an empty directed graph.
 func New() *Pantry {
+	commitGate := make(chan struct{}, 1)
+	commitGate <- struct{}{}
 	return &Pantry{
 		graph:        gograph.New[string](gograph.Directed()),
 		assets:       make(map[string]Asset),
 		edges:        make(map[string]Relationship),
 		reverseEdges: make(map[string][]string),
 		byType:       make(map[AssetType]map[string]struct{}),
+		commitGate:   commitGate,
 	}
 }
 
@@ -63,36 +69,24 @@ func edgeKey(from, to string) string {
 
 // AddAsset adds or updates an asset vertex.
 func (p *Pantry) AddAsset(asset Asset) error {
+	asset = cloneAsset(asset)
 	p.mu.Lock()
 
 	existing := p.graph.GetVertexByID(asset.ID)
 	if existing != nil {
 		oldAsset := p.assets[asset.ID]
-		oldState := oldAsset.State
-		hasNewKeys := false
-		for k := range asset.Properties {
-			if _, has := oldAsset.Properties[k]; !has {
-				hasNewKeys = true
-				break
-			}
-		}
 		if len(oldAsset.Properties) > 0 {
 			if asset.Properties == nil {
 				asset.Properties = make(map[string]any)
 			}
 			for k, v := range oldAsset.Properties {
 				if _, has := asset.Properties[k]; !has {
-					asset.Properties[k] = v
+					asset.Properties[k] = cloneProperty(v)
 				}
 			}
 		}
 		p.assets[asset.ID] = asset
-		p.version++
 		p.mu.Unlock()
-
-		if oldState != asset.State || hasNewKeys {
-			p.notifyAssetUpdated(asset, oldState)
-		}
 		return nil
 	}
 
@@ -103,15 +97,13 @@ func (p *Pantry) AddAsset(asset Asset) error {
 		p.byType[asset.Type] = make(map[string]struct{})
 	}
 	p.byType[asset.Type][asset.ID] = struct{}{}
-	p.version++
 	p.mu.Unlock()
-
-	p.notifyAssetAdded(asset)
 	return nil
 }
 
 // AddRelationship adds an edge between assets.
 func (p *Pantry) AddRelationship(fromID, toID string, rel Relationship) error {
+	rel = cloneRelationship(rel)
 	p.mu.Lock()
 
 	fromVertex := p.graph.GetVertexByID(fromID)
@@ -133,10 +125,7 @@ func (p *Pantry) AddRelationship(fromID, toID string, rel Relationship) error {
 
 	p.edges[edgeKey(fromID, toID)] = rel
 	p.reverseEdges[toID] = append(p.reverseEdges[toID], fromID)
-	p.version++
 	p.mu.Unlock()
-
-	p.notifyRelationshipAdded(fromID, toID, rel)
 	return nil
 }
 
@@ -176,10 +165,7 @@ func (p *Pantry) RemoveAsset(id string) error {
 	}
 
 	delete(p.assets, id)
-	p.version++
 	p.mu.Unlock()
-
-	p.notifyAssetRemoved(id)
 	return nil
 }
 
@@ -203,10 +189,7 @@ func (p *Pantry) RemoveRelationship(fromID, toID string) error {
 		p.graph.RemoveEdges(edge)
 	}
 
-	p.version++
 	p.mu.Unlock()
-
-	p.notifyRelationshipRemoved(fromID, toID)
 	return nil
 }
 
@@ -219,7 +202,7 @@ func (p *Pantry) GetAsset(id string) (Asset, error) {
 	if !ok {
 		return Asset{}, ErrAssetNotFound
 	}
-	return asset, nil
+	return cloneAsset(asset), nil
 }
 
 // HasAsset checks if an asset exists.
@@ -244,7 +227,7 @@ func (p *Pantry) GetAssetsByType(assetType AssetType) []Asset {
 	assets := make([]Asset, 0, len(ids))
 	for id := range ids {
 		if asset, ok := p.assets[id]; ok {
-			assets = append(assets, asset)
+			assets = append(assets, cloneAsset(asset))
 		}
 	}
 	return assets
@@ -261,7 +244,7 @@ func (p *Pantry) GetNeighbors(id string, hops int) ([]Asset, error) {
 
 	if hops <= 0 {
 		asset := p.assets[id]
-		return []Asset{asset}, nil
+		return []Asset{cloneAsset(asset)}, nil
 	}
 
 	visited := make(map[string]int)
@@ -294,7 +277,7 @@ func (p *Pantry) GetNeighbors(id string, hops int) ([]Asset, error) {
 	assets := make([]Asset, 0, len(visited))
 	for assetID := range visited {
 		if asset, ok := p.assets[assetID]; ok {
-			assets = append(assets, asset)
+			assets = append(assets, cloneAsset(asset))
 		}
 	}
 
@@ -308,7 +291,7 @@ func (p *Pantry) AllAssets() []Asset {
 
 	assets := make([]Asset, 0, len(p.assets))
 	for _, asset := range p.assets {
-		assets = append(assets, asset)
+		assets = append(assets, cloneAsset(asset))
 	}
 	return assets
 }
@@ -324,7 +307,7 @@ func (p *Pantry) AllRelationships() []Edge {
 	for _, e := range graphEdges {
 		fromID := e.Source().Label()
 		toID := e.Destination().Label()
-		rel := p.edges[edgeKey(fromID, toID)]
+		rel := cloneRelationship(p.edges[edgeKey(fromID, toID)])
 		result = append(result, Edge{
 			From:         fromID,
 			To:           toID,
@@ -351,13 +334,12 @@ func (p *Pantry) EdgeCount() int {
 	return len(p.graph.AllEdges())
 }
 
-// Version returns the current version of the graph.
-// Version is incremented on each mutation.
-func (p *Pantry) Version() int64 {
+// Revision returns the current committed Pantry revision.
+func (p *Pantry) Revision() uint64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	return p.version
+	return p.revision
 }
 
 // UpdateAssetState updates the state of an asset.
@@ -378,10 +360,7 @@ func (p *Pantry) UpdateAssetState(id string, state AssetState) error {
 
 	asset.State = state
 	p.assets[id] = asset
-	p.version++
 	p.mu.Unlock()
-
-	p.notifyAssetUpdated(asset, oldState)
 	return nil
 }
 
@@ -403,7 +382,7 @@ func (p *Pantry) FindHighValueTargets() []Asset {
 	var targets []Asset
 	for _, asset := range p.assets {
 		if asset.State == StateHighValue {
-			targets = append(targets, asset)
+			targets = append(targets, cloneAsset(asset))
 		}
 	}
 	return targets
@@ -448,7 +427,7 @@ func (p *Pantry) GetAttackPaths(sourceID string, targetTypes []AssetType) [][]As
 func (p *Pantry) findPath(fromID, toID string) []Asset {
 	if fromID == toID {
 		if asset, ok := p.assets[fromID]; ok {
-			return []Asset{asset}
+			return []Asset{cloneAsset(asset)}
 		}
 		return nil
 	}
@@ -471,7 +450,7 @@ func (p *Pantry) findPath(fromID, toID string) []Asset {
 			var path []Asset
 			for node := toID; node != ""; node = parent[node] {
 				if asset, ok := p.assets[node]; ok {
-					path = append([]Asset{asset}, path...)
+					path = append([]Asset{cloneAsset(asset)}, path...)
 				}
 				if node == fromID {
 					break
@@ -510,55 +489,53 @@ func (p *Pantry) Clear() {
 	p.byType = make(map[AssetType]map[string]struct{})
 }
 
-// pantryData is the serializable form of Pantry.
-type pantryData struct {
-	Assets []Asset `json:"assets"`
-	Edges  []Edge  `json:"edges"`
-}
-
 // MarshalJSON serializes the Pantry to JSON.
 func (p *Pantry) MarshalJSON() ([]byte, error) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	data := pantryData{
-		Assets: make([]Asset, 0, len(p.assets)),
-		Edges:  make([]Edge, 0, len(p.edges)),
-	}
-
-	for _, asset := range p.assets {
-		data.Assets = append(data.Assets, asset)
-	}
-
-	for key, rel := range p.edges {
-		from, to := parseEdgeKey(key)
-		data.Edges = append(data.Edges, Edge{
-			From:         from,
-			To:           to,
-			Relationship: rel,
-		})
-	}
-
-	return json.Marshal(data)
+	return json.Marshal(p.Snapshot())
 }
 
 // UnmarshalJSON deserializes JSON into a Pantry.
 func (p *Pantry) UnmarshalJSON(data []byte) error {
-	var pd pantryData
-	if err := json.Unmarshal(data, &pd); err != nil {
+	var snapshot Snapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return err
 	}
+	if err := validateSnapshot(snapshot); err != nil {
+		return err
+	}
+	decoded := pantryFromSnapshot(snapshot)
+	p.replaceWith(decoded)
+	return nil
+}
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
+func (p *Pantry) Snapshot() Snapshot {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 
-	p.graph = gograph.New[string](gograph.Directed())
-	p.assets = make(map[string]Asset)
-	p.edges = make(map[string]Relationship)
-	p.reverseEdges = make(map[string][]string)
-	p.byType = make(map[AssetType]map[string]struct{})
+	snapshot := Snapshot{
+		Revision: p.revision,
+		Assets:   make([]Asset, 0, len(p.assets)),
+		Edges:    make([]Edge, 0, len(p.edges)),
+	}
+	for _, asset := range p.assets {
+		snapshot.Assets = append(snapshot.Assets, cloneAsset(asset))
+	}
+	for key, relationship := range p.edges {
+		from, to := parseEdgeKey(key)
+		snapshot.Edges = append(snapshot.Edges, Edge{From: from, To: to, Relationship: cloneRelationship(relationship)})
+	}
+	sort.Slice(snapshot.Assets, func(i, j int) bool { return snapshot.Assets[i].ID < snapshot.Assets[j].ID })
+	sort.Slice(snapshot.Edges, func(i, j int) bool {
+		return edgeKey(snapshot.Edges[i].From, snapshot.Edges[i].To) < edgeKey(snapshot.Edges[j].From, snapshot.Edges[j].To)
+	})
+	return snapshot
+}
 
-	for _, asset := range pd.Assets {
+func pantryFromSnapshot(snapshot Snapshot) *Pantry {
+	p := New()
+	p.revision = snapshot.Revision
+	for _, original := range snapshot.Assets {
+		asset := cloneAsset(original)
 		p.graph.AddVertexByLabel(asset.ID)
 		p.assets[asset.ID] = asset
 		if p.byType[asset.Type] == nil {
@@ -566,18 +543,59 @@ func (p *Pantry) UnmarshalJSON(data []byte) error {
 		}
 		p.byType[asset.Type][asset.ID] = struct{}{}
 	}
-
-	for _, edge := range pd.Edges {
+	for _, original := range snapshot.Edges {
+		edge := cloneEdge(original)
 		fromVertex := p.graph.GetVertexByID(edge.From)
 		toVertex := p.graph.GetVertexByID(edge.To)
-		if fromVertex != nil && toVertex != nil {
-			_, _ = p.graph.AddEdge(fromVertex, toVertex)
-			p.edges[edgeKey(edge.From, edge.To)] = edge.Relationship
-			p.reverseEdges[edge.To] = append(p.reverseEdges[edge.To], edge.From)
+		if fromVertex == nil || toVertex == nil {
+			continue
 		}
+		_, _ = p.graph.AddEdge(fromVertex, toVertex)
+		p.edges[edgeKey(edge.From, edge.To)] = edge.Relationship
+		p.reverseEdges[edge.To] = append(p.reverseEdges[edge.To], edge.From)
 	}
+	return p
+}
 
-	return nil
+func (p *Pantry) setRevision(revision uint64) {
+	p.mu.Lock()
+	p.revision = revision
+	p.mu.Unlock()
+}
+
+func (p *Pantry) committedWriterGate() chan struct{} {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.commitGate == nil {
+		p.commitGate = make(chan struct{}, 1)
+		p.commitGate <- struct{}{}
+	}
+	return p.commitGate
+}
+
+func (p *Pantry) replaceWith(candidate *Pantry) {
+	candidate.mu.Lock()
+	p.mu.Lock()
+	previousGraph := p.graph
+	previousAssets := p.assets
+	previousEdges := p.edges
+	previousReverseEdges := p.reverseEdges
+	previousByType := p.byType
+	previousRevision := p.revision
+	p.graph = candidate.graph
+	p.assets = candidate.assets
+	p.edges = candidate.edges
+	p.reverseEdges = candidate.reverseEdges
+	p.byType = candidate.byType
+	p.revision = candidate.revision
+	candidate.graph = previousGraph
+	candidate.assets = previousAssets
+	candidate.edges = previousEdges
+	candidate.reverseEdges = previousReverseEdges
+	candidate.byType = previousByType
+	candidate.revision = previousRevision
+	p.mu.Unlock()
+	candidate.mu.Unlock()
 }
 
 // GetPredecessors returns assets with edges TO this node (reverse lookup).
@@ -589,7 +607,7 @@ func (p *Pantry) GetPredecessors(id string) []Asset {
 	assets := make([]Asset, 0, len(sourceIDs))
 	for _, srcID := range sourceIDs {
 		if asset, ok := p.assets[srcID]; ok {
-			assets = append(assets, asset)
+			assets = append(assets, cloneAsset(asset))
 		}
 	}
 	return assets
@@ -608,11 +626,102 @@ func (p *Pantry) GetOutgoingEdges(id string) []Edge {
 			result = append(result, Edge{
 				From:         id,
 				To:           to,
-				Relationship: rel,
+				Relationship: cloneRelationship(rel),
 			})
 		}
 	}
 	return result
+}
+
+func cloneAsset(asset Asset) Asset {
+	asset.Properties = cloneProperties(asset.Properties)
+	return asset
+}
+
+func cloneRelationship(relationship Relationship) Relationship {
+	relationship.Properties = cloneProperties(relationship.Properties)
+	return relationship
+}
+
+func cloneEdge(edge Edge) Edge {
+	edge.Relationship = cloneRelationship(edge.Relationship)
+	return edge
+}
+
+func cloneProperties(properties map[string]any) map[string]any {
+	if properties == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(properties))
+	for key, value := range properties {
+		cloned[key] = cloneProperty(value)
+	}
+	return cloned
+}
+
+func cloneProperty(value any) any {
+	if value == nil {
+		return nil
+	}
+	return clonePropertyValue(reflect.ValueOf(value)).Interface()
+}
+
+func clonePropertyValue(value reflect.Value) reflect.Value {
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := clonePropertyValue(value.Elem())
+		result := reflect.New(value.Type()).Elem()
+		result.Set(cloned)
+		return result
+	case reflect.Map:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		result := reflect.MakeMapWithSize(value.Type(), value.Len())
+		iterator := value.MapRange()
+		for iterator.Next() {
+			result.SetMapIndex(clonePropertyValue(iterator.Key()), clonePropertyValue(iterator.Value()))
+		}
+		return result
+	case reflect.Slice:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		result := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for index := 0; index < value.Len(); index++ {
+			result.Index(index).Set(clonePropertyValue(value.Index(index)))
+		}
+		return result
+	case reflect.Array:
+		result := reflect.New(value.Type()).Elem()
+		for index := 0; index < value.Len(); index++ {
+			result.Index(index).Set(clonePropertyValue(value.Index(index)))
+		}
+		return result
+	case reflect.Struct:
+		for index := 0; index < value.NumField(); index++ {
+			if value.Type().Field(index).PkgPath != "" {
+				return value
+			}
+		}
+		result := reflect.New(value.Type()).Elem()
+		for index := 0; index < value.NumField(); index++ {
+			result.Field(index).Set(clonePropertyValue(value.Field(index)))
+		}
+		return result
+	case reflect.Pointer:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		result := reflect.New(value.Type().Elem())
+		result.Elem().Set(clonePropertyValue(value.Elem()))
+		return result
+	default:
+		return value
+	}
 }
 
 func (p *Pantry) removeReverseEdge(toID, fromID string) {
