@@ -590,3 +590,21 @@ func TestPantry_JSON_OrganizationRoundTrip(t *testing.T) {
 
 	assert.Equal(t, 1, p2.EdgeCount())
 }
+
+func TestPantrySnapshotHasDeterministicOrder(t *testing.T) {
+	p := New()
+	second := NewOrganization("second", "github")
+	first := NewOrganization("first", "github")
+	require.NoError(t, p.AddAsset(second))
+	require.NoError(t, p.AddAsset(first))
+	require.NoError(t, p.AddRelationship(second.ID, first.ID, Contains()))
+
+	snapshot := p.Snapshot()
+
+	require.Len(t, snapshot.Assets, 2)
+	assert.Equal(t, first.ID, snapshot.Assets[0].ID)
+	assert.Equal(t, second.ID, snapshot.Assets[1].ID)
+	require.Len(t, snapshot.Edges, 1)
+	assert.Equal(t, second.ID, snapshot.Edges[0].From)
+	assert.Equal(t, first.ID, snapshot.Edges[0].To)
+}

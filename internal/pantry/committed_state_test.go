@@ -70,6 +70,12 @@ type recordingObserver struct {
 	changes []ChangeSet
 }
 
+type observerFunc func(ChangeSet)
+
+func (f observerFunc) OnPantryChange(change ChangeSet) {
+	f(change)
+}
+
 type countingJSONValue struct {
 	calls *atomic.Int32
 }
@@ -118,6 +124,37 @@ func TestCommittedStateUpdatePersistsBeforeOneGranularPublication(t *testing.T) 
 	assert.Equal(t, uint64(1), changes[0].Revision)
 	assert.Len(t, changes[0].Granular.AddedAssets, 2)
 	assert.Len(t, changes[0].Granular.AddedRelationships, 1)
+}
+
+func TestCommittedStateIsolatesObserverChangeSets(t *testing.T) {
+	live := New()
+	store := &memorySnapshotStore{}
+	live.AddObserver(observerFunc(func(change ChangeSet) {
+		change.Granular.AddedAssets[0].ID = "mutated"
+		change.Granular.AddedAssets[0].Properties["nested"].(map[string]any)["value"] = "mutated"
+		change.Granular.AddedRelationships[0].Relationship.Properties["nested"].(map[string]any)["value"] = "mutated"
+	}))
+	observer := &recordingObserver{}
+	live.AddObserver(observer)
+	state := NewCommittedState(live, store)
+
+	repo := NewRepository("acme", "api", "github")
+	repo.Properties["nested"] = map[string]any{"value": "original"}
+	workflow := NewWorkflow(repo.ID, ".github/workflows/ci.yml")
+	relationship := Contains().WithProperty("nested", map[string]any{"value": "original"})
+	require.NoError(t, state.Update(context.Background(), func(candidate *Pantry) error {
+		require.NoError(t, candidate.AddAsset(repo))
+		require.NoError(t, candidate.AddAsset(workflow))
+		return candidate.AddRelationship(repo.ID, workflow.ID, relationship)
+	}))
+
+	changes := observer.all()
+	require.Len(t, changes, 1)
+	require.Len(t, changes[0].Granular.AddedAssets, 2)
+	assert.Equal(t, repo.ID, changes[0].Granular.AddedAssets[0].ID)
+	assert.Equal(t, "original", changes[0].Granular.AddedAssets[0].Properties["nested"].(map[string]any)["value"])
+	require.Len(t, changes[0].Granular.AddedRelationships, 1)
+	assert.Equal(t, "original", changes[0].Granular.AddedRelationships[0].Relationship.Properties["nested"].(map[string]any)["value"])
 }
 
 func TestCommittedStateReplacePublishesOnlyCommittedStateMarker(t *testing.T) {

@@ -123,15 +123,17 @@ func (h *GraphHub) broadcast(msg GraphMessage) {
 // flushDelta sends accumulated changes to all clients.
 func (h *GraphHub) flushDelta() {
 	h.deltaMu.Lock()
+	defer h.deltaMu.Unlock()
+
 	delta := h.pendingDelta
 	h.pendingDelta = nil
 	h.batchTimer = nil
-	h.deltaMu.Unlock()
 
 	if delta == nil {
 		return
 	}
 
+	// Keep the publication fence held so a replacement snapshot cannot overtake this older delta.
 	h.broadcast(GraphMessage{Type: "delta", Data: delta})
 }
 

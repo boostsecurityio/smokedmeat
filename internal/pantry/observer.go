@@ -29,6 +29,28 @@ func (p *Pantry) notifyChange(change ChangeSet) {
 	p.obsMu.RUnlock()
 
 	for _, obs := range observers {
-		obs.OnPantryChange(change)
+		obs.OnPantryChange(cloneChangeSet(change))
 	}
+}
+
+func cloneChangeSet(change ChangeSet) ChangeSet {
+	cloned := change
+	cloned.Granular.AddedAssets = make([]Asset, len(change.Granular.AddedAssets))
+	for index, asset := range change.Granular.AddedAssets {
+		cloned.Granular.AddedAssets[index] = cloneAsset(asset)
+	}
+	cloned.Granular.UpdatedAssets = make([]AssetChange, len(change.Granular.UpdatedAssets))
+	for index, update := range change.Granular.UpdatedAssets {
+		cloned.Granular.UpdatedAssets[index] = AssetChange{
+			Before: cloneAsset(update.Before),
+			After:  cloneAsset(update.After),
+		}
+	}
+	cloned.Granular.RemovedAssetIDs = append([]string(nil), change.Granular.RemovedAssetIDs...)
+	cloned.Granular.AddedRelationships = make([]Edge, len(change.Granular.AddedRelationships))
+	for index, edge := range change.Granular.AddedRelationships {
+		cloned.Granular.AddedRelationships[index] = cloneEdge(edge)
+	}
+	cloned.Granular.RemovedRelationships = append([]EdgeRef(nil), change.Granular.RemovedRelationships...)
+	return cloned
 }

@@ -510,7 +510,6 @@ func (p *Pantry) UnmarshalJSON(data []byte) error {
 
 func (p *Pantry) Snapshot() Snapshot {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
 
 	snapshot := Snapshot{
 		Revision: p.revision,
@@ -524,6 +523,8 @@ func (p *Pantry) Snapshot() Snapshot {
 		from, to := parseEdgeKey(key)
 		snapshot.Edges = append(snapshot.Edges, Edge{From: from, To: to, Relationship: cloneRelationship(relationship)})
 	}
+	p.mu.RUnlock()
+
 	sort.Slice(snapshot.Assets, func(i, j int) bool { return snapshot.Assets[i].ID < snapshot.Assets[j].ID })
 	sort.Slice(snapshot.Edges, func(i, j int) bool {
 		return edgeKey(snapshot.Edges[i].From, snapshot.Edges[i].To) < edgeKey(snapshot.Edges[j].From, snapshot.Edges[j].To)
