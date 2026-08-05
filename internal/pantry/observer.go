@@ -3,17 +3,6 @@
 
 package pantry
 
-// Observer receives notifications of graph changes.
-// Implementations must be thread-safe as notifications may come from
-// concurrent goroutines.
-type Observer interface {
-	OnAssetAdded(asset Asset)
-	OnAssetUpdated(asset Asset, oldState AssetState)
-	OnRelationshipAdded(from, to string, rel Relationship)
-	OnAssetRemoved(id string)
-	OnRelationshipRemoved(from, to string)
-}
-
 // AddObserver registers an observer to receive change notifications.
 func (p *Pantry) AddObserver(obs Observer) {
 	p.obsMu.Lock()
@@ -33,57 +22,35 @@ func (p *Pantry) RemoveObserver(obs Observer) {
 	}
 }
 
-func (p *Pantry) notifyAssetAdded(asset Asset) {
+func (p *Pantry) notifyChange(change ChangeSet) {
 	p.obsMu.RLock()
 	observers := make([]Observer, len(p.observers))
 	copy(observers, p.observers)
 	p.obsMu.RUnlock()
 
 	for _, obs := range observers {
-		obs.OnAssetAdded(asset)
+		obs.OnPantryChange(cloneChangeSet(change))
 	}
 }
 
-func (p *Pantry) notifyAssetUpdated(asset Asset, oldState AssetState) {
-	p.obsMu.RLock()
-	observers := make([]Observer, len(p.observers))
-	copy(observers, p.observers)
-	p.obsMu.RUnlock()
-
-	for _, obs := range observers {
-		obs.OnAssetUpdated(asset, oldState)
+func cloneChangeSet(change ChangeSet) ChangeSet {
+	cloned := change
+	cloned.Granular.AddedAssets = make([]Asset, len(change.Granular.AddedAssets))
+	for index, asset := range change.Granular.AddedAssets {
+		cloned.Granular.AddedAssets[index] = cloneAsset(asset)
 	}
-}
-
-func (p *Pantry) notifyRelationshipAdded(from, to string, rel Relationship) {
-	p.obsMu.RLock()
-	observers := make([]Observer, len(p.observers))
-	copy(observers, p.observers)
-	p.obsMu.RUnlock()
-
-	for _, obs := range observers {
-		obs.OnRelationshipAdded(from, to, rel)
+	cloned.Granular.UpdatedAssets = make([]AssetChange, len(change.Granular.UpdatedAssets))
+	for index, update := range change.Granular.UpdatedAssets {
+		cloned.Granular.UpdatedAssets[index] = AssetChange{
+			Before: cloneAsset(update.Before),
+			After:  cloneAsset(update.After),
+		}
 	}
-}
-
-func (p *Pantry) notifyAssetRemoved(id string) {
-	p.obsMu.RLock()
-	observers := make([]Observer, len(p.observers))
-	copy(observers, p.observers)
-	p.obsMu.RUnlock()
-
-	for _, obs := range observers {
-		obs.OnAssetRemoved(id)
+	cloned.Granular.RemovedAssetIDs = append([]string(nil), change.Granular.RemovedAssetIDs...)
+	cloned.Granular.AddedRelationships = make([]Edge, len(change.Granular.AddedRelationships))
+	for index, edge := range change.Granular.AddedRelationships {
+		cloned.Granular.AddedRelationships[index] = cloneEdge(edge)
 	}
-}
-
-func (p *Pantry) notifyRelationshipRemoved(from, to string) {
-	p.obsMu.RLock()
-	observers := make([]Observer, len(p.observers))
-	copy(observers, p.observers)
-	p.obsMu.RUnlock()
-
-	for _, obs := range observers {
-		obs.OnRelationshipRemoved(from, to)
-	}
+	cloned.Granular.RemovedRelationships = append([]EdgeRef(nil), change.Granular.RemovedRelationships...)
+	return cloned
 }

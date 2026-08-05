@@ -78,6 +78,18 @@ func TestOpen_RejectsIncompatibleSchemaMajor(t *testing.T) {
 	assert.ErrorContains(t, err, "incompatible")
 }
 
+func TestOpen_RejectsSchemaTwoWithPurgeGuidance(t *testing.T) {
+	path := createSchemaTestDB(t, &schemaMetadata{Major: 2, Minor: 5}, BucketPantry)
+
+	database, err := Open(Config{Path: path})
+	require.Error(t, err)
+	assert.Nil(t, database)
+	assert.ErrorContains(t, err, "schema 2.5")
+	assert.ErrorContains(t, err, "binary schema 3.0")
+	assert.ErrorContains(t, err, "make quickstart-purge")
+	assert.ErrorContains(t, err, "make dev-quickstart-purge")
+}
+
 func TestOpen_RejectsUnknownUnversionedLayout(t *testing.T) {
 	path := createSchemaTestDB(t, nil, []byte("mystery"))
 

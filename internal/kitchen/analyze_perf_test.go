@@ -19,6 +19,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 	"github.com/boostsecurityio/smokedmeat/internal/poutine"
 )
 
@@ -87,7 +88,11 @@ func TestAnalyzePerformanceProfile(t *testing.T) {
 
 	fmt.Printf("[perf] importing analysis results - elapsed=%s\n", roundPerfDuration(time.Since(totalStarted)))
 	importStarted := time.Now()
-	importedAssets := h.importAnalysisToPantry(result)
+	importedAssets := 0
+	require.NoError(t, h.committedPantry().Replace(ctx, func(candidate *pantry.Pantry) error {
+		importedAssets = h.importAnalysisToPantry(candidate, result)
+		return nil
+	}))
 	importDuration := time.Since(importStarted)
 
 	fmt.Printf("[perf] updating repository access - elapsed=%s\n", roundPerfDuration(time.Since(totalStarted)))
@@ -97,15 +102,10 @@ func TestAnalyzePerformanceProfile(t *testing.T) {
 
 	fmt.Printf("[perf] updating private repo inventory - elapsed=%s\n", roundPerfDuration(time.Since(totalStarted)))
 	inventoryStarted := time.Now()
-	h.importPrivateReposToPantry(config.SessionID)
+	require.NoError(t, h.importPrivateReposToPantry(ctx, config.SessionID))
 	inventoryDuration := time.Since(inventoryStarted)
 
-	fmt.Printf("[perf] persisting attack graph - elapsed=%s\n", roundPerfDuration(time.Since(totalStarted)))
-	persistStarted := time.Now()
-	require.NoError(t, h.SavePantry())
-	persistDuration := time.Since(persistStarted)
-
-	tailDuration := importDuration + secretScanDuration + repoAccessDuration + inventoryDuration + persistDuration
+	tailDuration := importDuration + secretScanDuration + repoAccessDuration + inventoryDuration
 	totalDuration := time.Since(totalStarted)
 	repoCount := len(collectAnalyzedRepos(result))
 
@@ -121,13 +121,12 @@ func TestAnalyzePerformanceProfile(t *testing.T) {
 		h.Pantry().Size(),
 		h.Pantry().EdgeCount(),
 	)
-	t.Logf("analysis timings scan=%s secret_scan=%s import=%s repo_access=%s private_repo_inventory=%s persist=%s tail=%s total=%s",
+	t.Logf("analysis timings scan=%s secret_scan=%s import_commit=%s repo_access=%s private_repo_inventory_commit=%s tail=%s total=%s",
 		scanDuration,
 		secretScanDuration,
 		importDuration,
 		repoAccessDuration,
 		inventoryDuration,
-		persistDuration,
 		tailDuration,
 		totalDuration,
 	)

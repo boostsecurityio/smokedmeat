@@ -5,6 +5,7 @@ package kitchen
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -37,7 +38,7 @@ func TestHandler_runPurge_PreviewCountsRepoScopeForRequestingSession(t *testing.
 	h.database = database
 	h.pantry = purgeTestPantry(t)
 
-	resp, err := h.runPurge("sess-1", "repo", "acme/api", true)
+	resp, err := h.runPurge(context.Background(), "sess-1", "repo", "acme/api", true)
 	require.NoError(t, err)
 
 	assert.Equal(t, "preview", resp.Status)
@@ -74,7 +75,7 @@ func TestHandler_runPurge_ExecuteRemovesOrgScopeAndPreservesHistory(t *testing.T
 	h.database = database
 	h.pantry = purgeTestPantry(t)
 
-	resp, err := h.runPurge("sess-1", "org", "acme", false)
+	resp, err := h.runPurge(context.Background(), "sess-1", "org", "acme", false)
 	require.NoError(t, err)
 
 	assert.Equal(t, "purged", resp.Status)
@@ -88,6 +89,12 @@ func TestHandler_runPurge_ExecuteRemovesOrgScopeAndPreservesHistory(t *testing.T
 	assert.False(t, h.Pantry().HasAsset("github:acme/api:workflow:.github/workflows/build.yml"))
 	assert.True(t, h.Pantry().HasAsset("github:org:globex"))
 	assert.True(t, h.Pantry().HasAsset("github:globex/portal"))
+	assert.Equal(t, uint64(1), h.Pantry().Revision())
+	persisted, err := database.LoadPantry()
+	require.NoError(t, err)
+	require.NotNil(t, persisted)
+	assert.Equal(t, uint64(1), persisted.Revision())
+	assert.False(t, persisted.HasAsset("github:org:acme"))
 
 	sess1Entities, err := entityRepo.ListBySession("sess-1")
 	require.NoError(t, err)
@@ -113,7 +120,7 @@ func TestHandler_runPurge_ExecuteRemovesOrgScopeAndPreservesHistory(t *testing.T
 func TestHandler_runPurge_RejectsEmptySessionID(t *testing.T) {
 	h := NewHandlerWithPublisher(&mockPublisher{}, nil)
 
-	_, err := h.runPurge("", "repo", "acme/api", true)
+	_, err := h.runPurge(context.Background(), "", "repo", "acme/api", true)
 
 	require.Error(t, err)
 	assert.Equal(t, "session_id is required", err.Error())

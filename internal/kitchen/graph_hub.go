@@ -40,7 +40,7 @@ type GraphClient struct {
 	conn    *websocket.Conn
 	send    chan GraphMessage
 	hub     *GraphHub
-	version int64
+	version uint64
 	mode    string
 }
 
@@ -103,7 +103,7 @@ func (h *GraphHub) unregister(client *GraphClient) {
 }
 
 func (h *GraphHub) buildSnapshot(mode string) GraphSnapshot {
-	return buildGraphSnapshot(h.pantry, h.pantry.Version(), mode)
+	return buildGraphSnapshot(h.pantry, h.pantry.Revision(), mode)
 }
 
 // broadcast sends a message to all connected clients.
@@ -123,16 +123,17 @@ func (h *GraphHub) broadcast(msg GraphMessage) {
 // flushDelta sends accumulated changes to all clients.
 func (h *GraphHub) flushDelta() {
 	h.deltaMu.Lock()
+	defer h.deltaMu.Unlock()
+
 	delta := h.pendingDelta
 	h.pendingDelta = nil
 	h.batchTimer = nil
-	h.deltaMu.Unlock()
 
 	if delta == nil {
 		return
 	}
 
-	delta.Version = h.pantry.Version()
+	// Keep the publication fence held so a replacement snapshot cannot overtake this older delta.
 	h.broadcast(GraphMessage{Type: "delta", Data: delta})
 }
 
@@ -143,76 +144,65 @@ func (h *GraphHub) scheduleDeltaFlush() {
 	}
 }
 
-// PantryObserver implementation
+func (h *GraphHub) OnPantryChange(change pantry.ChangeSet) {
+	if change.Kind == pantry.ChangeCommittedState {
+		h.deltaMu.Lock()
+		if h.batchTimer != nil {
+			h.batchTimer.Stop()
+		}
+		h.batchTimer = nil
+		h.pendingDelta = nil
+		h.deltaMu.Unlock()
+		h.broadcastSnapshots()
+		return
+	}
 
-func (h *GraphHub) OnAssetAdded(asset pantry.Asset) {
 	h.deltaMu.Lock()
 	defer h.deltaMu.Unlock()
 
 	if h.pendingDelta == nil {
 		h.pendingDelta = &GraphDelta{}
 	}
-	h.pendingDelta.AddedNodes = append(h.pendingDelta.AddedNodes, AssetToGraphNode(asset))
+	h.pendingDelta.Version = change.Revision
+	for _, asset := range change.Granular.AddedAssets {
+		h.pendingDelta.AddedNodes = append(h.pendingDelta.AddedNodes, AssetToGraphNode(asset))
+	}
+	for _, update := range change.Granular.UpdatedAssets {
+		node := AssetToGraphNode(update.After)
+		h.pendingDelta.UpdatedNodes = append(h.pendingDelta.UpdatedNodes, NodeUpdate{
+			ID:                update.After.ID,
+			OldState:          string(update.Before.State),
+			NewState:          string(update.After.State),
+			Label:             node.Label,
+			Properties:        node.Properties,
+			TooltipProperties: node.TooltipProperties,
+		})
+	}
+	for _, edge := range change.Granular.AddedRelationships {
+		h.pendingDelta.AddedEdges = append(h.pendingDelta.AddedEdges, GraphEdge{
+			Source: edge.From,
+			Target: edge.To,
+			Type:   string(edge.Relationship.Type),
+		})
+	}
+	h.pendingDelta.RemovedNodes = append(h.pendingDelta.RemovedNodes, change.Granular.RemovedAssetIDs...)
+	for _, edge := range change.Granular.RemovedRelationships {
+		h.pendingDelta.RemovedEdges = append(h.pendingDelta.RemovedEdges, EdgeRef{Source: edge.From, Target: edge.To})
+	}
 	h.scheduleDeltaFlush()
 }
 
-func (h *GraphHub) OnAssetUpdated(asset pantry.Asset, oldState pantry.AssetState) {
-	h.deltaMu.Lock()
-	defer h.deltaMu.Unlock()
-
-	if h.pendingDelta == nil {
-		h.pendingDelta = &GraphDelta{}
+func (h *GraphHub) broadcastSnapshots() {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for client := range h.clients {
+		snapshot := h.buildSnapshot(client.mode)
+		select {
+		case client.send <- GraphMessage{Type: "snapshot", Data: snapshot}:
+		default:
+			slog.Warn("graph client buffer full, dropping snapshot")
+		}
 	}
-	node := AssetToGraphNode(asset)
-	h.pendingDelta.UpdatedNodes = append(h.pendingDelta.UpdatedNodes, NodeUpdate{
-		ID:                asset.ID,
-		OldState:          string(oldState),
-		NewState:          string(asset.State),
-		Label:             node.Label,
-		Properties:        node.Properties,
-		TooltipProperties: node.TooltipProperties,
-	})
-	h.scheduleDeltaFlush()
-}
-
-func (h *GraphHub) OnRelationshipAdded(from, to string, rel pantry.Relationship) {
-	h.deltaMu.Lock()
-	defer h.deltaMu.Unlock()
-
-	if h.pendingDelta == nil {
-		h.pendingDelta = &GraphDelta{}
-	}
-	h.pendingDelta.AddedEdges = append(h.pendingDelta.AddedEdges, GraphEdge{
-		Source: from,
-		Target: to,
-		Type:   string(rel.Type),
-	})
-	h.scheduleDeltaFlush()
-}
-
-func (h *GraphHub) OnAssetRemoved(id string) {
-	h.deltaMu.Lock()
-	defer h.deltaMu.Unlock()
-
-	if h.pendingDelta == nil {
-		h.pendingDelta = &GraphDelta{}
-	}
-	h.pendingDelta.RemovedNodes = append(h.pendingDelta.RemovedNodes, id)
-	h.scheduleDeltaFlush()
-}
-
-func (h *GraphHub) OnRelationshipRemoved(from, to string) {
-	h.deltaMu.Lock()
-	defer h.deltaMu.Unlock()
-
-	if h.pendingDelta == nil {
-		h.pendingDelta = &GraphDelta{}
-	}
-	h.pendingDelta.RemovedEdges = append(h.pendingDelta.RemovedEdges, EdgeRef{
-		Source: from,
-		Target: to,
-	})
-	h.scheduleDeltaFlush()
 }
 
 // ClientCount returns the number of connected graph clients.
