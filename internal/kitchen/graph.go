@@ -34,7 +34,7 @@ func (h *Handler) handleGraph(w http.ResponseWriter, _ *http.Request) {
 func (h *Handler) handleGraphData(w http.ResponseWriter, r *http.Request) {
 	writeGraphSecurityHeaders(w)
 	p := h.Pantry()
-	snapshot := buildGraphSnapshot(p, p.Revision(), r.URL.Query().Get("mode"))
+	snapshot := buildGraphSnapshot(p, r.URL.Query().Get("mode"))
 	data := graphData{
 		Mode:              snapshot.Mode,
 		LargeGraph:        snapshot.LargeGraph,

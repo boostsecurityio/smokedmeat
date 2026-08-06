@@ -4,6 +4,7 @@
 package kitchen
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -149,6 +150,29 @@ func TestGraphScriptUsesTooltipProperties(t *testing.T) {
 	assert.False(t, strings.Contains(body, "String(v)"))
 }
 
+func TestGraphDeltaUsesRevisionFenceFields(t *testing.T) {
+	payload, err := json.Marshal(GraphDelta{BaseRevision: 4, Revision: 5})
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{"base_revision":4,"revision":5}`, string(payload))
+	assert.NotContains(t, string(payload), "version")
+}
+
+func TestGraphSnapshotUsesCommittedRevision(t *testing.T) {
+	payload, err := json.Marshal(GraphSnapshot{Revision: 5})
+	require.NoError(t, err)
+
+	assert.Contains(t, string(payload), `"revision":5`)
+	assert.NotContains(t, string(payload), "version")
+}
+
+func TestGraphSnapshotRequiredCarriesMinimumRevision(t *testing.T) {
+	payload, err := json.Marshal(GraphSnapshotRequired{Revision: 5})
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{"revision":5}`, string(payload))
+}
+
 func TestHandleGraphSetsBrowserSecurityHeaders(t *testing.T) {
 	h := NewHandlerWithPublisher(nil, nil)
 	rec := httptest.NewRecorder()
@@ -256,8 +280,13 @@ func TestGraphTemplateAndScriptContainGraphModeControls(t *testing.T) {
 	assert.Contains(t, page, "data-mode=\"filtered\"")
 	assert.Contains(t, page, "data-mode=\"full\"")
 	assert.Contains(t, script, "setGraphMode")
-	assert.Contains(t, script, "prefersFilteredSnapshots")
-	assert.Contains(t, script, "resolvedGraphMode !== 'full' || prefersFilteredSnapshots()")
+	assert.Contains(t, script, "case 'snapshot_required':")
+	assert.Contains(t, script, "data.base_revision !== graphRevision")
+	assert.Contains(t, script, "data.revision <= graphRevision")
+	assert.Contains(t, script, "requireSnapshot(data.revision)")
+	assert.Contains(t, script, "if (snapshotRequestPending)")
+	assert.Contains(t, script, "data.revision < minimumSnapshotRevision")
+	assert.NotContains(t, script, "scheduleFilteredRefresh")
 }
 
 func TestAssetToGraphNode_RepositorySSHAccessLabel(t *testing.T) {

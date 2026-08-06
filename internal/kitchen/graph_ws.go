@@ -25,13 +25,13 @@ const (
 
 // GraphMessage is the envelope for all graph WebSocket messages.
 type GraphMessage struct {
-	Type string `json:"type"` // "snapshot", "delta", "ping", "pong"
+	Type string `json:"type"`
 	Data any    `json:"data,omitempty"`
 }
 
-// GraphSnapshot is the initial full graph state sent on connect.
+// GraphSnapshot is one complete graph projection at a committed revision.
 type GraphSnapshot struct {
-	Version           uint64      `json:"version"`
+	Revision          uint64      `json:"revision"`
 	Mode              string      `json:"mode"`
 	LargeGraph        bool        `json:"large_graph"`
 	TotalNodes        int         `json:"total_nodes"`
@@ -43,12 +43,18 @@ type GraphSnapshot struct {
 
 // GraphDelta contains incremental changes to the graph.
 type GraphDelta struct {
-	Version      uint64       `json:"version"`
+	BaseRevision uint64       `json:"base_revision"`
+	Revision     uint64       `json:"revision"`
 	AddedNodes   []GraphNode  `json:"added_nodes,omitempty"`
 	UpdatedNodes []NodeUpdate `json:"updated_nodes,omitempty"`
 	AddedEdges   []GraphEdge  `json:"added_edges,omitempty"`
 	RemovedNodes []string     `json:"removed_nodes,omitempty"`
 	RemovedEdges []EdgeRef    `json:"removed_edges,omitempty"`
+}
+
+// GraphSnapshotRequired fences deltas until the client loads a qualifying snapshot.
+type GraphSnapshotRequired struct {
+	Revision uint64 `json:"revision"`
 }
 
 // EdgeRef identifies an edge by its source and target.
@@ -189,10 +195,14 @@ func buildGraphSelection(p *pantry.Pantry, requestedMode string) graphSelection 
 	}
 }
 
-func buildGraphSnapshot(p *pantry.Pantry, revision uint64, requestedMode string) GraphSnapshot {
-	selection := buildGraphSelection(p, requestedMode)
+func buildGraphSnapshot(p *pantry.Pantry, requestedMode string) GraphSnapshot {
+	return buildGraphSnapshotFromView(p.Clone(), requestedMode)
+}
+
+func buildGraphSnapshotFromView(view *pantry.Pantry, requestedMode string) GraphSnapshot {
+	selection := buildGraphSelection(view, requestedMode)
 	return GraphSnapshot{
-		Version:           revision,
+		Revision:          view.Revision(),
 		Mode:              selection.mode,
 		LargeGraph:        selection.largeGraph,
 		TotalNodes:        selection.totalNodes,

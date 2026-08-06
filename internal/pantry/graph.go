@@ -532,6 +532,14 @@ func (p *Pantry) Snapshot() Snapshot {
 	return snapshot
 }
 
+// Clone returns an independently readable Pantry captured from one coherent state.
+func (p *Pantry) Clone() *Pantry {
+	if p == nil {
+		return New()
+	}
+	return pantryFromSnapshot(p.Snapshot())
+}
+
 func pantryFromSnapshot(snapshot Snapshot) *Pantry {
 	p := New()
 	p.revision = snapshot.Revision
