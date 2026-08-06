@@ -31,12 +31,14 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
         let cy;
         let ws;
-        let graphVersion = 0;
+        let graphRevision = 0;
         let reconnectAttempts = 0;
         let requestedGraphMode = readGraphMode();
         let resolvedGraphMode = 'full';
         let graphMeta = { totalNodes: 0, totalEdges: 0, largeGraph: false, filterDescription: '' };
-        let filteredRefreshTimer = null;
+        let minimumSnapshotRevision = 0;
+        let snapshotRequestPending = false;
+        let awaitingInitialSnapshot = true;
 
         function initCytoscape() {
             cy = cytoscape({
@@ -152,6 +154,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             wsUrl += '?' + wsParams.toString();
 
             updateConnectionStatus('connecting');
+            awaitingInitialSnapshot = true;
+            snapshotRequestPending = false;
+            minimumSnapshotRevision = Math.max(minimumSnapshotRevision, graphRevision);
             ws = new WebSocket(wsUrl);
 
             ws.onopen = function() {
@@ -165,6 +170,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             };
 
             ws.onclose = function() {
+                snapshotRequestPending = false;
                 updateConnectionStatus('disconnected');
                 scheduleReconnect();
             };
@@ -188,13 +194,24 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 case 'delta':
                     handleDelta(msg.data);
                     break;
+                case 'snapshot_required':
+                    requireSnapshot(msg.data.revision);
+                    break;
                 case 'pong':
                     break;
             }
         }
 
         function handleSnapshot(data) {
-            graphVersion = data.version;
+            snapshotRequestPending = false;
+            if (!Number.isSafeInteger(data.revision) || data.revision < minimumSnapshotRevision || data.revision < graphRevision) {
+                requestRequiredSnapshot();
+                return;
+            }
+
+            graphRevision = data.revision;
+            minimumSnapshotRevision = graphRevision;
+            awaitingInitialSnapshot = false;
             resolvedGraphMode = data.mode || 'full';
             graphMeta = {
                 totalNodes: data.total_nodes || 0,
@@ -238,12 +255,21 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         }
 
         function handleDelta(data) {
-            if (resolvedGraphMode !== 'full' || prefersFilteredSnapshots()) {
-                scheduleFilteredRefresh();
+            if (!Number.isSafeInteger(data.base_revision) || !Number.isSafeInteger(data.revision)) {
+                requireSnapshot(graphRevision + 1);
                 return;
             }
-
-            graphVersion = data.version;
+            if (data.revision <= graphRevision) {
+                return;
+            }
+            if (awaitingInitialSnapshot || requestedGraphMode !== 'full' || resolvedGraphMode !== 'full') {
+                requireSnapshot(data.revision);
+                return;
+            }
+            if (minimumSnapshotRevision > graphRevision || data.base_revision !== graphRevision) {
+                requireSnapshot(data.revision);
+                return;
+            }
 
             (data.added_nodes || []).forEach(node => {
                 cy.add({
@@ -297,6 +323,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             if (!graphMeta.largeGraph && (data.added_nodes || []).length > 2) {
                 runLayout();
             }
+            graphRevision = data.revision;
+            minimumSnapshotRevision = graphRevision;
             updateStats();
         }
 
@@ -344,10 +372,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             const edges = cy.edges().length;
             if (resolvedGraphMode === 'filtered') {
                 document.getElementById('stats').textContent =
-                    'Filtered: ' + nodes + '/' + graphMeta.totalNodes + ' nodes, ' + edges + '/' + graphMeta.totalEdges + ' edges (v' + graphVersion + ')';
+                    'Filtered: ' + nodes + '/' + graphMeta.totalNodes + ' nodes, ' + edges + '/' + graphMeta.totalEdges + ' edges (r' + graphRevision + ')';
                 return;
             }
-            document.getElementById('stats').textContent = 'Full: ' + nodes + ' nodes, ' + edges + ' edges (v' + graphVersion + ')';
+            document.getElementById('stats').textContent = 'Full: ' + nodes + ' nodes, ' + edges + ' edges (r' + graphRevision + ')';
         }
 
         function updateConnectionStatus(status) {
@@ -387,26 +415,28 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
         function requestSnapshot(mode) {
             if (!ws || ws.readyState !== WebSocket.OPEN) {
-                return;
+                return false;
             }
             ws.send(JSON.stringify({
                 type: 'snapshot_request',
                 data: { mode: mode }
             }));
+            snapshotRequestPending = true;
+            return true;
         }
 
-        function scheduleFilteredRefresh() {
-            if (filteredRefreshTimer) {
+        function requireSnapshot(revision) {
+            if (Number.isSafeInteger(revision)) {
+                minimumSnapshotRevision = Math.max(minimumSnapshotRevision, revision);
+            }
+            requestRequiredSnapshot();
+        }
+
+        function requestRequiredSnapshot() {
+            if (snapshotRequestPending) {
                 return;
             }
-            filteredRefreshTimer = window.setTimeout(function() {
-                filteredRefreshTimer = null;
-                requestSnapshot(requestedGraphMode);
-            }, 250);
-        }
-
-        function prefersFilteredSnapshots() {
-            return requestedGraphMode === 'filtered' || (requestedGraphMode === 'auto' && graphMeta.largeGraph);
+            requestSnapshot(requestedGraphMode);
         }
 
         function setGraphMode(mode) {
