@@ -255,6 +255,7 @@ E2E_TUNNEL_URL_FILE := $(SMOKEDMEAT_RUNTIME_DIR)/e2e-tunnel-url
 E2E_COMPOSE := KITCHEN_BROWSER_PORT=$$(cat "$(E2E_BROWSER_PORT_FILE)" 2>/dev/null || echo $(E2E_BROWSER_PORT_DEFAULT)) DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose -p smokedmeat-e2e -f deployments/docker-compose.e2e.yml
 E2E_ENV := .claude/e2e/.env
 E2E_TMUX_SOCKET := smokedmeat-e2e
+E2E_DOH_URL := https://cloudflare-dns.com/dns-query
 E2E_TMUX := tmux -L $(E2E_TMUX_SOCKET)
 define ensure_auth_token
 	@mkdir -p .claude/e2e
@@ -534,28 +535,75 @@ define wait_for_release_quickstart_tunnel_health
 	exit 1
 endef
 
+# Query public DNS directly so an early quick-tunnel NXDOMAIN does not poison the host resolver cache.
 define wait_for_tunnel_health
 	@KITCHEN_URL=$$(grep '^KITCHEN_URL=' $(E2E_ENV) | cut -d= -f2); \
+	KITCHEN_EXTERNAL_URL=$$(grep '^KITCHEN_EXTERNAL_URL=' $(E2E_ENV) | cut -d= -f2); \
 	if [ -z "$$KITCHEN_URL" ]; then \
 		echo "ERROR: KITCHEN_URL missing from $(E2E_ENV)"; \
 		exit 1; \
 	fi; \
-	LAST_CODE=""; \
-	for i in $$(seq 1 60); do \
-		if [ "$$i" = "1" ]; then \
-			echo "Waiting for local Kitchen health at $$KITCHEN_URL/health..."; \
+	if [ -z "$$KITCHEN_EXTERNAL_URL" ]; then \
+		echo "ERROR: KITCHEN_EXTERNAL_URL missing from $(E2E_ENV)"; \
+		exit 1; \
+	fi; \
+	LAST_LOCAL_CODE=""; \
+	LAST_EXTERNAL_CODE=""; \
+	for tunnel_attempt in 1 2 3; do \
+		TUNNEL_HOST=$${KITCHEN_EXTERNAL_URL#https://}; \
+		TUNNEL_HOST=$${TUNNEL_HOST%%/*}; \
+		echo "Waiting for local Kitchen and public tunnel health (tunnel $$tunnel_attempt/3)..."; \
+		for i in $$(seq 1 30); do \
+			LOCAL_CODE=$$(curl -sk --connect-timeout 2 --max-time 3 -o /dev/null -w '%{http_code}' \
+				"$$KITCHEN_URL/health" || true); \
+			LAST_LOCAL_CODE="$$LOCAL_CODE"; \
+			TUNNEL_READY=$$($(E2E_COMPOSE) logs cloudflared 2>&1 | grep -c 'Registered tunnel connection' || true); \
+			if [ "$$LOCAL_CODE" = "200" ] && [ "$$TUNNEL_READY" -gt 0 ]; then \
+				TUNNEL_IP=$$(curl -fsS --connect-timeout 2 --max-time 5 \
+					-H 'accept: application/dns-json' \
+					"$(E2E_DOH_URL)?name=$$TUNNEL_HOST&type=A" 2>/dev/null | \
+					sed -n 's/.*"data":"\([0-9][0-9.]*\)".*/\1/p' || true); \
+				EXTERNAL_CODE="000"; \
+				if [ -n "$$TUNNEL_IP" ]; then \
+					EXTERNAL_CODE=$$(curl -sk --resolve "$$TUNNEL_HOST:443:$$TUNNEL_IP" \
+						--connect-timeout 2 --max-time 5 -o /dev/null -w '%{http_code}' \
+						"$$KITCHEN_EXTERNAL_URL/health" || true); \
+				fi; \
+				LAST_EXTERNAL_CODE="$$EXTERNAL_CODE"; \
+				if [ "$$EXTERNAL_CODE" = "200" ]; then \
+					echo "Kitchen and public tunnel are ready."; \
+					exit 0; \
+				fi; \
+			fi; \
+			sleep 2; \
+		done; \
+		if [ "$$tunnel_attempt" -lt 3 ]; then \
+			PREVIOUS_TUNNEL_URL="$$KITCHEN_EXTERNAL_URL"; \
+			echo "Public tunnel did not become reachable; requesting a new quick tunnel..."; \
+			$(E2E_COMPOSE) restart cloudflared >/dev/null; \
+			KITCHEN_EXTERNAL_URL=""; \
+			for i in $$(seq 1 20); do \
+				CANDIDATE_URL=$$($(E2E_COMPOSE) logs cloudflared 2>&1 | \
+					grep -Eo 'https://[[:alnum:]-]+\.trycloudflare\.com' | \
+					grep -v '^https://api\.trycloudflare\.com$$' | tail -1); \
+				if [ -n "$$CANDIDATE_URL" ] && [ "$$CANDIDATE_URL" != "$$PREVIOUS_TUNNEL_URL" ]; then \
+					KITCHEN_EXTERNAL_URL="$$CANDIDATE_URL"; \
+					break; \
+				fi; \
+				sleep 1; \
+			done; \
+			if [ -z "$$KITCHEN_EXTERNAL_URL" ]; then \
+				echo "ERROR: cloudflared did not issue a replacement tunnel URL"; \
+				exit 1; \
+			fi; \
+			grep -v '^KITCHEN_EXTERNAL_URL=' $(E2E_ENV) > $(E2E_ENV).tmp; \
+			echo "KITCHEN_EXTERNAL_URL=$$KITCHEN_EXTERNAL_URL" >> $(E2E_ENV).tmp; \
+			mv $(E2E_ENV).tmp $(E2E_ENV); \
+			echo "$$KITCHEN_EXTERNAL_URL" > "$(E2E_TUNNEL_URL_FILE)"; \
+			echo "Replacement tunnel URL: $$KITCHEN_EXTERNAL_URL"; \
 		fi; \
-		CODE=$$(curl -sk --connect-timeout 3 --max-time 5 -o /dev/null -w '%{http_code}' \
-			"$$KITCHEN_URL/health" || true); \
-		LAST_CODE="$$CODE"; \
-		TUNNEL_READY=$$($(E2E_COMPOSE) logs cloudflared 2>&1 | grep -c 'Registered tunnel connection' || true); \
-		if [ "$$CODE" = "200" ] && [ "$$TUNNEL_READY" -gt 0 ]; then \
-			echo "Kitchen and tunnel are ready."; \
-			exit 0; \
-		fi; \
-		sleep 2; \
 	done; \
-	echo "ERROR: Kitchen/tunnel never became ready (local URL: $$KITCHEN_URL, last HTTP code: $$LAST_CODE)"; \
+	echo "ERROR: Kitchen/tunnel never became ready (local URL: $$KITCHEN_URL, local HTTP code: $$LAST_LOCAL_CODE, external URL: $$KITCHEN_EXTERNAL_URL, external HTTP code: $$LAST_EXTERNAL_CODE)"; \
 	$(E2E_COMPOSE) ps; \
 	$(E2E_COMPOSE) logs --tail=50 cloudflared kitchen; \
 	exit 1
