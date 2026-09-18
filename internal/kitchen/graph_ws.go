@@ -31,7 +31,7 @@ type GraphMessage struct {
 
 // GraphSnapshot is the initial full graph state sent on connect.
 type GraphSnapshot struct {
-	Version           int64       `json:"version"`
+	Version           uint64      `json:"version"`
 	Mode              string      `json:"mode"`
 	LargeGraph        bool        `json:"large_graph"`
 	TotalNodes        int         `json:"total_nodes"`
@@ -43,7 +43,7 @@ type GraphSnapshot struct {
 
 // GraphDelta contains incremental changes to the graph.
 type GraphDelta struct {
-	Version      int64        `json:"version"`
+	Version      uint64       `json:"version"`
 	AddedNodes   []GraphNode  `json:"added_nodes,omitempty"`
 	UpdatedNodes []NodeUpdate `json:"updated_nodes,omitempty"`
 	AddedEdges   []GraphEdge  `json:"added_edges,omitempty"`
@@ -189,10 +189,10 @@ func buildGraphSelection(p *pantry.Pantry, requestedMode string) graphSelection 
 	}
 }
 
-func buildGraphSnapshot(p *pantry.Pantry, version int64, requestedMode string) GraphSnapshot {
+func buildGraphSnapshot(p *pantry.Pantry, revision uint64, requestedMode string) GraphSnapshot {
 	selection := buildGraphSelection(p, requestedMode)
 	return GraphSnapshot{
-		Version:           version,
+		Version:           revision,
 		Mode:              selection.mode,
 		LargeGraph:        selection.largeGraph,
 		TotalNodes:        selection.totalNodes,

@@ -264,29 +264,26 @@ func (h *Handler) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	h.broadcastAnalysisProgress(req, startedAt, analysisPhaseImport, formatImportPhaseMessage(result), "", result.ReposAnalyzed, result.ReposAnalyzed, len(result.SecretFindings))
 	if len(result.Findings) > 0 || len(result.Workflows) > 0 || len(result.SecretFindings) > 0 {
 		importStarted := time.Now()
-		imported := h.importAnalysisToPantry(result)
-		slog.Info("imported analysis to pantry",
-			"findings", len(result.Findings),
-			"workflows", len(result.Workflows),
-			"secrets", len(result.SecretFindings),
-			"assets", imported,
-			"duration", time.Since(importStarted))
+		imported := 0
+		h.broadcastAnalysisProgress(req, startedAt, analysisPhaseImport, "Persisting attack graph", "", result.ReposAnalyzed, result.ReposAnalyzed, len(result.SecretFindings))
+		if err := h.committedPantry().Replace(ctx, func(candidate *pantry.Pantry) error {
+			imported = h.importAnalysisToPantry(candidate, result)
+			return nil
+		}); err != nil {
+			slog.Warn("failed to commit analysis pantry", "target", req.Target, "error", err)
+		} else {
+			slog.Info("committed analysis to pantry",
+				"findings", len(result.Findings),
+				"workflows", len(result.Workflows),
+				"secrets", len(result.SecretFindings),
+				"assets", imported,
+				"revision", h.Pantry().Revision(),
+				"duration", time.Since(importStarted))
+		}
 	}
 
 	if err := h.persistAnalysisLoot(req, result); err != nil {
 		slog.Warn("failed to persist analysis loot", "target", req.Target, "error", err)
-	}
-
-	h.broadcastAnalysisProgress(req, startedAt, analysisPhaseImport, "Persisting attack graph", "", result.ReposAnalyzed, result.ReposAnalyzed, len(result.SecretFindings))
-	saveStarted := time.Now()
-	if err := h.SavePantry(); err != nil {
-		slog.Warn("failed to persist pantry", "error", err)
-	} else {
-		slog.Info("analysis pantry persisted",
-			"target", req.Target,
-			"assets", h.Pantry().Size(),
-			"edges", h.Pantry().EdgeCount(),
-			"duration", time.Since(saveStarted))
 	}
 
 	h.recordAnalysisCompleted(req, result)
@@ -390,24 +387,21 @@ func (h *Handler) runAnalysisMetadataSync(req AnalyzeRequest, result *poutine.An
 		"duration", time.Since(visibilityStarted))
 
 	inventoryStarted := time.Now()
-	h.importPrivateReposToPantry(req.SessionID)
+	if err := h.importPrivateReposToPantry(ctx, req.SessionID); err != nil {
+		slog.Warn("failed to commit analysis private repository inventory", "target", req.Target, "error", err)
+		h.broadcastAnalysisMetadataSync(req, analysisMetadataFailed, "Repository access update incomplete", repoCount, err)
+		return
+	}
 	slog.Info("analysis private repo inventory updated",
 		"target", req.Target,
 		"session", req.SessionID,
 		"duration", time.Since(inventoryStarted))
 
-	saveStarted := time.Now()
-	if err := h.SavePantry(); err != nil {
-		slog.Warn("failed to persist pantry after analysis metadata sync", "target", req.Target, "error", err)
-		h.broadcastAnalysisMetadataSync(req, analysisMetadataFailed, "Repository access update incomplete", repoCount, err)
-		return
-	}
-
 	slog.Info("analysis metadata sync completed",
 		"target", req.Target,
 		"type", req.TargetType,
 		"repos", repoCount,
-		"persist_duration", time.Since(saveStarted),
+		"revision", h.Pantry().Revision(),
 		"duration", time.Since(started))
 	h.broadcastAnalysisMetadataSync(req, analysisMetadataDone, "Repository access updated", repoCount, nil)
 }
@@ -566,8 +560,7 @@ func (o *analysisProgressObserver) broadcast(message, repo string, completedDelt
 }
 
 // importAnalysisToPantry imports poutine findings into the Kitchen's pantry.
-func (h *Handler) importAnalysisToPantry(result *poutine.AnalysisResult) int {
-	p := h.Pantry()
+func (h *Handler) importAnalysisToPantry(p *pantry.Pantry, result *poutine.AnalysisResult) int {
 	imported := 0
 	orgAssets := make(map[string]string)
 	repoAssets := make(map[string]string)
@@ -1106,20 +1099,21 @@ func (h *Handler) recordAnalyzedRepoVisibility(ctx context.Context, req AnalyzeR
 	}
 }
 
-func (h *Handler) importPrivateReposToPantry(sessionID string) {
+func (h *Handler) importPrivateReposToPantry(ctx context.Context, sessionID string) error {
 	repo := db.NewKnownEntityRepository(h.database)
 	entities, err := repo.ListRepos(sessionID)
 	if err != nil {
-		slog.Warn("failed to list known entities for private repo import", "session", sessionID, "error", err)
-		return
+		return err
 	}
-	p := h.Pantry()
-	for _, entity := range entities {
-		if !entity.IsPrivate && entity.SSHPermission == "" && len(entity.Permissions) == 0 {
-			continue
+	return h.committedPantry().Update(ctx, func(candidate *pantry.Pantry) error {
+		for _, entity := range entities {
+			if !entity.IsPrivate && entity.SSHPermission == "" && len(entity.Permissions) == 0 {
+				continue
+			}
+			upsertKnownRepoAsset(candidate, entity)
 		}
-		upsertKnownRepoAsset(p, entity)
-	}
+		return nil
+	})
 }
 
 func upsertKnownRepoAsset(p *pantry.Pantry, entity *db.KnownEntityRow) {

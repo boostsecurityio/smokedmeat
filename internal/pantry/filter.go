@@ -12,7 +12,7 @@ func (p *Pantry) VulnBearingSubgraph() *Pantry {
 	defer p.mu.RUnlock()
 
 	subgraph := New()
-	subgraph.version = p.version
+	subgraph.revision = p.revision
 
 	vulnIDs := p.byType[AssetVulnerability]
 	if len(vulnIDs) == 0 {
@@ -109,7 +109,7 @@ func (p *Pantry) VulnBearingSubgraph() *Pantry {
 		_ = subgraph.AddRelationship(fromID, toID, rel)
 	}
 
-	subgraph.version = p.version
+	subgraph.revision = p.revision
 	return subgraph
 }
 

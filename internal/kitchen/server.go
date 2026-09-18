@@ -451,11 +451,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	if s.handler != nil {
 		s.handler.StagerStore().StopCleanup()
-		if err := s.handler.SavePantry(); err != nil {
-			slog.Warn("failed to save pantry on shutdown", "error", err)
-		} else {
-			slog.Info("pantry saved on shutdown")
-		}
 	}
 
 	s.closeDB()

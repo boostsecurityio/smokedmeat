@@ -92,7 +92,11 @@ type Handler struct {
 	sessions       *SessionRegistry
 	database       *db.DB
 	operators      *OperatorHub
+	pantryMu       sync.Mutex
 	pantry         *pantry.Pantry
+	pantryState    *pantry.CommittedState
+	pantryStateFor *pantry.Pantry
+	pantryStateDB  *db.DB
 	auth           *auth.Auth
 	preflightCache *deployPreflightCache
 	sourceCache    *sourceCache
@@ -101,6 +105,10 @@ type Handler struct {
 	analysisMu     sync.Mutex
 	analysisRuns   map[string]*cachedAnalysisResult
 }
+
+type volatilePantrySnapshotStore struct{}
+
+func (volatilePantrySnapshotStore) Replace([]byte) error { return nil }
 
 // NewHandler creates a new Handler.
 func NewHandler(publisher *pass.Publisher, store *OrderStore, sessions *SessionRegistry) *Handler {
@@ -134,7 +142,12 @@ func NewHandlerWithPublisher(publisher Publisher, store *OrderStore) *Handler {
 
 // SetDatabase sets the database for persistence and loads existing pantry.
 func (h *Handler) SetDatabase(database *db.DB) {
+	h.pantryMu.Lock()
+	defer h.pantryMu.Unlock()
 	h.database = database
+	h.pantryState = nil
+	h.pantryStateFor = nil
+	h.pantryStateDB = nil
 	if h.stagerStore != nil {
 		h.stagerStore.config.DeleteHook = h.deleteStager
 		if database == nil {
@@ -154,18 +167,33 @@ func (h *Handler) SetDatabase(database *db.DB) {
 
 // Pantry returns the attack graph, creating it if needed.
 func (h *Handler) Pantry() *pantry.Pantry {
+	h.pantryMu.Lock()
+	defer h.pantryMu.Unlock()
+	return h.pantryLocked()
+}
+
+func (h *Handler) pantryLocked() *pantry.Pantry {
 	if h.pantry == nil {
 		h.pantry = pantry.New()
 	}
 	return h.pantry
 }
 
-// SavePantry persists the pantry to the database.
-func (h *Handler) SavePantry() error {
-	if h.database == nil || h.pantry == nil {
-		return nil
+func (h *Handler) committedPantry() *pantry.CommittedState {
+	h.pantryMu.Lock()
+	defer h.pantryMu.Unlock()
+	live := h.pantryLocked()
+	if h.pantryState != nil && h.pantryStateFor == live && h.pantryStateDB == h.database {
+		return h.pantryState
 	}
-	return h.database.SavePantry(h.pantry)
+	var store pantry.SnapshotStore = volatilePantrySnapshotStore{}
+	if h.database != nil {
+		store = db.NewPantrySnapshotStore(h.database)
+	}
+	h.pantryState = pantry.NewCommittedState(live, store)
+	h.pantryStateFor = live
+	h.pantryStateDB = h.database
+	return h.pantryState
 }
 
 // SetOperatorHub sets the operator hub for WebSocket broadcasts.
@@ -1512,9 +1540,14 @@ func (h *Handler) handlePostKnownEntities(w http.ResponseWriter, r *http.Request
 	if req.EntityType == "repo" {
 		parts := strings.Split(req.Name, "/")
 		if len(parts) >= 2 {
-			p := h.Pantry()
-			upsertKnownRepoAsset(p, row)
-			_ = h.SavePantry()
+			if err := h.committedPantry().Update(r.Context(), func(candidate *pantry.Pantry) error {
+				upsertKnownRepoAsset(candidate, row)
+				return nil
+			}); err != nil {
+				slog.Warn("failed to commit known repository to pantry", "id", req.ID, "error", err)
+				http.Error(w, "failed to persist entity", http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 
