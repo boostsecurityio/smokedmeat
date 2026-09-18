@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -16,32 +15,22 @@ import (
 	"github.com/boostsecurityio/smokedmeat/internal/pantry"
 )
 
-const (
-	graphBatchWindow   = 100 * time.Millisecond
-	graphSendBuffer    = 256
-	graphStaleVersions = 100
-)
+const graphSendBuffer = 256
 
 // GraphHub manages WebSocket connections for real-time graph updates.
-// Implements pantry.Observer to receive change notifications.
 type GraphHub struct {
 	mu      sync.RWMutex
 	clients map[*GraphClient]bool
 	pantry  *pantry.Pantry
-
-	// Delta batching
-	deltaMu      sync.Mutex
-	pendingDelta *GraphDelta
-	batchTimer   *time.Timer
 }
 
 // GraphClient represents a connected graph visualization client.
 type GraphClient struct {
-	conn    *websocket.Conn
-	send    chan GraphMessage
-	hub     *GraphHub
-	version uint64
-	mode    string
+	conn   *websocket.Conn
+	send   chan GraphMessage
+	hub    *GraphHub
+	cancel context.CancelFunc
+	mode   string
 }
 
 // NewGraphHub creates a new graph hub.
@@ -63,113 +52,129 @@ func (h *GraphHub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := &GraphClient{
-		conn: conn,
-		send: make(chan GraphMessage, graphSendBuffer),
-		hub:  h,
-		mode: normalizeGraphMode(r.URL.Query().Get("mode")),
-	}
-
-	h.register(client)
-	defer h.unregister(client)
-
-	// Send initial snapshot
-	snapshot := h.buildSnapshot(client.mode)
-	client.version = snapshot.Version
-	client.send <- GraphMessage{Type: "snapshot", Data: snapshot}
-
 	ctx, cancel := context.WithCancel(r.Context())
+	client := &GraphClient{
+		conn:   conn,
+		send:   make(chan GraphMessage, graphSendBuffer),
+		hub:    h,
+		cancel: cancel,
+		mode:   normalizeGraphMode(r.URL.Query().Get("mode")),
+	}
+	if !h.register(client) {
+		cancel()
+		_ = conn.Close(websocket.StatusPolicyViolation, "state queue unavailable")
+		return
+	}
 	defer cancel()
+	defer h.unregister(client)
 
 	go client.writePump(ctx)
 	client.readPump(ctx)
 }
 
-func (h *GraphHub) register(client *GraphClient) {
+func (h *GraphHub) register(client *GraphClient) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	h.clients[client] = true
+	snapshot := h.buildSnapshot(client.mode)
+	if !h.enqueueLocked(client, GraphMessage{Type: "snapshot", Data: snapshot}) {
+		return false
+	}
 	slog.Debug("graph client connected", "total", len(h.clients))
+	return true
 }
 
 func (h *GraphHub) unregister(client *GraphClient) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if _, ok := h.clients[client]; ok {
-		delete(h.clients, client)
-		close(client.send)
-	}
+	h.disconnectLocked(client)
 	slog.Debug("graph client disconnected", "total", len(h.clients))
 }
 
-func (h *GraphHub) buildSnapshot(mode string) GraphSnapshot {
-	return buildGraphSnapshot(h.pantry, h.pantry.Revision(), mode)
-}
-
-// broadcast sends a message to all connected clients.
-func (h *GraphHub) broadcast(msg GraphMessage) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	for client := range h.clients {
-		select {
-		case client.send <- msg:
-		default:
-			slog.Warn("graph client buffer full, dropping message")
-		}
-	}
-}
-
-// flushDelta sends accumulated changes to all clients.
-func (h *GraphHub) flushDelta() {
-	h.deltaMu.Lock()
-	defer h.deltaMu.Unlock()
-
-	delta := h.pendingDelta
-	h.pendingDelta = nil
-	h.batchTimer = nil
-
-	if delta == nil {
+func (h *GraphHub) disconnectLocked(client *GraphClient) {
+	if _, ok := h.clients[client]; !ok {
 		return
 	}
-
-	// Keep the publication fence held so a replacement snapshot cannot overtake this older delta.
-	h.broadcast(GraphMessage{Type: "delta", Data: delta})
+	delete(h.clients, client)
+	close(client.send)
+	if client.cancel != nil {
+		client.cancel()
+	}
 }
 
-// scheduleDeltaFlush ensures a delta is flushed after the batch window.
-func (h *GraphHub) scheduleDeltaFlush() {
-	if h.batchTimer == nil {
-		h.batchTimer = time.AfterFunc(graphBatchWindow, h.flushDelta)
+func (h *GraphHub) enqueueLocked(client *GraphClient, message GraphMessage) bool {
+	select {
+	case client.send <- message:
+		return true
+	default:
+		slog.Warn("graph client state queue full, disconnecting")
+		h.disconnectLocked(client)
+		return false
 	}
+}
+
+func (h *GraphHub) enqueue(client *GraphClient, message GraphMessage) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, ok := h.clients[client]; !ok {
+		return false
+	}
+	return h.enqueueLocked(client, message)
+}
+
+func (h *GraphHub) buildSnapshot(mode string) GraphSnapshot {
+	return buildGraphSnapshot(h.pantry, mode)
 }
 
 func (h *GraphHub) OnPantryChange(change pantry.ChangeSet) {
-	if change.Kind == pantry.ChangeCommittedState {
-		h.deltaMu.Lock()
-		if h.batchTimer != nil {
-			h.batchTimer.Stop()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	var view *pantry.Pantry
+	var delta GraphDelta
+	hasDelta := false
+	snapshots := make(map[string]GraphSnapshot, 2)
+	for client := range h.clients {
+		if client.mode == graphModeFull {
+			message := GraphMessage{
+				Type: "snapshot_required",
+				Data: GraphSnapshotRequired{Revision: change.Revision},
+			}
+			if change.Kind == pantry.ChangeGranular {
+				if !hasDelta {
+					delta = graphDeltaFromChange(change)
+					hasDelta = true
+				}
+				message = GraphMessage{Type: "delta", Data: delta}
+			}
+			h.enqueueLocked(client, message)
+			continue
 		}
-		h.batchTimer = nil
-		h.pendingDelta = nil
-		h.deltaMu.Unlock()
-		h.broadcastSnapshots()
-		return
-	}
 
-	h.deltaMu.Lock()
-	defer h.deltaMu.Unlock()
-
-	if h.pendingDelta == nil {
-		h.pendingDelta = &GraphDelta{}
+		if view == nil {
+			view = h.pantry.Clone()
+		}
+		snapshot, ok := snapshots[client.mode]
+		if !ok {
+			snapshot = buildGraphSnapshotFromView(view, client.mode)
+			snapshots[client.mode] = snapshot
+		}
+		h.enqueueLocked(client, GraphMessage{Type: "snapshot", Data: snapshot})
 	}
-	h.pendingDelta.Version = change.Revision
+}
+
+func graphDeltaFromChange(change pantry.ChangeSet) GraphDelta {
+	delta := GraphDelta{
+		BaseRevision: change.BaseRevision,
+		Revision:     change.Revision,
+	}
 	for _, asset := range change.Granular.AddedAssets {
-		h.pendingDelta.AddedNodes = append(h.pendingDelta.AddedNodes, AssetToGraphNode(asset))
+		delta.AddedNodes = append(delta.AddedNodes, AssetToGraphNode(asset))
 	}
 	for _, update := range change.Granular.UpdatedAssets {
 		node := AssetToGraphNode(update.After)
-		h.pendingDelta.UpdatedNodes = append(h.pendingDelta.UpdatedNodes, NodeUpdate{
+		delta.UpdatedNodes = append(delta.UpdatedNodes, NodeUpdate{
 			ID:                update.After.ID,
 			OldState:          string(update.Before.State),
 			NewState:          string(update.After.State),
@@ -179,30 +184,28 @@ func (h *GraphHub) OnPantryChange(change pantry.ChangeSet) {
 		})
 	}
 	for _, edge := range change.Granular.AddedRelationships {
-		h.pendingDelta.AddedEdges = append(h.pendingDelta.AddedEdges, GraphEdge{
+		delta.AddedEdges = append(delta.AddedEdges, GraphEdge{
 			Source: edge.From,
 			Target: edge.To,
 			Type:   string(edge.Relationship.Type),
 		})
 	}
-	h.pendingDelta.RemovedNodes = append(h.pendingDelta.RemovedNodes, change.Granular.RemovedAssetIDs...)
+	delta.RemovedNodes = append(delta.RemovedNodes, change.Granular.RemovedAssetIDs...)
 	for _, edge := range change.Granular.RemovedRelationships {
-		h.pendingDelta.RemovedEdges = append(h.pendingDelta.RemovedEdges, EdgeRef{Source: edge.From, Target: edge.To})
+		delta.RemovedEdges = append(delta.RemovedEdges, EdgeRef{Source: edge.From, Target: edge.To})
 	}
-	h.scheduleDeltaFlush()
+	return delta
 }
 
-func (h *GraphHub) broadcastSnapshots() {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for client := range h.clients {
-		snapshot := h.buildSnapshot(client.mode)
-		select {
-		case client.send <- GraphMessage{Type: "snapshot", Data: snapshot}:
-		default:
-			slog.Warn("graph client buffer full, dropping snapshot")
-		}
+func (h *GraphHub) sendSnapshot(client *GraphClient, mode string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, ok := h.clients[client]; !ok {
+		return
 	}
+	client.mode = normalizeGraphMode(mode)
+	snapshot := h.buildSnapshot(client.mode)
+	h.enqueueLocked(client, GraphMessage{Type: "snapshot", Data: snapshot})
 }
 
 // ClientCount returns the number of connected graph clients.
@@ -217,9 +220,8 @@ func (c *GraphClient) readPump(ctx context.Context) {
 
 	for {
 		var msg GraphMessage
-		err := wsjson.Read(ctx, c.conn, &msg)
-		if err != nil {
-			if websocket.CloseStatus(err) != websocket.StatusNormalClosure {
+		if err := wsjson.Read(ctx, c.conn, &msg); err != nil {
+			if websocket.CloseStatus(err) != websocket.StatusNormalClosure && ctx.Err() == nil {
 				slog.Debug("graph websocket read error", "error", err)
 			}
 			return
@@ -227,12 +229,9 @@ func (c *GraphClient) readPump(ctx context.Context) {
 
 		switch msg.Type {
 		case "ping":
-			c.send <- GraphMessage{Type: "pong"}
+			c.hub.enqueue(c, GraphMessage{Type: "pong"})
 		case "snapshot_request":
-			c.mode = graphModeFromData(msg.Data, c.mode)
-			snapshot := c.hub.buildSnapshot(c.mode)
-			c.version = snapshot.Version
-			c.send <- GraphMessage{Type: "snapshot", Data: snapshot}
+			c.hub.sendSnapshot(c, graphModeFromData(msg.Data, c.mode))
 		}
 	}
 }
@@ -248,6 +247,7 @@ func (c *GraphClient) writePump(ctx context.Context) {
 			}
 			if err := wsjson.Write(ctx, c.conn, msg); err != nil {
 				slog.Debug("graph websocket write error", "error", err)
+				c.hub.unregister(c)
 				return
 			}
 		}
