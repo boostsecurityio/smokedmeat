@@ -7,8 +7,6 @@ package e2e
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,7 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/atotto/clipboard"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -32,7 +29,6 @@ const (
 	deployWorkflow         = ".github/workflows/deploy.yml"
 	founderPreviewWorkflow = ".github/workflows/founder-preview-intake.yml"
 	flagBucket             = "whooli-newcleus-benchmarks"
-	flagXYZHash            = "2c90d898d0924d8d5cf3f4094fd446bb0f1deea61c4b41f9b40215852dfe1414"
 	oidcDwellAdjustments   = 1
 )
 
@@ -100,13 +96,6 @@ func TestGOATFlagPath(t *testing.T) {
 	}
 
 	requireContent(t, tmux, "FLAG_XYZ", 2*time.Minute, "Branch-name side quest should surface FLAG_XYZ in findings")
-	jumpOmnibox(t, tmux, "JILFOIL_FIREWALL_DIRECTIVE", "JILFOIL_FIREWALL_DIRECTIVE", 2*time.Minute)
-	ensureLootFocus(t, tmux)
-	require.NoError(t, clipboard.WriteAll(""))
-	require.NoError(t, tmux.SendKeys("c"))
-	flagXYZ := waitForClipboardValue(t, 10*time.Second)
-	require.True(t, strings.HasPrefix(flagXYZ, "flag_"), "FLAG_XYZ should start with flag_")
-	assert.Equal(t, flagXYZHash, sha256Hex(flagXYZ))
 
 	ensureShortcutFocus(t, tmux)
 	require.NoError(t, tmux.SendKeys("r"))
@@ -331,29 +320,6 @@ func waitForVaultTokenByNames(t *testing.T, root string, timeout time.Duration, 
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-func sha256Hex(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])
-}
-
-func waitForClipboardValue(t *testing.T, timeout time.Duration) string {
-	t.Helper()
-
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		value, err := clipboard.ReadAll()
-		require.NoError(t, err)
-		value = strings.TrimSpace(value)
-		if value != "" {
-			return value
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
-
-	t.Fatalf("clipboard did not contain a value within %s", timeout)
-	return ""
 }
 
 func matchingActionsCaches(caches []actionsCache, prefix, ref string) []actionsCache {

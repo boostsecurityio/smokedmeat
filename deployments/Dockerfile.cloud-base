@@ -1,7 +1,7 @@
 # Copyright (C) 2026 boostsecurity.io
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:9925d3017788558fa8f27e8bb160b791e56202b60c91fbcc5c867de3175986c8
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:d13acb327aa77acf2752acea8c08456511a5b8142455cc2fe0f966b960bf64c6
 
 RUN apk add --no-cache bash jq curl git openssh-client aws-cli-2 google-cloud-sdk python-3 az kubectl-latest
 
